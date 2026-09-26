@@ -200,6 +200,31 @@ def test_commit_messages_are_checked(repository):
     assert any("commit message" in issue for issue in public_check.inspect_repository(repository))
 
 
+def test_exact_final_public_attribution_is_allowed_only_in_commit_messages(repository):
+    message = "Add public source\n\n" + public_check.PUBLIC_ATTRIBUTION
+    assert "email address" in public_check.content_issues(message.encode())
+    assert public_check.content_issues(message.encode(), commit_message=True) == []
+    run_git(repository, "commit", "--allow-empty", "-qm", message)
+    assert public_check.inspect_repository(repository) == []
+
+
+@pytest.mark.parametrize("message", [
+    "Subject\n\nCo-authored-by: Synthetic <synthetic" + "@example.invalid>",
+    "Subject\n\n" + public_check.PUBLIC_ATTRIBUTION.replace("Copilot <", "Someone <"),
+    "Subject\n\n" + public_check.PUBLIC_ATTRIBUTION + "\nAdditional text",
+    "Subject\n\n" + public_check.PUBLIC_ATTRIBUTION + "\n\n" + public_check.PUBLIC_ATTRIBUTION,
+    "Subject\n\nContact synthetic" + "@example.invalid\n\n" + public_check.PUBLIC_ATTRIBUTION,
+    "Subject\n\n" + public_check.PUBLIC_ATTRIBUTION + " ",
+])
+def test_public_attribution_does_not_exempt_other_email_content(message):
+    assert "email address" in public_check.content_issues(message.encode(), commit_message=True)
+
+
+def test_public_attribution_does_not_exempt_other_sensitive_patterns():
+    message = "1" * 12 + "\n\n" + public_check.PUBLIC_ATTRIBUTION
+    assert "AWS account ID" in public_check.content_issues(message.encode(), commit_message=True)
+
+
 def test_index_symlink_is_rejected_without_following_it(repository):
     blob = run_git(repository, "hash-object", "-w", "README.md")
     run_git(repository, "update-index", "--add", "--cacheinfo", f"120000,{blob},docs/link.md")

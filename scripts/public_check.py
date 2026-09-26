@@ -27,6 +27,9 @@ SOURCE_SUFFIXES = {
 }
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+PUBLIC_ATTRIBUTION = (
+    "Co-authored-by: Copilot <223556219+Copilot" + "@users.noreply.github.com>"
+)
 PATTERNS = (
     ("private key", re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")),
     ("AWS access key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
@@ -76,7 +79,7 @@ def git(root: Path, *args: str) -> bytes:
     return result.stdout
 
 
-def content_issues(data: bytes) -> list[str]:
+def content_issues(data: bytes, *, commit_message: bool = False) -> list[str]:
     if len(data) > MAX_FILE_BYTES:
         return ["file exceeds publication size limit"]
     if b"\x00" in data:
@@ -85,7 +88,15 @@ def content_issues(data: bytes) -> list[str]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return ["content is not UTF-8 text"]
-    return [label for label, pattern in PATTERNS if pattern.search(text)]
+    email_text = text
+    ending = "\n\n" + PUBLIC_ATTRIBUTION
+    if commit_message and text.rstrip("\r\n").endswith(ending):
+        # Only this exact final public attribution is exempt, never source-file content.
+        email_text = text.rstrip("\r\n")[:-len(PUBLIC_ATTRIBUTION)]
+    return [
+        label for label, pattern in PATTERNS
+        if pattern.search(email_text if label == "email address" else text)
+    ]
 
 
 def path_issues(name: str) -> list[str]:
@@ -196,7 +207,9 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
     for revision in revisions:
         report(
             f"commit message {revision[:12]}",
-            content_issues(git(root, "show", "-s", "--format=%B", revision)),
+            content_issues(
+                git(root, "show", "-s", "--format=%B", revision), commit_message=True
+            ),
         )
         for entry in git(root, "ls-tree", "-r", "-z", revision).split(b"\0"):
             if not entry:

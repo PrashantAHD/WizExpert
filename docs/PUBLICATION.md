@@ -76,6 +76,11 @@ assignments, AWS account identifiers and resource names, Azure subscription
 resource paths, email addresses, and a restricted organization-name marker.
 Do not weaken these checks to accommodate real data. Synthetic tests construct
 representative patterns at runtime rather than storing complete examples.
+Commit-message email checks permit only the exact standard Copilot public
+co-author attribution as a final, separate trailer. This exception does not
+apply to source files, other email addresses, modified trailers or other
+sensitive patterns. Use a GitHub noreply identity for public author/committer
+metadata when a work address should remain private.
 
 Untracked files, reflog-only/unreachable objects, arbitrary prose identifying
 other organizations or people, encoded/obfuscated secrets, and Git metadata
