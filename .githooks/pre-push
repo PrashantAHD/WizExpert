@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+if [ -x ".venv/Scripts/python.exe" ]; then
+    exec ".venv/Scripts/python.exe" scripts/verify.py --pre-push --audit-dependencies
+elif [ -x ".venv/bin/python" ]; then
+    exec ".venv/bin/python" scripts/verify.py --pre-push --audit-dependencies
+else
+    echo "Push blocked: create .venv and install the project's dev dependencies first." >&2
+    exit 2
+fi

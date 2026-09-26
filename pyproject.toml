@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=78"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloud-security-remediations"
+version = "0.1.0"
+description = "Local CSV-first cloud security evidence reporting"
+requires-python = ">=3.12"
+dependencies = [
+    "openpyxl>=3.1.5,<4",
+    "defusedxml>=0.7.1,<0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip>=26.2,<27",
+    "pytest>=8.3,<10",
+    "ruff>=0.12,<1",
+    "bandit>=1.8.6,<2",
+    "pip-audit>=2.9,<3",
+]
+
+[project.scripts]
+cloud-remediations = "remediation.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["remediation*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
