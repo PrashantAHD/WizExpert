@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from copy import copy
 from datetime import UTC, date, datetime
 from io import BytesIO
@@ -27,6 +28,22 @@ from remediation.csv_report import (
 )
 
 
+def retry_locked_cleanup(function, path, error):
+    """Retry only transient Windows sharing/lock violations during test cleanup."""
+    for delay in (0.1, 0.2, 0.4, 0.8, 1.6):
+        if not isinstance(error, PermissionError) or getattr(error, "winerror", None) not in (
+            32, 33,
+        ):
+            raise error
+        time.sleep(delay)
+        try:
+            function(path)
+            return
+        except OSError as retry_error:
+            error = retry_error
+    raise error
+
+
 @pytest.fixture
 def workspace():
     # Output must be outside the repository; use its workspace parent, not system temp.
@@ -35,7 +52,71 @@ def workspace():
     try:
         yield root
     finally:
-        shutil.rmtree(root)
+        shutil.rmtree(root, onexc=retry_locked_cleanup)
+
+
+def test_cleanup_retries_transient_windows_lock(monkeypatch, tmp_path):
+    path = tmp_path / "synthetic.txt"
+    path.write_text("synthetic", encoding="utf-8")
+    delays = []
+    calls = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+    error = PermissionError("synthetic sharing violation")
+    error.winerror = 32
+
+    def unlink(value):
+        calls.append(value)
+        if len(calls) == 1:
+            raise error
+        value.unlink()
+
+    retry_locked_cleanup(unlink, path, error)
+    assert calls == [path, path]
+    assert delays == [0.1, 0.2]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("winerror", [32, 33])
+def test_cleanup_persistent_lock_still_fails(monkeypatch, winerror):
+    error = PermissionError("synthetic persistent lock")
+    error.winerror = winerror
+    delays = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    def locked(_):
+        raise error
+
+    with pytest.raises(PermissionError) as caught:
+        retry_locked_cleanup(locked, "synthetic-path", error)
+    assert caught.value is error
+    assert delays == [0.1, 0.2, 0.4, 0.8, 1.6]
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), OSError("unrelated failure")])
+def test_cleanup_does_not_retry_unrelated_errors(monkeypatch, error):
+    def unexpected(_):
+        pytest.fail("Unrelated cleanup errors must not be retried.")
+
+    monkeypatch.setattr(time, "sleep", unexpected)
+    with pytest.raises(type(error)) as caught:
+        retry_locked_cleanup(unexpected, "synthetic-path", error)
+    assert caught.value is error
+
+
+def test_cleanup_stops_if_retry_error_changes(monkeypatch):
+    error = PermissionError("synthetic sharing violation")
+    error.winerror = 32
+    failure = OSError("synthetic different failure")
+    delays = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+
+    def changed(_):
+        raise failure
+
+    with pytest.raises(OSError) as caught:
+        retry_locked_cleanup(changed, "synthetic-path", error)
+    assert caught.value is failure
+    assert delays == [0.1]
 
 
 def record(**overrides):

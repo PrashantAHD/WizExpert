@@ -49,6 +49,11 @@ client that ignores hooks). They cannot provide server-side enforcement.
 Configure protected branches and require the `verify` CI check where available.
 CI only runs **after** source has reached GitHub, so it cannot undo a disclosure.
 
+CSV-report test cleanup retries Windows sharing/lock violations (codes 32/33)
+for at most five attempts, with 3.1 seconds of total delay. Persistent locks and
+all other cleanup errors still fail validation. This does not retry production
+workbook writes, ignore test failures or bypass any push checks.
+
 ## What is inspected
 
 `scripts/public_check.py` inspects the current contents of tracked files, every
