@@ -2,8 +2,9 @@
 
 This is a human-reviewed consulting workflow supported by CSV report
 automation. ServiceNow is authoritative for approvals, changes, exceptions and
-evidence. The CLI does not store approvals, send messages or execute cloud
-changes. Use approved internal channels; keep operational evidence outside
+evidence. The CLI's local execution memory is not an authoritative approval
+system. It does not send messages or execute cloud changes. Use approved internal
+channels; keep operational evidence outside
 the public repository.
 
 ## 1. Discover, validate and explain
@@ -66,10 +67,12 @@ Best Regards,
 [Security team]
 ```
 
-Interpretation and email drafting happen through human or approved chat
-review, not an automated general-purpose analysis feature. Send only through
-approved communication channels. Retain the email and response references
-in ServiceNow.
+Initial risk interpretation and outreach require human or approved chat review,
+not an automated general-purpose analysis feature. For post-approval local-account
+work, the [execution follow-up command](EXECUTION.md) can draft a factual update
+from recorded completion, exclusions and blockers. It does not send the draft.
+Send only through approved communication channels. Retain the email and response
+references in ServiceNow.
 
 ## 3. Translate the response into exact decisions
 
