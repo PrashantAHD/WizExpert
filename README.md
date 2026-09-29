@@ -18,6 +18,8 @@ stakeholder email draft. This is a separate command, not a new Wiz CSV importer.
 - One Excel workbook with four tabs: **Cover**, **AWS Data**, **Azure Data**
   and **Remediation**.
 - Remediation guidance for review, not automatic changes to your cloud environment.
+- Optional private per-finding workflow tracker, with a terminal/chat status view
+  and an operator-recorded snapshot on the report cover.
 
 ## Quick start
 
@@ -50,6 +52,7 @@ exports for the same finding. Mismatched or conflicting evidence is rejected.
 | `--issues PATH` | Add matching issue metadata. Repeat for multiple issue files. |
 | `--as-of YYYY-MM-DD` | Set the UTC date used for age and expiry calculations; defaults to today. |
 | `--notes PATH` | Include a local text file as a comment on the Remediation title. |
+| `--workflow PATH` | Display a private tracker snapshot on the cover; the control ID must match. |
 | `--update` | Regenerate an existing tool-created workbook at the same `--output` path. |
 | `--help` | Show all available options. |
 
@@ -94,6 +97,62 @@ in code and tests.
 
 See [workflow and communication guidance](docs/WORKFLOW.md) for the stage
 details and stakeholder email template.
+
+## Track the current stage
+
+Keep one private JSON tracker per finding **and scope**, outside the checkout.
+The tracker stores progress and evidence references, not credentials, approval
+authority or automated Wiz status. It works independently of CSV schema support.
+
+```powershell
+.\.venv\Scripts\python.exe -m remediation workflow init `
+  --tracker "C:\PrivateReports\finding.workflow.json" `
+  --finding-id "example-case" --control-id "example-control" `
+  --scope "Example project; Open and In Progress; agreed observation window" `
+  --summary "Initial lookup only; full collection outstanding." `
+  --next-action "Collect both sources and reconcile their scope."
+
+.\.venv\Scripts\python.exe -m remediation workflow show `
+  --tracker "C:\PrivateReports\finding.workflow.json"
+```
+
+The display shows all eight stages, current status, last-updated UTC timestamp,
+latest update, blocker, next action and required completion references.
+Use `workflow record` to record progress or a blocker without advancing:
+
+```powershell
+.\.venv\Scripts\python.exe -m remediation workflow record `
+  --tracker "C:\PrivateReports\finding.workflow.json" --stage 1 --status blocked `
+  --summary "Issue collection is partial." --blocker "Graph evidence unavailable." `
+  --next-action "Restore read-only access and finish collection."
+```
+
+Completion uses `--status complete` with a separate `--evidence GATE=REFERENCE`
+for **every** gate shown by `workflow show`. References must point to reviewed
+private evidence or authoritative records. The CLI checks that references are
+recorded, **not that their contents prove completion**; a human must validate
+the stage criteria. Blockers must be resolved first. Completion advances one
+stage, never skips stages, and completing stage 8 marks the workflow complete,
+not necessarily technically remediated (closure may include authorized risk
+acceptance). Updates retain previous events. Existing trackers are not
+overwritten by initialization; completed stages cannot be silently reopened.
+
+For a supported CSV report, add `--workflow` to the normal generation/update
+command. Supply matching issue evidence or an explicit `--rule-id` matching
+the tracker's control. Verify the tracker scope against the exports yourself:
+control matching alone does not establish identical projects/accounts/time
+windows. The cover shows the current stage and last update; its cell comment
+includes case/scope and the detailed status view. Stages 1-2 are labeled draft.
+This is a **snapshot**, not a live link: regenerate with the same `--workflow`
+path to refresh it. Omitting the flag leaves the original four-tab layout
+unchanged (and removes a previous snapshot when regenerating).
+
+No extra worksheet, browser dashboard, cloud call or automatic stage transition
+on report generation is added. Existing local-account execution reports and
+their evidence memory remain separate and unchanged.
+In approved chat, show a compact tracker at stage transitions or on request;
+read the saved file first rather than reconstructing progress from memory.
+See [stage completion references](docs/WORKFLOW.md#tracker-completion-references).
 
 ## Update completed work and blockers
 

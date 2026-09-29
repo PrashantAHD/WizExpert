@@ -216,6 +216,65 @@ the applicable process and distinguish it from resolved resources. Do not
 claim a whole mixed-outcome finding was technically fixed when only a subset
 was changed. Reappearing findings require fresh evidence and review.
 
+## Tracker completion references
+
+The optional `workflow` CLI stores a private, append-only sequence of progress
+events in an external JSON file. It does not fetch evidence, inspect the
+referenced files, verify approval authority, send notifications or close tickets.
+Only record completion after human review of the applicable criteria above.
+The local history is not tamper-proof and does not replace an authoritative
+audit trail.
+
+| Stage | Required `--evidence` keys | Reviewed evidence |
+| --- | --- | --- |
+| 1 | `issues`, `graph`, `field-coverage`, `pagination`, `reconciliation` | Both complete sources, selected-field equivalence, retrieval limits and stable-ID/count reconciliation. |
+| 2 | `analysis`, `options` | Validated explanation, actual causes, practical options and dependencies. |
+| 3 | `report`, `email-draft`, `ticket` | Reviewed report/draft and existing assigned security ticket. |
+| 4 | `decisions`, `authorization` | Exact actions, scope, exclusions, conditions and applicable change authority. |
+| 5 | `prechecks`, `dependencies`, `recovery`, `plan` | Current-state checks and reviewed implementation, test, stop and recovery arrangements. |
+| 6 | `execution` | Operator results covering the approved scope, including failures and partial outcomes. |
+| 7 | `technical-validation`, `owner-validation`, `wiz-reassessment` | Separate technical, functional and fresh Wiz evidence; missing evidence remains outstanding. |
+| 8 | `closure` | Updated reporting and authoritative disposition against agreed closure criteria. |
+
+For example, after actually completing and reviewing Stage 1:
+
+```powershell
+.\.venv\Scripts\python.exe -m remediation workflow record `
+  --tracker "C:\PrivateReports\finding.workflow.json" --stage 1 --status complete `
+  --summary "Both sources reconciled for the agreed scope." `
+  --next-action "Explain the validated finding and remediation options." `
+  --evidence "issues=C:\PrivateEvidence\issues.csv" `
+  --evidence "graph=C:\PrivateEvidence\graph.csv" `
+  --evidence "field-coverage=C:\PrivateEvidence\collection-review.txt" `
+  --evidence "pagination=C:\PrivateEvidence\collection-review.txt" `
+  --evidence "reconciliation=C:\PrivateEvidence\collection-review.txt"
+```
+
+References may be private file paths or authoritative ticket/evidence references;
+do not use credential-bearing URLs. Each completion command supplies all gates
+for that stage, even if an earlier progress entry recorded some of them.
+The command requires the current stage number and advances exactly one stage.
+Blocked entries need a blocker; resuming/completing requires an explicit update
+without that blocker. No gate is satisfied merely by an example reference.
+An authorized no-change/risk-acceptance path must have an explicit reviewed
+disposition explaining non-applicable work, never fabricated execution evidence.
+Workflow completion alone must not be labeled technical remediation.
+
+Writes use atomic publication and a sibling exclusive `.json.lock` file.
+Avoid concurrent writers. A stale lock after a process crash must be investigated
+before removing that exact lock; never delete another writer's active lock.
+Do not edit history to hide errors. Completed stages cannot be reopened by this
+CLI; record a new reviewed follow-up scope/case linked to the prior record when
+new evidence invalidates completed work. Keep authoritative decisions in ServiceNow.
+
+Show the saved tracker in chat at stage changes or on request. It is not a
+continuously updating UI widget. Record progress first and re-read the file
+after restarting a session. The report cover's optional `--workflow` snapshot
+records stage/status and update time; its comment retains the case/scope and
+status detail. Verify scope manually as well as the enforced control-ID match.
+Generating a report never advances the tracker. Stages 1-2 produce a draft
+snapshot, not a claim of final validated analysis.
+
 ## Report maintenance
 
 Keep source CSVs and approved decisions outside the workbook. Explicit

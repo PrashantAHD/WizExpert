@@ -106,6 +106,20 @@ These are consulting stages, not eight automated product features. The CSV
 importer's optional issue enrichment remains backward compatible; it does not
 waive the two-source evidence requirement for the complete consulting workflow.
 
+Use `python -m remediation workflow` for an optional external private JSON
+progress tracker, not a new approval system. Read its persisted state before
+showing progress at a stage transition or on request; do not repeatedly display
+it after routine messages. Include current stage, completion/blocker information,
+last-updated time and next action. Write reviewed progress before announcing it.
+Complete a stage only after checking all required evidence/approval references;
+the CLI validates their presence, not their truth or authority. Never advance
+because a later stage was discussed or a report was generated. Keep separate
+trackers for distinct scopes of the same control. Tracker records and report
+cover snapshots are not technical remediation or live Wiz closure evidence.
+The optional CSV report `--workflow` flag must match the control; also review
+scope manually. Do not add workflow banners to existing local-account reports
+unless specifically requested; their execution evidence memory is separate.
+
 The email must include "Hi Team,", Issue Description, Issue Details, a
 `SNOW: [Ticket number]` placeholder, the attached Excel report, concise
 numbered Recommended Remediation options and "Best Regards,". Use this exact

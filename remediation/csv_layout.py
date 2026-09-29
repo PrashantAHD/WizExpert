@@ -256,6 +256,8 @@ def cover(
     severity: str,
     rule_id: str,
     issues: Sequence[Mapping[str, str]] | None = None,
+    workflow_text: str = "",
+    workflow_context: str = "",
 ) -> None:
     sheet = _page(workbook, "Cover")
     _title(sheet, "Privileged Credentials Report", "AWS & Azure Multi-Cloud Assessment")
@@ -348,6 +350,9 @@ def cover(
         "No approval, business risk acceptance, execution or verified closure is asserted."
     )
     sheet["A23"].comment = _comment(context)
+    if workflow_text:
+        _block(sheet, 21, workflow_text, fill=LIGHT_BLUE, size=10)
+        sheet["A21"].comment = _comment(workflow_context)
     sheet.print_area = "A1:A23"
     sheet.page_setup.fitToHeight = 1
     sheet.sheet_properties.tabColor = NAVY

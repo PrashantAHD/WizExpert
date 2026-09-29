@@ -26,6 +26,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from remediation.csv_layout import cover, remediation_page, resource_table
 from remediation.issue_metadata import enrich_records
+from remediation.workflow import Tracker, load_tracker
 
 PRINCIPAL = "(SERVICE_ACCOUNT | USER_ACCOUNT)."
 KEY = "ACCESS_KEY."
@@ -333,6 +334,7 @@ def _workbook(
     rule_id: str,
     notes: str,
     issues: list[dict[str, str]] | None = None,
+    workflow: Tracker | None = None,
 ) -> BytesIO:
     workbook = Workbook()
     workbook.remove(workbook.active)
@@ -341,6 +343,8 @@ def _workbook(
     cover(
         workbook, evidence.records, title=title, as_of=as_of, source_rows=result.source_rows,
         severity=severity, rule_id=rule_id, issues=issues,
+        workflow_text=workflow.cover_text() if workflow is not None else "",
+        workflow_context=workflow.display() if workflow is not None else "",
     )
     for name, subset in (
         ("AWS Data", [row for row in evidence.records if row["cloud"] == "AWS"]),
@@ -462,6 +466,7 @@ def generate_report(
     notes: str | Path | None = None,
     issues: Sequence[str | Path] | None = None,
     update: bool = False,
+    workflow: str | Path | None = None,
 ) -> ReportResult:
     """Publish four tabs outside this repository and return non-identifying counts.
 
@@ -472,6 +477,8 @@ def generate_report(
     Optional issue exports must describe the same finding and match all graph
     principals by exact IDs. Explicit updates regenerate, not merge, the report:
     manual workbook edits are replaced. Close Excel and avoid concurrent writers.
+    ``workflow`` optionally snapshots a private tracker with the same control ID;
+    scope still requires human review. Report generation never advances it.
     """
     if not paths or isinstance(paths, (str, Path)):
         raise ValueError("Supply one or more CSV paths as a sequence.")
@@ -501,11 +508,19 @@ def generate_report(
             title, severity, rule_id = _issue_context(issue_records, title, severity, rule_id)
     finally:
         csv.field_size_limit(previous_limit)
+    tracker = load_tracker(workflow) if workflow is not None else None
+    if tracker is not None and (
+        rule_id == NOT_SUPPLIED or tracker.control_id != rule_id
+    ):
+        raise ValueError(
+            "Workflow control ID must match the report's explicit or verified rule ID."
+        )
     result = _counts(
         evidence, destination, len(issue_records) if issue_records is not None else None
     )
     stream = _workbook(
-        evidence, result, day, title or DEFAULT_TITLE, severity, rule_id, note_text, issue_records
+        evidence, result, day, title or DEFAULT_TITLE, severity, rule_id, note_text, issue_records,
+        tracker,
     )
     _publish(stream, destination, expected_digest=expected_digest)
     return result
@@ -529,6 +544,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--severity", choices=SEVERITIES, default=NOT_SUPPLIED)
     parser.add_argument("--rule-id", default=NOT_SUPPLIED)
     parser.add_argument("--notes", help="Local UTF-8 text file kept in a Remediation title comment")
+    parser.add_argument("--workflow", help="Private tracker JSON; snapshot its stage on the cover")
     args = parser.parse_args(argv)
     if args.update:
         print(
@@ -540,7 +556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = generate_report(
             args.paths, output=args.output, as_of=args.as_of, title=args.title,
             severity=args.severity, rule_id=args.rule_id, notes=args.notes,
-            issues=args.issues, update=args.update,
+            issues=args.issues, update=args.update, workflow=args.workflow,
         )
     except ValueError as error:
         print(f"Report not created: {error}", file=sys.stderr)
