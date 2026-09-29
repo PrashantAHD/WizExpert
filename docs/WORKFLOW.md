@@ -7,18 +7,41 @@ system. It does not send messages or execute cloud changes. Use approved interna
 channels; keep operational evidence outside
 the public repository.
 
-## 1. Discover, validate and explain
+## 1. Collect and reconcile evidence
 
-Start with Wiz discovery and the supported graph CSV evidence. Optionally
-enrich it with matching issue exports for the same finding. Do not infer
-issue counts from graph relationships or join by resource display names.
-See the README for the strict import contract; other finding categories
-require human review rather than pretending the importer supports them.
+Collect both issue-dashboard details and the associated Security Graph
+relationships for the same finding. Use authorized read-only Wiz MCP tools
+in an approved chat when available, or paired issue and graph exports.
+Direct MCP retrieval is not implemented in the CLI. The existing CSV importer
+still accepts optional issue enrichment for its supported schema; that alone
+does not constitute completion of the two-source workflow.
+
+Retrieve the equivalent of the selected custom columns, including relevant
+identity, permission, resource and finding metadata. Verify whether saved UI
+selections are available through the API; never assume they are. Do not retrieve
+secret values or sensitive record samples merely to enrich a report.
+
+Complete pagination and check for export limits or truncation. Retain query,
+filters, status/project/account scope, observation times and selected fields
+with private evidence. Preserve optional graph relationships. Match stable
+cloud, graph and native identifiers, never display names. Deduplicate
+relationships without discarding distinct access paths; distinguish issue,
+unique-resource and graph-row counts. Explain count differences through scope
+and relationship multiplicity rather than forcing the totals to match.
+
+Missing fields, incomplete retrieval, ambiguous matches, conflicting facts and
+unexplained differences must be recorded and resolved before validated analysis
+or final reporting. Do not claim error-free collection or full coverage from a
+sample page. See the README for the strict CLI import contract; other finding
+categories require a reviewed case-specific process.
 
 Collect the finding title/control, reported severity, observation times, exact
 resource and cloud scope, ownership, permissions, exposure, dependencies,
 existing safeguards and evidence of impact. Mark missing details unknown.
 Keep native identifiers in approved private evidence, not public examples.
+
+## 2. Explain and analyze
+
 Separate observations, hypotheses and confirmed causes in the explanation.
 Do not invent compromise, data loss or compliance breach.
 
@@ -33,7 +56,12 @@ dependency testing, and SecOps for risk, monitoring and incident response.
 Team names do not establish individual authority. Follow incident response
 and preserve evidence if active compromise is suspected.
 
-## 2. Security ticket and stakeholder email
+## 3. Prepare the report and stakeholder email
+
+Prepare a separate finding report from the reconciled evidence using the
+supported report schema or a reviewed case-specific process. Do not force
+unrelated finding types into the privileged-credential importer. Present
+practical remediation options, dependencies and material trade-offs.
 
 The **security team creates and assigns the ServiceNow ticket before outreach**.
 Include its reference in the reviewed email; never ask stakeholders to create
@@ -74,7 +102,7 @@ from recorded completion, exclusions and blockers. It does not send the draft.
 Send only through approved communication channels. Retain the email and response
 references in ServiceNow.
 
-## 3. Translate the response into exact decisions
+## 4. Obtain stakeholder decisions and approval
 
 Do not treat silence, a general preference or agreement on an approach as
 authorization to change production. Record:
@@ -102,7 +130,7 @@ the remaining accounts are unchanged."
 
 Incorrect: "The owner agreed to cleanup, so remove all inactive accounts."
 
-## 4. Authorized plan, dependency tests and rollback
+## 5. Prepare remediation
 
 Before implementation, obtain the applicable change authorization separately
 from agreement on the desired approach. Use the actual configuration and
@@ -119,6 +147,8 @@ current official service documentation to prepare:
 Do not provide or execute a broad destructive command from a generic finding.
 Resolve unknown native identifiers and dependencies first. Pause for renewed
 authorization if scope or conditions change.
+Check whether execution roles, identities or policies are shared so that
+changing one finding's permissions does not unexpectedly affect other workloads.
 
 ### Account removal versus VM-wide SSH policy
 
@@ -153,17 +183,31 @@ authentication on every reported VM."
   improvements. Do not mandate an immediate redesign when a safe staged
   rotation or narrower scoped change addresses the approved need.
 
-## 5. Implement, validate and close
+## 6. Execute approved changes
 
 Only an approved operator implements the authorized plan. Retain before/after
 evidence, timestamps, operator details, test outcomes and deviations in
-ServiceNow. Obtain application-owner validation and independent technical
-review, then a fresh Wiz rescan/reassessment covering the changed scope.
+ServiceNow. Start with a representative workload where feasible and validate
+before expanding within the approved scope. Stop on unexpected failures or
+scope differences; do not silently retry destructive operations.
+
+## 7. Verify and reconcile results
+
+Confirm the intended changes took effect. Obtain application-owner validation
+and independent technical review, then reconcile a fresh Wiz rescan/reassessment
+covering the changed scope when available. Missing reassessment evidence remains
+outstanding, not proof of closure. The CLI does not perform or track Wiz scans.
 
 Keep these states distinct:
 
 **Desired approach agreed → change authorized → change applied →
 independently validated → closure evidence confirmed.**
+
+## 8. Report outcomes and close
+
+Update the report and draft a concise completion/blocker summary. Close the
+ticket only when the agreed closure criteria are met. Track deferred work,
+unresolved exceptions and authorized risk acceptance explicitly.
 
 An email approval alone is not an applied fix. A successful change alone is
 not independently verified closure. A suppression, retained-risk decision or

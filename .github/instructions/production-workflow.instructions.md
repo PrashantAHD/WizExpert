@@ -21,7 +21,9 @@ Use synthetic fixtures and approved external locations such as
   Python minimum: 3.12.
 - Do not restore a browser app, Flask/Waitress, routes, templates, SQLite
   case history or approval tracking. Leave existing external private artifacts
-  untouched. No email sending, ServiceNow/Wiz API calls or cloud execution.
+  untouched. No email sending, ServiceNow/Wiz API calls or cloud execution
+  in the current CLI. Authorized read-only Wiz MCP collection may be performed
+  through approved chat tools; do not claim it is implemented in the CLI.
 - Describe interpretation, stakeholder email drafting and response translation
   as human/approved-chat work, not automated general AI capabilities.
   ServiceNow is authoritative for approvals, changes, exceptions and evidence.
@@ -82,14 +84,27 @@ supporting tabs or another versioned workbook."
 
 ## Consulting sequence and email
 
-1. Wiz discovery → validate evidence → explain in plain English.
-2. Security team creates and assigns the ServiceNow ticket.
-3. Draft a concise professional email to the relevant CloudOps/Engineering/IAM,
-   application/integration owners or SecOps stakeholders.
-4. Interpret the response into exact scope, actions, exclusions and conditions.
-5. Obtain change authorization and prepare dependency testing and rollback.
-6. Approved operator implements; independent validation and fresh Wiz
-   rescan/reassessment support evidence-based closure in ServiceNow.
+Follow the eight stages in README and `docs/WORKFLOW.md`:
+
+1. Collect both issue-dashboard and Security Graph evidence, through authorized
+   read-only MCP tools or paired exports. Verify selected-column equivalents,
+   pagination, scope and timestamps; join stable identifiers, deduplicate
+   relationships and reconcile counts. Missing or conflicting evidence blocks
+   validated analysis and final reporting. Do not imply the CLI has MCP support.
+2. Explain validated findings and analyze actual causes and practical options.
+3. Prepare the finding report and concise stakeholder email. Security creates
+   and assigns the ServiceNow ticket before outreach.
+4. Record stakeholder decisions, exact scope, exclusions and authorization.
+5. Prepare current-state prechecks, dependency tests, recovery and rollback.
+6. An approved operator executes only authorized changes with stop criteria.
+7. Verify technical results, owner functionality checks and fresh Wiz evidence
+   when available; execution, validation and finding resolution are distinct.
+8. Update reporting and close only against agreed criteria; retain blockers,
+   deferrals and authorized risk acceptance explicitly.
+
+These are consulting stages, not eight automated product features. The CSV
+importer's optional issue enrichment remains backward compatible; it does not
+waive the two-source evidence requirement for the complete consulting workflow.
 
 The email must include "Hi Team,", Issue Description, Issue Details, a
 `SNOW: [Ticket number]` placeholder, the attached Excel report, concise
