@@ -139,9 +139,9 @@ def test_cover_exact_approved_colors_fonts_borders_and_rows():
         assert_border(cell)
         assert cell.alignment.wrap_text
     for row, label, color in (
-        (11, "What's Wrong", "CC3333"),
-        (16, "Risk Assessment", "FF9900"),
-        (19, "Recommended Next Step", "00A651"),
+        (11, "Issue Summary", "CC3333"),
+        (16, "Risk Description", "FF9900"),
+        (19, "Security Recommendation and Requested Response", "00A651"),
     ):
         assert sheet.cell(row, 1).value == label
         assert_font(sheet.cell(row, 1), 12, "FFFFFF", bold=True)
@@ -286,10 +286,10 @@ def test_unique_issue_counts_severity_and_lifecycle_are_separate_from_credential
     add_cover(workbook, records, severity="Critical", issues=issues)
     sheet = workbook["Cover"]
     assert "9 credentials" in sheet["A9"].value
-    assert "8 distinct Wiz issues" in sheet["A9"].value
-    assert "15 source CSV rows" in sheet["A9"].value
-    assert "9 credential-scope rows" in sheet["A10"].value
-    assert "Source issue severity: Low: 8" in sheet["A23"].value
+    assert "8 Wiz issues" in sheet["A9"].value
+    assert "15 source CSV rows" in sheet["A9"].comment.text
+    assert "9 credential-scope rows" in sheet["A9"].comment.text
+    assert "Wiz severity: Low: 8" in sheet["A23"].value
     assert "Critical" not in sheet["A23"].value
     context = sheet["A23"].comment.text
     assert "derived from matched issue CSV records" in context
@@ -299,8 +299,64 @@ def test_unique_issue_counts_severity_and_lifecycle_are_separate_from_credential
     assert "In Progress: 4, Open: 4" in context
     derived = empty_workbook()
     add_cover(derived, records)
-    assert "8 distinct Wiz issues" in derived["Cover"]["A9"].value
+    assert "8 Wiz issues" in derived["Cover"]["A9"].value
     assert "Low: 8" in derived["Cover"]["A23"].value
+
+
+@pytest.mark.parametrize("issues", [None, [], [
+    {"issue_id": "synthetic-issue", "issue_severity": "Medium", "issue_status": "Open"},
+]])
+def test_stakeholder_summary_keeps_collection_details_in_notes(issues):
+    workbook = empty_workbook()
+    add_cover(workbook, [record()], issues=issues)
+    workbook, _ = roundtrip(workbook)
+    sheet = workbook["Cover"]
+    visible = "\n".join(str(cell.value) for row in sheet for cell in row if cell.value)
+    for technical_phrase in ("source CSV rows", "credential-scope rows", "matched issue CSV"):
+        assert technical_phrase not in visible
+    assert "15 source CSV rows; 1 credential-scope rows" in sheet["A9"].comment.text
+    assert "current configuration still needs confirmation" in sheet["A10"].comment.text
+    assert "current configuration still needs confirmation" not in visible
+    assert "Remediation approval: Pending" in visible
+    assert "We recommend staged replacement" in visible
+    assert "Security recommends" not in visible
+    assert "Please confirm the preferred approach and any business constraints" in visible
+    assert "Please confirm ownership, required access and application dependencies" in visible
+    assert "An inactivity flag alone is not a reason to remove a credential" in (
+        sheet["A14"].comment.text
+    )
+    assert "inactivity flag alone" not in visible
+    assert "Missing information is marked" not in visible
+    assert "These credentials authenticate AWS or Azure identities" in sheet["A14"].value
+    assert "No approval, business risk acceptance, execution or verified closure" in (
+        sheet["A23"].comment.text
+    )
+    if issues is None:
+        assert "Provided context (not verified)" in visible
+
+
+@pytest.mark.parametrize(("workflow_text", "workflow_context"), [
+    ("Stage 1/8 | Evidence review in progress", ""),
+    ("", "Owner enrichment incomplete; reconcile source rows"),
+    ("Status: blocked", "Confirm ticket routing; fetch graph"),
+])
+def test_internal_workflow_is_note_only_and_preserves_stakeholder_request(
+    workflow_text, workflow_context,
+):
+    workbook = empty_workbook()
+    add_cover(workbook, [record()], workflow_text=workflow_text, workflow_context=workflow_context)
+    workbook, _ = roundtrip(workbook)
+    sheet = workbook["Cover"]
+    visible = "\n".join(str(c.value) for row in sheet for c in row if c.value)
+    for text in (workflow_text, workflow_context):
+        if text:
+            assert text not in visible
+            assert text in sheet["A21"].comment.text
+    assert "Please confirm ownership, required access and application dependencies" in (
+        sheet["A21"].value
+    )
+    assert sheet["A16"].value == "Risk Description"
+    assert "not evidence of a compromise or data loss" in sheet["A17"].value
 
 
 def test_aged_findings_are_conditional_and_expiry_is_not_an_sla():
@@ -318,8 +374,9 @@ def test_aged_findings_are_conditional_and_expiry_is_not_an_sla():
     assert sheet["A12"].value.startswith("1 credentials")
     assert "1 have reported expiry dates in the past" in sheet["A13"].value
     assert "2026-01-15" in sheet["A13"].value
-    assert "not approval deadlines or an SLA" in sheet["A13"].value
-    assert "No compromise or data loss is established" in sheet["A17"].value
+    assert "Expiry dates are not remediation deadlines" in sheet["A13"].comment.text
+    assert "remediation deadlines" not in sheet["A13"].value
+    assert "not evidence of a compromise or data loss" in sheet["A17"].value
     assert "do not prove unrestricted cloud access" in sheet["A17"].value
 
 
@@ -401,7 +458,7 @@ def test_cross_scope_rows_do_not_inflate_identity_or_credential_counts():
     add_cover(workbook, records)
     assert workbook["Cover"]["A7"].value == "AWS: 2 identities | 1 credentials"
     assert "Total: 2 identities | 1 credentials" in workbook["Cover"]["A9"].value
-    assert "3 credential-scope rows" in workbook["Cover"]["A10"].value
+    assert "3 credential-scope rows" in workbook["Cover"]["A9"].comment.text
     assert workbook["Cover"]["A12"].value.startswith("1 credentials")
 
 

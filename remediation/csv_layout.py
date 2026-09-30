@@ -102,6 +102,16 @@ def _check_text(text: str, *, notes: bool = False) -> None:
         raise ValueError("Report text contains characters not supported by XLSX.")
 
 
+def follow_up_columns(approval_reference: str | None = None) -> tuple[str, ...]:
+    """Expose follow-up columns only for an operator-reviewed approval response."""
+    if approval_reference is None:
+        return ()
+    if not isinstance(approval_reference, str) or not approval_reference.strip():
+        raise ValueError("A nonblank reviewed approval-response reference is required.")
+    _check_text(approval_reference)
+    return ("Blocker", "Next Action")
+
+
 def _literal(sheet: Worksheet, row: int, column: int, text: str) -> None:
     _check_text(text)
     cell = sheet.cell(row, column)
@@ -268,16 +278,23 @@ def cover(
         _metric(sheet, row, f"{cloud}: {len({_identity(r) for r in subset})} identities | "
                 f"{len({_credential(r) for r in subset})} credentials")
     unique_issues = _issues(records, issues)
-    issue_count = f"{len(unique_issues)} distinct Wiz issues" if unique_issues else (
-        "0 distinct Wiz issues" if issues is not None else "Wiz issue count unknown"
+    issue_count = (
+        f"{len(unique_issues)} Wiz issue{'s' if len(unique_issues) != 1 else ''}"
+    ) if unique_issues else (
+        "0 Wiz issues" if issues is not None else "Wiz issue count unknown"
     )
     _metric(sheet, 9,
             f"Total: {len({_identity(r) for r in records})} identities | "
-            f"{len({_credential(r) for r in records})} credentials | {issue_count} | "
-            f"{source_rows} source CSV rows")
-    _metric(sheet, 10, f"As of {as_of:%Y-%m-%d} (UTC). "
-            f"{len(records)} credential-scope rows; not an issue count. "
-            "Source observations are not live checks.")
+            f"{len({_credential(r) for r in records})} credentials | {issue_count}")
+    sheet["A9"].comment = _comment(
+        f"{source_rows} source CSV rows; {len(records)} credential-scope rows. "
+        "These are evidence counts, not additional issues."
+    )
+    _metric(sheet, 10, f"Report date: {as_of:%Y-%m-%d} (UTC) | Source: Wiz export")
+    sheet["A10"].comment = _comment(
+        "The report date is not evidence freshness. Source observations are not live checks; "
+        "current configuration still needs confirmation."
+    )
     unique_keys = {_credential(r): r for r in records}
     aged = sum(
         _value(r, "key_active").casefold() == "true"
@@ -293,7 +310,7 @@ def cover(
         (days := _number(_value(r, "days_until_expiry"))) is not None and days < 0
         for r in unique_keys.values()
     )
-    _section(sheet, 11, "What's Wrong", RED)
+    _section(sheet, 11, "Issue Summary", RED)
     _block(sheet, 12,
            f"{aged} credentials are reported active, linked to highly privileged identities, "
            "and last rotated more than 365 days ago.", fill="FFE8E8")
@@ -306,24 +323,32 @@ def cover(
     else:
         expiry_message = "No supplied expiry date falls within the next 60 days. "
     expiry_message += (
-        f"{expired} have reported expiry dates in the past. "
-        "These are technical dates, not approval deadlines or an SLA."
+        f"{expired} have reported expiry dates in the past."
     )
     _block(sheet, 13, expiry_message, fill="FFE8E8")
+    sheet["A13"].comment = _comment("Expiry dates are not remediation deadlines.")
     _block(sheet, 14,
-           "Confirm credential type, owners, use and live status. Missing fields are unknown; "
-           "issue update dates do not establish fresh credential observations.", fill="FFE8E8")
-    _section(sheet, 16, "Risk Assessment", ORANGE)
+           "These credentials authenticate AWS or Azure identities and allow access to "
+           "resources within those identities' effective permissions.", fill="FFE8E8")
+    sheet["A14"].comment = _comment(
+        "Missing information is marked as unknown. An inactivity flag alone is not a reason "
+        "to remove a credential."
+    )
+    _section(sheet, 16, "Risk Description", ORANGE)
     _block(sheet, 17,
            "A compromised credential could enable unauthorized changes within its effective "
            "permissions. Broad IAM or directory actions do not prove unrestricted cloud access. "
-           "No compromise or data loss is established by this export.", fill="FFF4E6")
-    _section(sheet, 19, "Recommended Next Step", GREEN)
+           "This finding is not evidence of a compromise or data loss.", fill="FFF4E6")
+    _section(sheet, 19, "Security Recommendation and Requested Response", GREEN)
     _block(sheet, 20,
-           "Review AWS Data and Azure Data with owners. Confirm use and dependencies, then seek "
-           "approval for staged replacement or retirement using Remediation. Do not change "
-           "credentials solely on an inactivity flag. All guidance is a read-only proposal.",
+           "- We recommend staged replacement of required credentials and controlled "
+           "retirement of credentials confirmed as obsolete.\n"
+           "- Changes are subject to dependency testing, a recovery plan and change approval.",
            fill="E8F5E8")
+    _block(sheet, 21,
+           "- Please confirm the preferred approach and any business constraints.\n"
+           "- Please confirm ownership, required access and application dependencies.",
+           fill="E8F5E8", size=10)
     severities = _counts([_severity(_value(r, "issue_severity")) for r in unique_issues.values()])
     statuses = _counts([_value(r, "issue_status") for r in unique_issues.values()])
     if unique_issues or issues is not None:
@@ -331,8 +356,8 @@ def cover(
             _value(r, "issue_control_id") for r in unique_issues.values()
         })) or "Unknown"
         metadata = (
-            f"Source CSV: {len(unique_issues)} distinct issues | "
-            f"Source issue severity: {severities or 'Unknown'} | "
+            f"Wiz issues: {len(unique_issues)} | "
+            f"Wiz severity: {severities or 'Unknown'} | "
             f"Wiz status: {statuses or 'Unknown'} | Control ID: {controls}."
         )
         context = "Source issue metadata is derived from matched issue CSV records.\n"
@@ -342,7 +367,7 @@ def cover(
             f"Control ID: {rule_id or 'Unknown'}. Source issue severity: Unknown."
         )
         context = "Provided context is not verified source issue metadata.\n"
-    _metric(sheet, 23, metadata + "\nApproval not recorded; status is not verified closure.")
+    _metric(sheet, 23, metadata + "\nRemediation approval: Pending.")
     context += (
         f"Distinct source issue lifecycle statuses: {statuses or 'Unknown'}\n"
         "Source CSV files remain the original evidence; this report is not a raw archive.\n"
@@ -350,9 +375,10 @@ def cover(
         "No approval, business risk acceptance, execution or verified closure is asserted."
     )
     sheet["A23"].comment = _comment(context)
-    if workflow_text:
-        _block(sheet, 21, workflow_text, fill=LIGHT_BLUE, size=10)
-        sheet["A21"].comment = _comment(workflow_context)
+    if workflow_text or workflow_context:
+        sheet["A21"].comment = _comment(
+            "\n".join(part for part in (workflow_text, workflow_context) if part)
+        )
     sheet.print_area = "A1:A23"
     sheet.page_setup.fitToHeight = 1
     sheet.sheet_properties.tabColor = NAVY
@@ -463,11 +489,11 @@ def remediation_page(workbook: Workbook, *, notes: str = "") -> None:
         label = "Provided review notes - not validated and not approval:\n"
         _check_text(label + notes, notes=True)
         sheet["A1"].comment = _comment(label + notes)
-    _section(sheet, 5, "Approval Required - Read-Only Proposal", ORANGE)
+    _section(sheet, 5, "Approval Required Before Changes", ORANGE)
     _block(sheet, 6,
-           "Obtain owner approval for the exact resources, change window, validation and "
-           "recovery plan before any change. Wiz status, including In Progress or Resolved, "
-           "does not establish approval, business risk acceptance or verified closure.",
+           "Agree the affected resources, change window, testing and recovery plan with the "
+           "owner. Obtain approval before making changes. A Wiz issue status does not replace "
+           "change approval, risk acceptance or confirmation that the work is complete.",
            fill="FFF4E6")
     steps = (
         ("Step 1: Confirm Ownership and Usage",

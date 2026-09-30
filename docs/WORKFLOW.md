@@ -63,6 +63,58 @@ supported report schema or a reviewed case-specific process. Do not force
 unrelated finding types into the privileged-credential importer. Present
 practical remediation options, dependencies and material trade-offs.
 
+Write the visible report for stakeholders: use concise labels such as
+`Wiz severity: Medium | Open issues: 10`, clear risk descriptions and specific
+recommended actions. Avoid collection jargon such as "matched to model IDs",
+"source rows" or "pagination" in the executive summary. Retain reconciliation,
+field mappings, count caps and provenance in evidence notes. Keep material
+qualifications on risk, pending approvals and draft status visible in plain language;
+natural wording must not imply verified ownership, live checks or completed work.
+
+Write in the reporting security team's voice, addressed to stakeholder recipients,
+not as coaching for the report preparer. State findings, risk and a proposed
+remediation, then request the owners' review or decision: for example,
+"We recommend workload-specific permissions. Please confirm the preferred
+approach and any business constraints." Keep internal stage numbers, evidence
+collection tasks and ticket-routing reminders out of the stakeholder narrative;
+retain them in the private tracker or evidence notes. A draft may still be written
+for stakeholders without implying that it is approved or has been sent.
+The cover has distinct purposes: the issue description explains the affected
+resource/access relationship; the risk description explains conditional impact;
+the recommendation proposes a change; the requested response addresses the
+responsible stakeholders. Place collection dates in the header and counting
+guidance, missing-enrichment reminders and workflow snapshots in cell notes.
+Do not add those internal reminders back to the finding narrative during audits.
+Express unconfirmed ownership or dependencies as a stakeholder review request,
+not as coaching for the preparer; never claim they have been verified.
+Use short, point-wise notes for cover observations, risks, recommendations and
+requested responses, with one point per line rather than dense paragraphs.
+Keep summary metrics compact and preserve full technical evidence in notes.
+Verify wrapped text fits the row heights without unnecessary blank space.
+Include an explicit **Risk Description**, not only a severity label or approval
+caveats. Explain the observed exposure, the condition under which it could be
+misused, the affected data or services and potential business impact. Distinguish
+read, write and delete consequences where supported; qualify unverified effective
+access and existing controls. Do not imply exploitation or a compliance breach
+without evidence.
+
+Initial reports omit **Blocker** and **Next Action/Next Step** columns. Use
+**Pending review** in the remediation decision/status field until a stakeholder
+response has been reviewed; keep the source Wiz lifecycle status separately.
+Retain evidence limitations in notes and the cover rather than execution-tracking
+columns. After a reviewed approval response, add those follow-up columns and
+populate them only from the applicable scoped decisions. A ticket number, report
+generation or workflow stage alone does not establish an approval response.
+The `follow_up_columns` layout helper accepts an operator-reviewed response
+reference for case-specific builders; it does not authenticate or grant approval.
+The post-execution updater remains a separate follow-up process.
+
+In case-specific reports, a role-name column may move to a cover highlight only
+when every scoped resource has the same nonblank role name. Retain each distinct
+role's stable/native IDs in resource notes; equal names across accounts do not
+mean the same identity or permissions. Preserve the column for mixed or missing
+names. Do not copy unrelated execution statuses from a reference template.
+
 The **security team creates and assigns the ServiceNow ticket before outreach**.
 Include its reference in the reviewed email; never ask stakeholders to create
 or provide the ticket. Attach the Excel report and keep the message concise
@@ -269,13 +321,23 @@ new evidence invalidates completed work. Keep authoritative decisions in Service
 
 Show the saved tracker in chat at stage changes or on request. It is not a
 continuously updating UI widget. Record progress first and re-read the file
-after restarting a session. The report cover's optional `--workflow` snapshot
-records stage/status and update time; its comment retains the case/scope and
-status detail. Verify scope manually as well as the enforced control-ID match.
+after restarting a session. The optional `--workflow` snapshot retains stage/status,
+update time, case/scope and status detail in the Cover A21 cell note only, not
+the visible stakeholder response request. Verify scope manually as well as the
+enforced control-ID match.
 Generating a report never advances the tracker. Stages 1-2 produce a draft
 snapshot, not a claim of final validated analysis.
 
 ## Report maintenance
+
+Organize private deliverables into one folder per issue or campaign, using a
+control ID and short descriptive name where available. Keep its report, analysis,
+email drafts, workflow tracker and evidence together; store shared client context
+separately. This is an operator workflow convention, not automatic CLI routing.
+On relocation, verify file hashes, update active generators and current sidecar
+paths, and retain historical evidence paths with an explicit relocation map
+rather than rewriting audit history. Never run remediation scripts while
+organizing files. Keep all these folders outside the public checkout.
 
 Keep source CSVs and approved decisions outside the workbook. Explicit
 `--update --output` regenerates an existing tool-generated report in place

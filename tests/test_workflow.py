@@ -231,7 +231,11 @@ def test_cli_records_errors_and_literal_cover_snapshot(workspace, capsys):  # no
     book = load_workbook(report)
     try:
         assert book.sheetnames == csv_report.SHEETS
-        assert book["Cover"]["A21"].value == load_tracker(path).cover_text()
+        assert "Please confirm the preferred approach" in book["Cover"]["A21"].value
+        assert load_tracker(path).cover_text() in book["Cover"]["A21"].comment.text
+        visible = "\n".join(str(c.value) for row in book["Cover"] for c in row if c.value)
+        for internal_text in ("Stage 1/8", "Fetch graph", "=synthetic-case", "Synthetic scope"):
+            assert internal_text not in visible
         assert book["Cover"]["A21"].data_type == "s"
         assert "Finding: =synthetic-case" in book["Cover"]["A21"].comment.text
         assert "Scope: Synthetic scope" in book["Cover"]["A21"].comment.text
@@ -258,8 +262,10 @@ def test_report_update_refreshes_snapshot_without_advancing_tracker(workspace): 
     csv_report.generate_report([source], update=True, **options)
     book = load_workbook(report)
     try:
-        assert "Status: blocked" in book["Cover"]["A21"].value
+        assert "Status: blocked" in book["Cover"]["A21"].comment.text
         assert "Missing graph" in book["Cover"]["A21"].comment.text
+        visible = "\n".join(str(c.value) for row in book["Cover"] for c in row if c.value)
+        assert "Status: blocked" not in visible and "Missing graph" not in visible
     finally:
         book.close()
     assert load_tracker(path).current_stage == 1
@@ -267,7 +273,7 @@ def test_report_update_refreshes_snapshot_without_advancing_tracker(workspace): 
     csv_report.generate_report([source], update=True, **options)
     book = load_workbook(report)
     try:
-        assert book["Cover"]["A21"].value is None
+        assert "Please confirm the preferred approach" in book["Cover"]["A21"].value
         assert book["Cover"]["A21"].comment is None
     finally:
         book.close()

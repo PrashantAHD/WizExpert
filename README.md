@@ -52,7 +52,7 @@ exports for the same finding. Mismatched or conflicting evidence is rejected.
 | `--issues PATH` | Add matching issue metadata. Repeat for multiple issue files. |
 | `--as-of YYYY-MM-DD` | Set the UTC date used for age and expiry calculations; defaults to today. |
 | `--notes PATH` | Include a local text file as a comment on the Remediation title. |
-| `--workflow PATH` | Display a private tracker snapshot on the cover; the control ID must match. |
+| `--workflow PATH` | Retain a private tracker snapshot in the Cover A21 cell note, not the visible summary; the control ID must match. |
 | `--update` | Regenerate an existing tool-created workbook at the same `--output` path. |
 | `--help` | Show all available options. |
 

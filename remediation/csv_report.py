@@ -544,7 +544,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--severity", choices=SEVERITIES, default=NOT_SUPPLIED)
     parser.add_argument("--rule-id", default=NOT_SUPPLIED)
     parser.add_argument("--notes", help="Local UTF-8 text file kept in a Remediation title comment")
-    parser.add_argument("--workflow", help="Private tracker JSON; snapshot its stage on the cover")
+    parser.add_argument(
+        "--workflow", help="Private tracker JSON; retain its snapshot in cover cell notes",
+    )
     args = parser.parse_args(argv)
     if args.update:
         print(

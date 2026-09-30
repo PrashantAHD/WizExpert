@@ -618,9 +618,9 @@ def test_reference_style_cover_and_nine_column_resource_tables(workspace):
     assert cover["A1"].fill.fgColor.rgb.endswith("1A3D5C")
     assert cover["A1"].font.sz == 28
     assert cover["A5"].value == "Executive Summary"
-    assert cover["A11"].value == "What's Wrong"
-    assert cover["A16"].value == "Risk Assessment"
-    assert cover["A19"].value == "Recommended Next Step"
+    assert cover["A11"].value == "Issue Summary"
+    assert cover["A16"].value == "Risk Description"
+    assert cover["A19"].value == "Security Recommendation and Requested Response"
     assert not cover.sheet_view.showGridLines
     assert cover.page_setup.fitToHeight == 1
     for name in ("AWS Data", "Azure Data"):
@@ -636,7 +636,7 @@ def test_reference_style_cover_and_nine_column_resource_tables(workspace):
             assert all(cell.alignment.wrap_text for cell in row)
     remediation = workbook["Remediation"]
     text = "\n".join(str(cell.value) for row in remediation for cell in row if cell.value)
-    assert "Approval Required - Read-Only Proposal" in text
+    assert "Approval Required Before Changes" in text
     assert "two-access-key limit" in text
     assert "No Longer Needed" in text
     assert "AWS" in text and "Azure / Entra" in text
@@ -715,7 +715,8 @@ def test_issue_enrichment_is_wired_to_report_and_never_approval(workspace):
     assert workbook.sheetnames == csv_report.SHEETS
     assert workbook["Cover"]["A6"].value == issue["Title"]
     assert "1 identities | 2 credentials" in workbook["Cover"]["A7"].value
-    assert "1 distinct Wiz issues" in workbook["Cover"]["A9"].value
+    assert "1 Wiz issue" in workbook["Cover"]["A9"].value
+    assert "1 Wiz issues" not in workbook["Cover"]["A9"].value
     assert "Medium" in workbook["Cover"]["A23"].value
     sheet = workbook["AWS Data"]
     assert sheet["I1"].value == "Wiz Status / Approval"

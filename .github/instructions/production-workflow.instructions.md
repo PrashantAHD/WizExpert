@@ -56,6 +56,32 @@ Incorrect: "Every CSV row is a separate issue and matching names prove identity.
 
 ## Report contract and validation
 
+- Include a point-wise Risk Description covering the observed exposure, misuse
+  conditions, affected data/services and potential business impact. Qualify impact
+  by effective permissions and existing controls; severity and approval caveats
+  alone are not a risk description. Never invent exploitation or a breach.
+- Use natural, stakeholder-facing wording across the cover, tables, recommendations
+  and empty-state messages. Put matching, pagination, API mappings and collection
+  mechanics in evidence notes, not the executive summary. Keep material risk qualifications,
+  draft status and approval requirements visible in plain language. Do not imply
+  manual authorship, live verification or confirmed facts that the evidence does
+  not support.
+- Write as the reporting security team addressing stakeholders, not as an
+  assistant advising the report preparer. Present findings, our proposed
+  remediation and the review or decision requested from owners. Keep internal
+  stage numbers and ticket-routing reminders in private tracking/evidence notes,
+  not the stakeholder narrative. Do not invent recipients, approvals or completed
+  outreach.
+- Initial reports omit Blocker and Next Action/Next Step columns. Remediation
+  status starts at Pending review; source Wiz lifecycle status stays separate.
+  Add follow-up columns only after an operator-reviewed stakeholder approval
+  response, not merely a ticket reference or stage change. Use
+  `csv_layout.follow_up_columns` in case-specific builders. It validates a
+  reference's presence, not the underlying authority or permitted actions.
+- For a user-approved case-specific layout, move a uniformly nonblank role name
+  from repeated rows to a cover highlight. Preserve distinct role/native IDs in
+  resource notes and explicitly distinguish same-name roles across accounts.
+  Mixed/missing role names retain the column.
 - Preserve exactly Cover, AWS Data, Azure Data and Remediation, with
   nine-column cloud tables and complete literal permission values. No extra
   Analysis, archive, hidden-detail or status tabs. Notes use a comment on the
@@ -64,6 +90,10 @@ Incorrect: "Every CSV row is a separate issue and matching names prove identity.
 - Preserve input evidence read-only. Output must be an absolute `.xlsx`
   outside the checkout; the Windows default is
   `%LOCALAPPDATA%\CloudSecurityRemediations\reports` with dated unique names.
+- Group private deliverables by issue/campaign, keeping reports, analysis, email
+  drafts, trackers and evidence together; keep shared client context separate.
+  Update active path references on moves, verify hashes, and retain a relocation
+  map for historical paths without rewriting original audit evidence.
 - Never overwrite by default. `--update` requires an explicit existing
   tool-generated workbook path. Regenerate all four tabs from validated CSVs;
   warn that manual edits are replaced, not merged. Keep approved decisions
@@ -83,6 +113,12 @@ Incorrect: "Update silently preserves every handwritten status and adds
 supporting tabs or another versioned workbook."
 
 ## Consulting sequence and email
+
+Use the user's confirmed cloud-to-team routing from private client context.
+Do not infer the primary coordination team from a finding's technical subject:
+an IAM-related finding does not automatically make IAM the primary recipient.
+Include supporting owners as needed; keep client-specific routing outside the
+public repository, and distinguish coordination from change authorization.
 
 Follow the eight stages in README and `docs/WORKFLOW.md`:
 
@@ -115,21 +151,41 @@ Complete a stage only after checking all required evidence/approval references;
 the CLI validates their presence, not their truth or authority. Never advance
 because a later stage was discussed or a report was generated. Keep separate
 trackers for distinct scopes of the same control. Tracker records and report
-cover snapshots are not technical remediation or live Wiz closure evidence.
+cover cell-note snapshots are not technical remediation or live Wiz closure evidence.
 The optional CSV report `--workflow` flag must match the control; also review
-scope manually. Do not add workflow banners to existing local-account reports
-unless specifically requested; their execution evidence memory is separate.
+scope manually. Store snapshots in cell notes, never visible workflow banners;
+local-account execution evidence memory remains separate.
 
-The email must include "Hi Team,", Issue Description, Issue Details, a
-`SNOW: [Ticket number]` placeholder, the attached Excel report, concise
-numbered Recommended Remediation options and "Best Regards,". Use this exact
-closing:
+The email must include "Hi Team," or the confirmed coordinating team's greeting,
+Issue Description, Issue Details, the Security-owned ticket reference (or an
+unresolved placeholder in drafts), the attached Excel report, concise
+Recommended Remediation options and the user's approved signature. Use
+first-person plural and request the review/approval appropriate to the phase:
 
 Please review the attached report and confirm the desired remediation approach. Let us know if you need any assistance.
 
+When scoped approval is requested, ask which changes are approved and which
+access must remain unchanged. Do not assign implementation/testing to the
+reviewing team when the user is the expected authorized operator. Keep detailed
+testing and rollback in post-approval planning, and account for user-confirmed
+existing safeguards rather than requesting duplicate implementation.
 Never ask stakeholders to create/provide the ticket, promise remediation dates
 or invent SLAs/deadlines. Technical expiry dates are facts, not SLAs.
 Use the complete template in `docs/WORKFLOW.md`.
+
+## Learnings
+
+- Use first-person plural for the sender's recommendations in emails and reports:
+  "We recommend..." and "our review," not "Security recommends..." or "the security
+  team recommends..." as though describing a third party. Keep attribution to
+  Wiz for Wiz observations, and do not claim verification or actions not performed.
+- Stakeholder narrative and internal evidence review are separate output channels:
+  findings explain the resource/access relationship and impact, while requested
+  responses address the coordinating team. Correct: "Please confirm required
+  access"; incorrect in an issue summary: "Ownership enrichment is incomplete;
+  do not sum repeated rows." Keep counting guidance and review reminders in
+  cell notes, dates in the header, and conditional risk qualifications visible;
+  regression-test this separation after rendering and regeneration.
 
 Correct: "Security has created and assigned the ticket; please confirm the
 desired option for the listed scope."
