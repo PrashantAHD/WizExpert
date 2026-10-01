@@ -288,6 +288,13 @@ Use approved storage, access controls and retention.
 | Import execution results or manage blockers | [Execution follow-up](docs/EXECUTION.md) |
 | Develop, validate or publish changes safely | [Publication guide](docs/PUBLICATION.md) |
 
+## Developer & Maintainer
+
+**[Prashant Kumar](https://github.com/PrashantAHD)**  
+Cloud Security Engineer @AHEAD
+
+[GitHub](https://github.com/PrashantAHD) &nbsp; | &nbsp; [LinkedIn](https://www.linkedin.com/in/iprashantkr)
+
 ---
 
 **Evidence before conclusions. Scoped approval before changes. Verification before closure.**
