@@ -30,6 +30,15 @@ Use synthetic fixtures and approved external locations such as
 
 ## Evidence contract
 
+- For each control, review its actual rule configuration when available and
+  initially open one or two representative underlying issues for the summary,
+  investigation/attack path, linked evidence and remediation best practices.
+  Expand for materially different configurations; this interpretation sample
+  never replaces full inventory reconciliation or authorizes generalization.
+- Preserve private source references, observation times and sample rationale;
+  distinguish rule text, graph/configuration observations, AI-generated
+  investigation and recommendations. Supplied UI evidence is not a live fetch,
+  and a newly observed sample status does not refresh all report counts.
 - Accept one or more UTF-8/BOM graph CSV paths only for the supported AWS/Azure
   privileged-credential schema. Do not claim arbitrary Wiz CSV support.
 - Optional `--issues` is a repeatable path flag. Issue CSV alone is unsupported.
@@ -175,6 +184,26 @@ Use the complete template in `docs/WORKFLOW.md`.
 
 ## Learnings
 
+- Ground analysis in Wiz's configured rule and representative issue guidance,
+  then refine it using verified permissions, cloud-service behavior and operating
+  constraints rather than copying AI-generated attack claims as facts.
+  Privately classify relevant recommendations as adopt/adapt/omit/defer with a
+  reason; for example, omit duplicate logging setup when confirmed present,
+  without claiming full coverage or that logging fixes excessive permissions.
+  Keep the resulting HTML analysis, report and email aligned, removing irrelevant
+  advice but retaining material caveats and scoped approval requirements.
+- Produce private analysis companions and initial, progress, blocker and closure
+  email drafts as standalone local HTML pages, retaining plain-text companions.
+  Analysis is an internal learning channel: use evidence-backed diagrams,
+  labeled counts, explanations and expandable details; emails remain concise,
+  first-person and copyable with consistent inline formatting.
+  Preserve historical facts/dates on format-only conversions and label them
+  historical rather than implying a new assessment or status update.
+- Keep HTML free of remote assets, analytics and scripts by default; escape
+  source text and validate content parity, local links and desktop/mobile
+  rendering. For example, an access diagram must distinguish an observed
+  relationship from a hypothetical attack, and HTML preparation dates must
+  never silently replace evidence dates.
 - Use first-person plural for the sender's recommendations in emails and reports:
   "We recommend..." and "our review," not "Security recommends..." or "the security
   team recommends..." as though describing a third party. Keep attribution to

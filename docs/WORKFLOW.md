@@ -40,6 +40,41 @@ resource and cloud scope, ownership, permissions, exposure, dependencies,
 existing safeguards and evidence of impact. Mark missing details unknown.
 Keep native identifiers in approved private evidence, not public examples.
 
+### Read the rule and representative issue details
+
+For each control, use Wiz's own explanation as a starting point rather than
+reasoning only from its title or inventing a generic remediation narrative:
+
+1. Retrieve the source rule definition/configuration where authorized and
+   available. Identify the actual matching conditions, AND/OR branches, severity
+   thresholds, relationship filters and optional enrichment. A title is not a
+   substitute for the configured query; record unavailable configuration as unknown.
+2. Initially select one or two underlying issues from the scoped inventory and
+   open their details through approved read-only tools or review supplied UI
+   evidence. Prefer meaningful differences in roles, accounts, services or access
+   paths over two arbitrary first results. If only one issue exists, review it.
+3. Collect the issue summary/description, investigation or attack-path narrative,
+   linked resource/policy evidence and remediation recommendations/best practices.
+   Keep source-rule text, observed graph/configuration data, AI-generated
+   investigation and recommendations distinguishable. Record the issue ID,
+   source reference, observation time and reason for sample selection privately.
+4. Expand the sample when it reveals materially different policy causes,
+   deployments, safeguards or remediation needs. One or two issues is an initial
+   interpretation sample, not a fixed coverage limit or proof about all resources.
+   Do not apply a sampled recommendation to an unreviewed configuration group.
+5. Record unavailable sections and use approved exports or user-provided
+   screenshots when necessary. Never invent API field equivalence or claim that
+   a supplied screenshot was retrieved live.
+
+Sampling enriches interpretation; it never replaces complete scoped inventory,
+pagination, stable-ID matching or count reconciliation. A newer sampled issue
+status/assignee is a dated observation for that issue, not an automatic refresh
+of the whole report. Reconcile source differences before revising aggregate
+counts or claiming current configuration.
+
+This is an approved-chat/operator collection strategy, not a new Wiz API feature
+in the CSV CLI.
+
 ## 2. Explain and analyze
 
 Separate observations, hypotheses and confirmed causes in the explanation.
@@ -49,6 +84,37 @@ Explain in plain English what is exposed, under which conditions it matters,
 the plausible impact, and what remains unverified. An issue update timestamp
 is not proof that older resource evidence was refreshed. Credential expiry
 dates are factual technological constraints, not remediation SLAs.
+
+### Combine Wiz guidance with configuration-aware reasoning
+
+Use the rule intent and sampled issue content to focus the analysis, then test
+each material claim against the reconciled evidence and applicable cloud-service
+behavior. Wiz AI-generated investigation is a hypothesis to evaluate, not
+independent proof of exploitation, effective access, business criticality or
+legal obligations. For example, adversarial model inputs alone do not establish
+AWS access, `iam:PassRole` is not `sts:AssumeRole`, and a production-like name
+does not establish business impact.
+
+For each relevant Wiz recommendation, record a concise private disposition:
+**adopt**, **adapt**, **omit** or **defer**, with the evidence/condition and reason.
+Adopt applicable guidance; adapt it to supported service operations, shared
+dependencies, required access and change controls. Omit duplicate safeguards or
+irrelevant generic advice only when justified. Defer recommendations requiring
+unconfirmed dependencies or a separate approved change. Existing logging may
+remove a duplicate "enable logging" action, but does not prove complete event/
+alert coverage or resolve excessive permissions.
+
+The resulting recommendation must explain the observed cause it addresses and
+preserve business-required operations, not blindly repeat a generic "inference
+only" or "remove permissions" instruction. Consult current official documentation
+when service behavior or implementation details need verification. Do not add
+unrelated best practices merely to lengthen the assessment.
+
+Carry the same reviewed findings and decisions into the HTML analysis, workbook
+and email. The learning page may explain why guidance was adapted; stakeholder
+outputs receive the concise applicable recommendation and requested decision,
+not the internal disposition checklist. Cutting noise must never remove material
+uncertainty, draft status, risk qualifications or approval requirements.
 
 Route review to the actual owners: CloudOps/Engineering for infrastructure,
 IAM for identity controls, application/integration owners for usage and
@@ -153,6 +219,33 @@ work, the [execution follow-up command](EXECUTION.md) can draft a factual update
 from recorded completion, exclusions and blockers. It does not send the draft.
 Send only through approved communication channels. Retain the email and response
 references in ServiceNow.
+
+### HTML analysis and email companions
+
+Prepare analysis and all initial, progress, blocker and closure email drafts as
+standalone private HTML pages alongside plain-text copies. This is an
+operator/approved-chat deliverable convention; the CLI's execution follow-up
+command still produces plain text, not automatic HTML.
+
+Analysis pages are an internal learning channel, distinct from stakeholder
+communications. Explain the finding with a short overview, clearly labeled
+metrics, resource/access diagrams, observed-versus-hypothetical distinctions,
+practical options and expandable evidence or knowledge checks. Preserve the full
+source analysis and material caveats. Visuals must not imply a proven attack,
+live usage, additive relationship counts or authorization.
+
+Email pages keep the concise stakeholder body separate from internal review
+instructions, subject and routing metadata. Use consistent inline font, spacing
+and alignment for copying into an HTML email. Retain the approved sender voice
+and signature in new drafts. For historical format conversions, preserve original
+wording, figures, signatures and dates, label the snapshot historical and do not
+silently update its status. Flag unavailable attachments rather than linking
+nonexistent files.
+
+Keep pages in the relevant private issue folder, with no remote assets, analytics
+or scripts by default. Escape source content; verify text parity and local links,
+and check desktop/mobile browser rendering. Distinguish presentation dates from
+evidence dates. This adds companion pages, not workbook tabs or a web application.
 
 ## 4. Obtain stakeholder decisions and approval
 
