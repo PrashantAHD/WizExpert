@@ -8,7 +8,7 @@
 
 Python 3.12+ &nbsp; | &nbsp; AWS + Azure &nbsp; | &nbsp; Local CSV processing &nbsp; | &nbsp; Human-reviewed changes
 
-[Quick start](#quick-start) &nbsp; / &nbsp; [What you get](#what-you-get) &nbsp; / &nbsp; [Workflow](#eight-stage-remediation-workflow) &nbsp; / &nbsp; [Guides](#documentation)
+[Quick start](#quick-start) &nbsp; / &nbsp; [What you get](#what-you-get) &nbsp; / &nbsp; [Wiz MCP](#how-we-use-wiz-mcp) &nbsp; / &nbsp; [Workflow](#eight-stage-remediation-workflow) &nbsp; / &nbsp; [Guides](#documentation)
 
 </div>
 
@@ -83,11 +83,62 @@ The human/approved-chat workflow also prepares:
 
 These are reviewed deliverable conventions, **not automatic general-purpose
 analysis or HTML generation in the CLI**. Direct read-only Wiz collection uses
-authorized chat tools when available, not a built-in CLI integration.
+authorized Wiz MCP tools when available, not a built-in CLI integration.
 
 > [!NOTE]
 > The tool does not send emails, create tickets, execute cloud changes or track
 > Wiz closure. ServiceNow remains authoritative for approvals, changes and closure.
+
+## How we use Wiz MCP
+
+**Less manual exporting. More context behind the finding.**
+
+Wiz MCP (Model Context Protocol) lets an authorized assistant access the Wiz tools
+exposed by a configured MCP server. In our assistant-led workflow, we use these
+tools for **read-only evidence collection and investigation**, then review the
+results before preparing deliverables.
+
+```mermaid
+flowchart LR
+    A["Wiz issues and Security Graph"] --> B["Authorized read-only MCP tools"]
+    B --> C["Reconcile evidence and review guidance"]
+    C --> D["Analysis, report and email drafts"]
+```
+
+| Step | How we use it | What we check |
+| :--- | :--- | :--- |
+| **Find the scope** | Retrieve issues for the selected control and account/project/status filters | Observation times, pagination and retrieval limits |
+| **Understand the rule** | Review available rule configuration and one or two representative issue details | Summary, investigation and recommendations; expand the sample when configurations differ |
+| **Trace relationships** | Retrieve associated identities, permissions, resources and relevant data-finding metadata | Stable IDs, optional relationships, distinct access paths and field coverage |
+| **Reconcile and explain** | Review saved responses, deduplicate relationships and tailor applicable guidance | Counts, evidence gaps, existing safeguards and workload dependencies |
+
+The last step is our review process, not a guarantee supplied by MCP. AI-generated
+investigation remains a hypothesis to evaluate, and samples do not establish
+complete inventory coverage.
+
+<details>
+<summary><strong>Connection requirements, fallback and product boundaries</strong></summary>
+
+- An approved assistant/chat environment must already have a configured Wiz MCP
+  server, authorized authentication and suitable read permissions. This repository
+  does not install or configure that connection.
+- Available tools and fields depend on the server and permissions. Verify what
+  is exposed; do not assume every UI section, custom column or rule definition
+  has an API equivalent.
+- If direct retrieval is unavailable, use paired issue and Security Graph
+  exports. The Python CLI accepts only its supported credential CSV schema;
+  arbitrary MCP responses are not direct CLI inputs. Other controls use a
+  reviewed case-specific process.
+- Keep raw responses and client identifiers in approved private storage. Do not
+  collect secret values or sensitive record samples just to enrich a report.
+- MCP access is not remediation approval. Our use here does not execute fixes,
+  change issue statuses, send messages or close tickets.
+
+</details>
+
+**Where the integration lives:** in the authorized assistant environment.
+**What this repository provides:** local reporting, tracking, execution follow-up
+and the [review process](docs/WORKFLOW.md) that turns evidence into useful outputs.
 
 ## Eight-stage remediation workflow
 
