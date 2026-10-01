@@ -1,108 +1,176 @@
+<div align="center">
+
 # Cloud Security Remediations
 
-Turn Wiz CSV exports into clear Excel reports for cloud security reviews.
-Provide your CSV paths, generate a report, and use it to discuss remediation
-with resource owners.
+### From Wiz findings to clear reports and scoped remediation decisions.
 
-**CSV report generation:** AWS and Azure privileged-credential graph exports.
-Other Wiz export formats and finding types are not supported yet.
+**Bring your CSVs. Understand the evidence. Coordinate the next step.**
 
-**Execution follow-up:** update an existing approved local-account report from
-supported Run Command results, record blockers and next actions, and generate a
-stakeholder email draft. This is a separate command, not a new Wiz CSV importer.
+Python 3.12+ &nbsp; | &nbsp; AWS + Azure &nbsp; | &nbsp; Local CSV processing &nbsp; | &nbsp; Human-reviewed changes
 
-## What you get
+[Quick start](#quick-start) &nbsp; / &nbsp; [What you get](#what-you-get) &nbsp; / &nbsp; [Workflow](#eight-stage-remediation-workflow) &nbsp; / &nbsp; [Guides](#documentation)
 
-- Duplicate relationships consolidated without inflating identity or credential counts.
-- Optional issue details, severity, status and Wiz links from a matching issue CSV.
-- One Excel workbook with four tabs: **Cover**, **AWS Data**, **Azure Data**
-  and **Remediation**.
-- Remediation guidance for review, not automatic changes to your cloud environment.
-- Optional private per-finding workflow tracker, with a terminal/chat status view
-  and an operator-recorded snapshot on the report cover.
+</div>
+
+---
+
+## Less spreadsheet cleanup. More useful security conversations.
+
+Wiz identifies the finding. This project helps turn its evidence into a readable
+report, a practical review and a traceable follow-up.
+
+| **Understand the scope** | **Make the review easier** | **Keep decisions separate** |
+| :--- | :--- | :--- |
+| Consolidate repeated relationships without inflating identity or credential counts. | Present resource details, permission evidence and matched Wiz issue links in Excel. | Track progress without confusing approval, execution and verified closure. |
+
+> [!IMPORTANT]
+> **Start with the supported input:** AWS/Azure privileged-credential graph CSVs.
+> This is not an importer for every Wiz control. Other finding types need a
+> reviewed case-specific process.
 
 ## Quick start
 
-Requires **Python 3.12 or newer**. Run these commands from the project folder
-in PowerShell:
+**Requirements:** Python 3.12 or newer. Run from the project folder in PowerShell.
+
+### 1. Set up once
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\python.exe -m remediation "C:\Exports\graph.csv" --output "C:\Reports\finding.xlsx"
 ```
 
-Replace the example paths with your own. Keep inputs and reports outside the
-project folder. The output path must be absolute.
-
-To include matching issue details:
+### 2. Point to your export
 
 ```powershell
 .\.venv\Scripts\python.exe -m remediation "C:\Exports\graph.csv" `
-  --issues "C:\Exports\issues.csv" --output "C:\Reports\finding.xlsx"
+  --output "C:\Reports\finding.xlsx"
 ```
 
-The issue CSV supplements the graph export; it cannot replace it. Supply
-exports for the same finding. Mismatched or conflicting evidence is rejected.
+### 3. Open the report and review
 
-## Useful options
+Your workbook contains **Cover**, **AWS Data**, **Azure Data** and **Remediation**.
+Use it to review the evidence and discuss the proposed approach with owners.
 
-| Option | Purpose |
-| --- | --- |
-| `--issues PATH` | Add matching issue metadata. Repeat for multiple issue files. |
-| `--as-of YYYY-MM-DD` | Set the UTC date used for age and expiry calculations; defaults to today. |
-| `--notes PATH` | Include a local text file as a comment on the Remediation title. |
-| `--workflow PATH` | Retain a private tracker snapshot in the Cover A21 cell note, not the visible summary; the control ID must match. |
-| `--update` | Regenerate an existing tool-created workbook at the same `--output` path. |
-| `--help` | Show all available options. |
+**Have the matching issue export too?** Add severity, lifecycle status and Wiz links:
 
-**Updating a report:** close it in Excel, then rerun your command with
-`--update`. This rebuilds all four tabs and **replaces manual workbook edits**.
-Keep original CSVs and decision records separately. Reuse `--as-of` if you
-want to preserve the calculation date.
+```powershell
+.\.venv\Scripts\python.exe -m remediation "C:\Exports\graph.csv" `
+  --issues "C:\Exports\issues.csv" --output "C:\Reports\enriched-finding.xlsx"
+```
+
+Replace the example paths with your own. Inputs and outputs belong **outside the
+checkout**; output paths must be absolute. Existing files are not overwritten by
+default. The issue CSV supplements the graph CSV, not replaces it; mismatched or
+conflicting evidence is rejected.
+
+## What you get
+
+### Three local tools, one reviewed workflow
+
+| Tool | You provide | You receive |
+| :--- | :--- | :--- |
+| **CSV report** | Supported graph exports; optional matching issue CSVs | Four-tab Excel report with consolidated evidence and proposed guidance |
+| **Workflow tracker** | Operator-reviewed progress and evidence references | Private per-finding/scope JSON history and an eight-stage status view |
+| **Execution follow-up** | Existing local-account workbook and supported saved results | Updated completion/blockers, private execution memory and a plain-text email draft |
+
+### The broader deliverable experience
+
+The human/approved-chat workflow also prepares:
+
+- **Visual analysis HTML** to explain the issue, access relationships and practical options.
+- **Concise stakeholder email HTML** with a separate copyable body and plain-text companion.
+- **Case-specific reports** when the default credential schema is not appropriate.
+
+These are reviewed deliverable conventions, **not automatic general-purpose
+analysis or HTML generation in the CLI**. Direct read-only Wiz collection uses
+authorized chat tools when available, not a built-in CLI integration.
+
+> [!NOTE]
+> The tool does not send emails, create tickets, execute cloud changes or track
+> Wiz closure. ServiceNow remains authoritative for approvals, changes and closure.
 
 ## Eight-stage remediation workflow
 
-These stages describe the end-to-end, human-reviewed workflow, not eight
-automated CLI features. The current CLI supports the CSV schemas and execution
-follow-up described above. Direct Wiz MCP collection and general-purpose
-cross-source reconciliation are not implemented in the CLI; authorized
-read-only MCP collection is an approved-chat activity when the required tools
-are available. Existing CSV inputs remain supported.
+**Understand first. Agree the scope. Then change and verify.**
+The diagram describes the human-reviewed process, not eight automated features.
 
-| Stage | Work and required outcome |
-| --- | --- |
-| **1. Collect and reconcile evidence** | Obtain both issue-dashboard details and the associated Security Graph relationships through authorized read-only access, including the equivalent of selected custom columns. Use paired exports when direct retrieval is unavailable. Complete pagination; record filters, scope and observation times; match stable cloud, graph and native identifiers; deduplicate relationships; reconcile issue, unique-resource and graph-row counts. Flag missing fields, truncation, conflicting facts and unexplained differences before proceeding. |
-| **2. Explain and analyze** | Explain the validated finding in plain language, distinguish confirmed causes from hypotheses, assess permissions and access paths, and develop practical remediation options with dependencies and trade-offs. Do not infer compromise from a risk finding alone. |
-| **3. Prepare the report and stakeholder email** | Generate a separate finding report from validated evidence using a supported schema or a reviewed case-specific process. Draft a concise email covering risk, affected scope and feasible options, with the report attached. Security creates and assigns the ticket before outreach; review and send through approved channels. |
-| **4. Obtain stakeholder decisions and approval** | Record owners' responses: approve remediation, request changes, defer, or accept risk. Establish exact resources, permitted actions, exclusions, business dependencies and conditions. Approach agreement is not production change authorization; silence is not approval. |
-| **5. Prepare remediation** | Recheck current configuration against approved scope. Prepare steps or tightly scoped scripts, least-privilege operator access, prechecks, backups, tested recovery/rollback arrangements, stop criteria and success criteria. Check shared identities and policies for impacts on other workloads. |
-| **6. Execute approved changes** | An authorized operator applies only the approved changes. Start with a representative workload where feasible, validate before expanding, retain execution evidence privately and stop on unexpected failures or scope differences. |
-| **7. Verify and reconcile results** | Verify that intended configuration changes took effect; obtain application-owner functionality checks and independent technical validation. Reconcile fresh Wiz evidence when available. Keep change execution, functionality validation and finding resolution distinct; missing reassessment evidence remains outstanding. |
-| **8. Report outcomes and close** | Update the report and draft a concise completion/blocker summary. Close the ticket only when agreed closure criteria are met. Keep deferred work, unresolved exceptions and authorized risk acceptance explicit; partial remediation is not whole-finding closure. |
+```mermaid
+flowchart TB
+    subgraph review["EVIDENCE AND DECISIONS"]
+        direction LR
+        A["1. Collect and reconcile"] --> B["2. Explain and analyze"]
+        B --> C["3. Report and draft email"]
+        C --> D["4. Obtain scoped approval"]
+    end
+    subgraph delivery["AUTHORIZED CHANGE AND FOLLOW-UP"]
+        direction LR
+        E["5. Prepare remediation"] --> F["6. Execute approved changes"]
+        F --> G["7. Verify results"]
+        G --> H["8. Report outcomes and close"]
+    end
+    review --> delivery
+    classDef evidence fill:#E8EFF7,stroke:#185ADB,color:#19324B
+    classDef approval fill:#FFF4E6,stroke:#B7791F,color:#513508
+    classDef outcome fill:#E8F5EE,stroke:#16866B,color:#174D40
+    class A,B,C evidence
+    class D,E approval
+    class F,G,H outcome
+```
 
-Stage 1 must not silently substitute issue summaries for granular graph
-evidence. Saved UI column selections may not be exposed by an API; verify
-field coverage and document gaps rather than claiming an equivalent export.
-Graph relationship counts need not equal issue counts. Unresolved material
-evidence gaps block validated analysis and final reporting, not just execution.
+| Phase | The question it answers | Required outcome |
+| :--- | :--- | :--- |
+| **1-2 / Understand** | What is affected, why does it matter, and what is actually supported by evidence? | Reconciled issue + graph scope, plain-English analysis and feasible options |
+| **3-4 / Agree** | What should change, who authorizes it, and what must stay untouched? | Reviewed report/email, Security-created ticket and exact decisions/exclusions |
+| **5-6 / Act** | How can the approved change be made safely? | Current-state checks, dependency/recovery plan and scoped operator execution |
+| **7-8 / Confirm** | Did it work, and are the closure criteria met? | Technical and owner validation, fresh Wiz evidence and an authoritative disposition |
 
-Follow your organization's change and risk-management processes. ServiceNow
-remains authoritative for approvals, changes and closure. The CLI does not
-send emails, create tickets, execute cloud changes or track Wiz closure.
-The later stages are operator responsibilities supported by reviewed reports
-and local drafts. Keep source evidence, identifiers, screenshots, credentials
-and generated outputs outside this public repository; use synthetic examples
-in code and tests.
+**No shortcuts:** approach agreement is not execution authorization; an applied
+change is not verified closure; risk acceptance is not technical remediation.
+Missing material evidence blocks validated analysis and final reporting.
+Stop execution on unexpected failures or scope differences.
 
-See [workflow and communication guidance](docs/WORKFLOW.md) for the stage
-details and stakeholder email template.
+### Guided by Wiz. Refined for the environment.
+
+1. **Read the rule** and initially open one or two representative issues for
+   their summary, investigation and remediation guidance.
+2. **Check the evidence.** Expand the sample for different configurations;
+   sampling never replaces complete inventory, pagination or count reconciliation.
+3. **Filter recommendations:** adopt, adapt, omit or defer, with a reason.
+   Account for existing safeguards, shared dependencies and required access.
+4. **Keep outputs aligned.** Explain the reasoning in the learning page; give
+   stakeholders the concise applicable recommendation and approval request.
+
+Wiz AI-generated investigation is context to evaluate, not proof of an attack.
+See the [full workflow and communication guide](docs/WORKFLOW.md).
+
+## Useful options
+
+<details>
+<summary><strong>Report flags and safe in-place updates</strong></summary>
+
+| Option | Purpose |
+| :--- | :--- |
+| `--issues PATH` | Add matching issue metadata; repeat for multiple issue files |
+| `--as-of YYYY-MM-DD` | Set the UTC age/expiry calculation date; defaults to today, not evidence freshness |
+| `--notes PATH` | Include local text as a comment on the Remediation title |
+| `--workflow PATH` | Retain a matching tracker snapshot in the Cover A21 cell note, not the visible summary |
+| `--update` | Regenerate an existing tool-created workbook at the explicit `--output` path |
+| `--help` | Show all options |
+
+**Close Excel before updating.** `--update` rebuilds all four tabs and
+**replaces manual workbook edits**. Keep source CSVs and approved decisions
+separately. Reuse `--as-of` to preserve the calculation date.
+
+</details>
 
 ## Track the current stage
 
-Keep one private JSON tracker per finding **and scope**, outside the checkout.
-The tracker stores progress and evidence references, not credentials, approval
-authority or automated Wiz status. It works independently of CSV schema support.
+Keep one private tracker per **finding and scope**, independent of CSV schema
+support. See the current stage, last update, blocker, next action and required
+completion references without putting internal workflow notes into executive prose.
+
+<details>
+<summary><strong>Create a tracker, view progress and record a blocker</strong></summary>
 
 ```powershell
 .\.venv\Scripts\python.exe -m remediation workflow init `
@@ -114,50 +182,48 @@ authority or automated Wiz status. It works independently of CSV schema support.
 
 .\.venv\Scripts\python.exe -m remediation workflow show `
   --tracker "C:\PrivateReports\finding.workflow.json"
-```
 
-The display shows all eight stages, current status, last-updated UTC timestamp,
-latest update, blocker, next action and required completion references.
-Use `workflow record` to record progress or a blocker without advancing:
-
-```powershell
 .\.venv\Scripts\python.exe -m remediation workflow record `
   --tracker "C:\PrivateReports\finding.workflow.json" --stage 1 --status blocked `
   --summary "Issue collection is partial." --blocker "Graph evidence unavailable." `
   --next-action "Restore read-only access and finish collection."
 ```
 
-Completion uses `--status complete` with a separate `--evidence GATE=REFERENCE`
-for **every** gate shown by `workflow show`. References must point to reviewed
-private evidence or authoritative records. The CLI checks that references are
-recorded, **not that their contents prove completion**; a human must validate
-the stage criteria. Blockers must be resolved first. Completion advances one
-stage, never skips stages, and completing stage 8 marks the workflow complete,
-not necessarily technically remediated (closure may include authorized risk
-acceptance). Updates retain previous events. Existing trackers are not
-overwritten by initialization; completed stages cannot be silently reopened.
+Completion requires `--status complete` and a separate
+`--evidence GATE=REFERENCE` for **every** current-stage gate. The CLI validates
+reference presence, **not their truth or approval authority**. Human review is
+required; blockers must be resolved before advancing one stage.
 
-For a supported CSV report, add `--workflow` to the normal generation/update
-command. Supply matching issue evidence or an explicit `--rule-id` matching
-the tracker's control. Verify the tracker scope against the exports yourself:
-control matching alone does not establish identical projects/accounts/time
-windows. The cover shows the current stage and last update; its cell comment
-includes case/scope and the detailed status view. Stages 1-2 are labeled draft.
-This is a **snapshot**, not a live link: regenerate with the same `--workflow`
-path to refresh it. Omitting the flag leaves the original four-tab layout
-unchanged (and removes a previous snapshot when regenerating).
+History is retained, existing trackers are not overwritten by initialization,
+and completed stages cannot be reopened through this CLI. Workflow completion
+does not necessarily mean technical remediation.
+See [completion references and follow-up rules](docs/WORKFLOW.md#tracker-completion-references).
 
-No extra worksheet, browser dashboard, cloud call or automatic stage transition
-on report generation is added. Existing local-account execution reports and
-their evidence memory remain separate and unchanged.
-In approved chat, show a compact tracker at stage transitions or on request;
-read the saved file first rather than reconstructing progress from memory.
-See [stage completion references](docs/WORKFLOW.md#tracker-completion-references).
+</details>
+
+<details>
+<summary><strong>Attach a tracker snapshot to a supported CSV report</strong></summary>
+
+Add `--workflow` to the report command. Supply matching issue evidence or an
+explicit `--rule-id` matching the control, and manually verify account/project/
+time-window scope. A matching control alone is not enough.
+
+The **Cover A21 comment only** retains the stage, update time, case/scope and
+status detail. Its snapshot includes a draft qualification for stages 1-2.
+Regenerate with the flag to refresh it; omitting the flag during regeneration
+removes a prior snapshot. The visible stakeholder response request stays intact.
+
+Generating a report never advances the tracker. No extra worksheet or live
+dashboard is added. In approved chat, read the saved tracker before displaying
+progress at stage changes or on request. Local-account execution memory remains
+a separate record.
+
+</details>
 
 ## Update completed work and blockers
 
-For an existing local-account workbook with **AWS Data**, **Azure Data**,
-**Pending Review** and **Pending Remediation** tabs:
+Already have an approved local-account report? Import saved execution evidence
+without manually rewriting every status.
 
 ```powershell
 .\.venv\Scripts\python.exe -m remediation update-remediation `
@@ -166,34 +232,62 @@ For an existing local-account workbook with **AWS Data**, **Azure Data**,
   --email-output "C:\Reports\stakeholder-update.txt"
 ```
 
-Repeat `--result` for more files. Only supported marker-based local-account
-removal output is accepted, not arbitrary scripts or Azure's "Enable succeeded"
-message alone. The report must already contain explicit approved usernames.
+> [!IMPORTANT]
+> This uses a **different workbook schema**: AWS Data, Azure Data, Pending Review
+> and Pending Remediation, with optional Cover. The four-tab credential report
+> from the quick start is deliberately not accepted.
 
-- Excel shows completed work, blocker reasons and next actions in the existing
-  tabs. Columns are found by header, so reordered or removed optional columns
-  do not break updates.
-- Raw output and deduplication history stay in a private
-  `local-account-report.remediation-memory.json` file beside the workbook,
-  **not in Excel**. Keep this file with the report for future updates.
-- The stakeholder draft summarizes recorded removals, exclusions, blockers and
-  remaining work. Review it and attach the report before sending.
-- No Wiz scan, reassessment or finding-closure tracking is added.
-- Close Excel first. Each update keeps a uniquely named pre-update workbook
-  backup and refuses to overwrite an existing email draft.
+<details>
+<summary><strong>Supported evidence, blockers and preservation rules</strong></summary>
 
-For a manual blocker or an explicit return to its original pending status, use
-`--blockers "C:\Evidence\blockers.csv"` instead of, or alongside, result files.
-To draft an email from the current report without changing it, use `--email-only`
-instead of result/blocker inputs.
-See the [execution follow-up guide](docs/EXECUTION.md) for the exact CSV schema,
-supported workbook format and partial-result safeguards.
+- The report must contain explicit approved usernames; authorization still
+  requires review through the change process.
+- Repeat `--result` for multiple files. Only supported marker-based account-removal
+  output is accepted, not arbitrary scripts or "Enable succeeded" alone.
+- Partial results retain their verified subset and blockers; already-absent
+  accounts do not count as new removals.
+- Columns are matched by header. Pending views, blocker reasons and next actions
+  are updated without treating them as extra resources.
+- Raw output and deduplication history stay beside the workbook in
+  `local-account-report.remediation-memory.json`, **not in Excel or the email**.
+  Keep the report and memory together.
+- Close Excel first. Updates retain a uniquely named pre-update workbook backup
+  and refuse to overwrite an existing email draft.
+- Use `--blockers "C:\Evidence\blockers.csv"` for reviewed manual blockers or
+  an explicit return to the original pending status.
+- Use `--email-only` instead of result/blocker inputs to draft from current
+  records without changing the workbook or memory.
+
+The email is a **plain-text draft** summarizing recorded completions, exclusions
+and remaining work. Review recipients, facts, ticket reference and attachment
+before sending. No fresh Wiz reassessment or closure is performed.
+
+See the [execution follow-up guide](docs/EXECUTION.md) for schemas, matching rules
+and supported result markers.
+
+</details>
+
+## Private evidence. Public reusable tooling.
+
+| Keep outside this repository | Keep in this repository |
+| :--- | :--- |
+| Client exports, identifiers, screenshots and reports | Reusable application code |
+| Analysis/email pages, approval records and execution logs | Client-neutral workflow documentation |
+| Credentials, secrets and operational backups | Synthetic tests and publication checks |
+
+Organize private deliverables by issue/campaign, with shared context kept
+separately. This is a workflow convention, not automatic CLI folder routing.
+CSV processing is local; **workbooks and local execution memory are not encrypted**.
+Use approved storage, access controls and retention.
 
 ## Documentation
 
-- [Workflow and communication guidance](docs/WORKFLOW.md)
-- [Execution results, blockers and stakeholder drafts](docs/EXECUTION.md)
-- [Development checks and publication safety](docs/PUBLICATION.md)
+| I want to... | Start here |
+| :--- | :--- |
+| Understand evidence, analysis and stakeholder communication | [Workflow guide](docs/WORKFLOW.md) |
+| Import execution results or manage blockers | [Execution follow-up](docs/EXECUTION.md) |
+| Develop, validate or publish changes safely | [Publication guide](docs/PUBLICATION.md) |
 
-Keep operational data, credentials and generated reports out of this public
-repository. CSV processing is local; generated workbooks are not encrypted.
+---
+
+**Evidence before conclusions. Scoped approval before changes. Verification before closure.**
