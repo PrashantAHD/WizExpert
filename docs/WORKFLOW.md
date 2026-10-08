@@ -7,6 +7,47 @@ system. It does not send messages or execute cloud changes. Use approved interna
 channels; keep operational evidence outside
 the public repository.
 
+## Preparation continuity and completion check
+
+For an authorized end-to-end assessment, continue through the available
+read-only investigation and the requested deliverable set: analysis HTML,
+Excel report and stakeholder email HTML, retaining the required plain-text
+companions. An initial analysis or a list of next steps is a progress update,
+not completion while actionable preparation remains. Respect narrower requests,
+explicit pauses and scope changes. After a side question or factual correction,
+resume the outstanding authorized work unless the user redirects it.
+
+Unfinished policy, scope or dependency checks are tasks to pursue. Stop the
+affected work only when a genuine access/evidence limitation, material decision,
+explicit hold or approval requirement prevents safe progress. Explain exactly
+what is missing, which output it blocks and what input is needed; continue
+independent preparation where safe. Do not fill gaps with assumptions.
+
+Incomplete evidence may support a clearly labeled draft requesting confirmation,
+with material unknowns visible. It does not support validated analysis, final
+reporting or completion of unmet tracker gates. Cloud-change approval is not
+needed merely to continue already-authorized read-only preparation; preparing
+an email or ticket draft does not authorize sending or creating it. Keep holds
+specific to their case and scope, not global across unrelated active work.
+
+Before ending the preparation task:
+
+- Verify the requested files exist and open successfully. Validate HTML links,
+  desktop/mobile presentation and text parity, and check workbook structure
+  and content using the supported schema or reviewed case-specific process.
+- Reconcile scope, counts, status observation dates, findings and recommendations
+  across the outputs. Retain historical evidence unchanged; label later refreshes.
+- Distinguish draft readiness from final assessment and approval. Do not advance
+  tracker stages merely because later-stage drafts exist.
+- Provide links to the actual deliverables with their draft/final status. For
+  each missing output, identify the genuine blocker rather than presenting raw
+  evidence files or an unexplained "not created yet" as the deliverable set.
+- Persist reviewed progress, limitations and the next action before a necessary
+  handoff. Do not imply background continuation unless a task is actually running.
+
+This is an assistant/operator completion check, not a new CLI validator or a
+guarantee that an assistant cannot end a response early.
+
 ## 1. Collect and reconcile evidence
 
 Collect both issue-dashboard details and the associated Security Graph

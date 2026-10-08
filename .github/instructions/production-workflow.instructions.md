@@ -1,5 +1,5 @@
 ---
-description: "CSV-first evidence reporting, stakeholder decisions and safe production remediation"
+description: "Use when investigating Wiz findings, preparing analysis, Excel reports and stakeholder emails, tracking approvals or performing safe production remediation"
 applyTo: '**'
 ---
 
@@ -27,6 +27,39 @@ Use synthetic fixtures and approved external locations such as
 - Describe interpretation, stakeholder email drafting and response translation
   as human/approved-chat work, not automated general AI capabilities.
   ServiceNow is authoritative for approvals, changes, exceptions and evidence.
+
+## Preparation continuity and completion
+
+- For an authorized end-to-end finding assessment, continue through available
+  read-only investigation, analysis HTML, Excel report and stakeholder email
+  HTML, with the required text companions. Do not stop at an initial analysis
+  or a "next steps" list while actionable preparation remains. Respect narrower
+  requests, explicit pauses and changes of scope; a question alone does not
+  authorize new work.
+- Unfinished checks are work to perform, not automatically blockers. Resolve
+  them using authorized tools and evidence. If access, evidence or a material
+  user decision genuinely prevents progress, identify the exact dependency,
+  affected deliverable and required input. Continue independent preparation
+  where safe; never invent facts or substitute unsupported final conclusions.
+- Keep incomplete outputs explicitly draft. A request for stakeholder
+  confirmation may be prepared with visible unknowns, but cannot satisfy missing
+  evidence gates or become a validated final assessment. Follow
+  `docs/WORKFLOW.md` for the preparation completion check.
+- Cloud-change approval gates execution, not already-authorized read-only
+  analysis or draft preparation. Drafting does not authorize sending an email,
+  creating a ticket, mutating Wiz or changing cloud resources.
+- Keep holds tied to the specific case and scope. Do not apply one case's
+  approval wait to another active case. Preserve tracker gates; output creation
+  is not stage completion, stakeholder approval or finding resolution.
+- Before ending a preparation task, verify each requested deliverable exists,
+  opens successfully and agrees on scope, counts, status observation dates,
+  findings and recommendations. Provide links and draft/final status, or state
+  the genuine blocker for each missing output. Evidence files are not substitutes
+  for the requested deliverables.
+- After a side question or correction, resume outstanding authorized work unless
+  the user pauses or redirects it. Persist current progress and blockers before
+  a necessary handoff; do not imply work continues in the background unless an
+  actual task is running. These are assistant guidance, not runtime enforcement.
 
 ## Evidence contract
 
