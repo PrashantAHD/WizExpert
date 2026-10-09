@@ -217,6 +217,18 @@ Use the complete template in `docs/WORKFLOW.md`.
 
 ## Learnings
 
+- Name each new private case folder `<Short-Descriptive-Topic>-<Control-ID>`
+  once the rule's purpose is verified, replacing a temporary generic folder
+  before delivering links without waiting for a separate naming request.
+  For example, use the synthetic `Model-Guardrails-wc-id-0000`, not
+  `Rule-wc-id-0000`: the topic makes the case recognizable and the ID keeps it
+  traceable; preserve existing user-chosen descriptive names.
+  On rename, refuse destination collisions, update active generators,
+  validators, tracker references and local links, retain a private relocation
+  map for historical paths, and verify hashes and link targets.
+  If Excel or another application locks the folder, ask the user to save and
+  close the affected file before retrying; never force-close their application
+  or bypass the lock by copying and deleting the folder.
 - Ground analysis in Wiz's configured rule and representative issue guidance,
   then refine it using verified permissions, cloud-service behavior and operating
   constraints rather than copying AI-generated attack claims as facts.

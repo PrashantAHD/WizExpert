@@ -464,14 +464,24 @@ snapshot, not a claim of final validated analysis.
 
 ## Report maintenance
 
-Organize private deliverables into one folder per issue or campaign, using a
-control ID and short descriptive name where available. Keep its report, analysis,
-email drafts, workflow tracker and evidence together; store shared client context
-separately. This is an operator workflow convention, not automatic CLI routing.
-On relocation, verify file hashes, update active generators and current sidecar
-paths, and retain historical evidence paths with an explicit relocation map
-rather than rewriting audit history. Never run remediation scripts while
-organizing files. Keep all these folders outside the public checkout.
+Organize private deliverables into one folder per issue or campaign. For a
+control-specific case, use `<Short-Descriptive-Topic>-<Control-ID>` once the rule's
+purpose is verified; replace a temporary generic name before delivering links,
+without waiting for a separate naming request. For example, the synthetic
+`Model-Guardrails-wc-id-0000` is recognizable and traceable, unlike
+`Rule-wc-id-0000`. Preserve existing user-chosen descriptive names. Keep the
+report, analysis, email drafts, workflow tracker and evidence together; store
+shared client context separately. This is an operator/assistant workflow
+convention, not automatic CLI routing.
+
+On relocation, refuse destination collisions, verify file hashes and link
+targets, and update active generators, validators, current tracker/sidecar paths
+and local deliverable links. Retain historical evidence paths with an explicit
+private relocation map rather than rewriting audit history. If an open workbook
+or another application locks the folder, ask the user to save and close the
+affected file before retrying; do not force-close applications or bypass the
+lock through copy-and-delete. Never run remediation scripts while organizing
+files. Keep all these folders outside the public checkout.
 
 Keep source CSVs and approved decisions outside the workbook. Explicit
 `--update --output` regenerates an existing tool-generated report in place
