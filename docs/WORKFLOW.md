@@ -10,8 +10,8 @@ the public repository.
 ## Preparation continuity and completion check
 
 For an authorized end-to-end assessment, continue through the available
-read-only investigation and the requested deliverable set: analysis HTML,
-Excel report and stakeholder email HTML, retaining the required plain-text
+read-only investigation and the requested deliverable set: internal analysis HTML,
+client-facing assessment HTML, Excel report and stakeholder email HTML, retaining the required plain-text
 companions. An initial analysis or a list of next steps is a progress update,
 not completion while actionable preparation remains. Respect narrower requests,
 explicit pauses and scope changes. After a side question or factual correction,
@@ -151,8 +151,8 @@ only" or "remove permissions" instruction. Consult current official documentatio
 when service behavior or implementation details need verification. Do not add
 unrelated best practices merely to lengthen the assessment.
 
-Carry the same reviewed findings and decisions into the HTML analysis, workbook
-and email. The learning page may explain why guidance was adapted; stakeholder
+Carry the same reviewed findings and decisions into the internal analysis,
+client-facing assessment, workbook and email. The learning page may explain why guidance was adapted; stakeholder
 outputs receive the concise applicable recommendation and requested decision,
 not the internal disposition checklist. Cutting noise must never remove material
 uncertainty, draft status, risk qualifications or approval requirements.
@@ -194,8 +194,9 @@ guidance, missing-enrichment reminders and workflow snapshots in cell notes.
 Do not add those internal reminders back to the finding narrative during audits.
 Express unconfirmed ownership or dependencies as a stakeholder review request,
 not as coaching for the preparer; never claim they have been verified.
-Use short, point-wise notes for cover observations, risks, recommendations and
-requested responses, with one point per line rather than dense paragraphs.
+Use point-wise cover observations, risks and requested responses rather than
+dense paragraphs. Give each numbered remediation option enough detail to explain
+its practical approach and material prerequisites; keep resource-row actions concise.
 Keep summary metrics compact and preserve full technical evidence in notes.
 Verify wrapped text fits the row heights without unnecessary blank space.
 Include an explicit **Risk Description**, not only a severity label or approval
@@ -261,10 +262,11 @@ from recorded completion, exclusions and blockers. It does not send the draft.
 Send only through approved communication channels. Retain the email and response
 references in ServiceNow.
 
-### HTML analysis and email companions
+### Internal analysis, client assessment and email companions
 
-Prepare analysis and all initial, progress, blocker and closure email drafts as
-standalone private HTML pages alongside plain-text copies. This is an
+Prepare internal analysis, a separate client-facing assessment, and all initial,
+progress, blocker and closure email drafts as standalone private HTML pages
+alongside plain-text copies. This is an
 operator/approved-chat deliverable convention; the CLI's execution follow-up
 command still produces plain text, not automatic HTML.
 
@@ -274,6 +276,22 @@ metrics, resource/access diagrams, observed-versus-hypothetical distinctions,
 practical options and expandable evidence or knowledge checks. Preserve the full
 source analysis and material caveats. Visuals must not imply a proven attack,
 live usage, additive relationship counts or authorization.
+
+The client-facing assessment is a separate, concise decision document, not a
+renamed internal analysis. Include the executive summary, affected scope and
+observation date, verified finding, qualified business risk, practical remediation
+options, compatibility/testing/rollback considerations and requested stakeholder
+decisions. Link the actual workbook by a relative path and keep it alongside the
+HTML when sharing, or refer clearly to the separately attached report. Do not
+link internal analysis, raw evidence or workflow trackers from the client page.
+Keep material limitations visible in stakeholder language, such as "Enforcement
+selection depends on the workload's API path and model compatibility," rather
+than exposing collection/debugging notes or removing the uncertainty altogether.
+Preserve the internal analysis unchanged when preparing the client version.
+Use self-contained, print-friendly HTML; verify print layout as well as screen
+rendering. Client-ready means suitable for stakeholder review, not completed
+effective-access validation, change authorization or permission to send.
+Incomplete assessments remain review drafts and existing outreach gates apply.
 
 Email pages keep the concise stakeholder body separate from internal review
 instructions, subject and routing metadata. Use consistent inline font, spacing
@@ -463,6 +481,15 @@ Generating a report never advances the tracker. Stages 1-2 produce a draft
 snapshot, not a claim of final validated analysis.
 
 ## Report maintenance
+
+Place detailed, numbered remediation options and material prerequisites on the
+Cover. Keep inventory and pending-status row actions concise and relevant to
+each resource; expanding the Cover does not authorize repeating all options in
+every row. Preserve existing concise wording unless row-level detail is
+requested. Keep the Cover, row actions, client assessment and email consistent
+without requiring identical length. On content changes, verify wrapped text,
+row heights and native Excel rendering; preserve evidence notes, links, statuses
+and unrelated formatting.
 
 Organize private deliverables into one folder per issue or campaign. For a
 control-specific case, use `<Short-Descriptive-Topic>-<Control-ID>` once the rule's

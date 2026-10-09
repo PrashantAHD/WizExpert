@@ -31,8 +31,9 @@ Use synthetic fixtures and approved external locations such as
 ## Preparation continuity and completion
 
 - For an authorized end-to-end finding assessment, continue through available
-  read-only investigation, analysis HTML, Excel report and stakeholder email
-  HTML, with the required text companions. Do not stop at an initial analysis
+  read-only investigation, internal analysis HTML, client-facing assessment HTML,
+  Excel report and stakeholder email HTML, with the required text companions.
+  Do not stop at an initial analysis
   or a "next steps" list while actionable preparation remains. Respect narrower
   requests, explicit pauses and changes of scope; a question alone does not
   authorize new work.
@@ -217,6 +218,24 @@ Use the complete template in `docs/WORKFLOW.md`.
 
 ## Learnings
 
+- Keep detailed, numbered remediation options and material prerequisites on the
+  workbook Cover; retain concise, resource-relevant actions in inventory and
+  pending-status rows rather than copying every option into every record.
+  For example, expand the Cover's recommendation section while preserving the
+  existing short row action unless the user explicitly requests row-level detail.
+  Keep both levels consistent and validate wrapping, row heights and native
+  Excel rendering without changing evidence, statuses or unrelated formatting.
+- Prepare a separate client-facing assessment HTML/text pair alongside the
+  internal analysis, concise email and detailed workbook; do not replace or
+  expose the internal learning page as the client attachment.
+  Include an executive summary, dated scope, verified finding and qualified
+  risk, practical options, operational safeguards and requested decisions,
+  retaining material evidence limitations in stakeholder language.
+  Exclude debugging, workflow-stage labels, raw evidence dumps and internal
+  links; use self-contained, print-friendly HTML and verify desktop/mobile,
+  print rendering, text parity and any workbook link.
+  "Client-ready" means suitable for stakeholder review, not final validation,
+  approved remediation or permission to send; preserve draft and outreach gates.
 - Name each new private case folder `<Short-Descriptive-Topic>-<Control-ID>`
   once the rule's purpose is verified, replacing a temporary generic folder
   before delivering links without waiting for a separate naming request.
