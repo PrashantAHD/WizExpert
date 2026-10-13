@@ -218,6 +218,18 @@ Use the complete template in `docs/WORKFLOW.md`.
 
 ## Learnings
 
+- Keep stakeholder update replies brief: acknowledge confirmed active use and
+  reported controls, then state the review or decision awaited without repeating
+  the initial assessment or recommending duplicate safeguards.
+  Use "We will await your further permission review," not "remediation on hold"
+  when no such issue-status option exists; private work pauses are separate
+  from tool lifecycle statuses.
+  Where the confirmed client process uses Accepted Risk / Ignored, make that
+  outcome conditional on authorized risk acceptance for the applicable scope,
+  never on active use or a promised review alone.
+  For example: "If the current access needs to be retained, we will mark the
+  applicable issues as Accepted Risk / Ignored once risk acceptance is approved";
+  drafting this reply does not authorize a status mutation or establish a fix.
 - Keep detailed, numbered remediation options and material prerequisites on the
   workbook Cover; retain concise, resource-relevant actions in inventory and
   pending-status rows rather than copying every option into every record.

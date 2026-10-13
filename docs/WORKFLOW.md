@@ -262,6 +262,32 @@ from recorded completion, exclusions and blockers. It does not send the draft.
 Send only through approved communication channels. Retain the email and response
 references in ServiceNow.
 
+### Concise stakeholder update replies
+
+For an acknowledgement of a stakeholder response, do not repeat the initial
+email's full issue description, risk explanation, attachment list and remediation
+options. Acknowledge active use and reported safeguards, then briefly state the
+review or decision awaited. Do not request duplicate controls or treat reported
+controls as independently verified.
+
+Use "We will await your further permission review" rather than "remediation on
+hold" when the issue system has no such status. A private pause in execution is
+not a lifecycle-status change. Follow the confirmed client process for accepted
+risk; do not assume that every system exposes the same labels or API values.
+Where the process uses Accepted Risk / Ignored, a suitable reply is:
+
+> Thank you for confirming active use and the existing security controls.
+>
+> We will await your further permission review. If the current access needs to
+> be retained, we will mark the applicable issues as Accepted Risk / Ignored once
+> risk acceptance is approved.
+
+Active use, existing safeguards or a promise to review permissions does not
+constitute risk acceptance. Retain the rationale, authorized decision and exact
+scope under the approval process below. Drafting or approving email wording
+does not authorize sending, changing issue statuses or declaring remediation.
+Keep HTML and plain-text reply companions aligned.
+
 ### Internal analysis, client assessment and email companions
 
 Prepare internal analysis, a separate client-facing assessment, and all initial,
