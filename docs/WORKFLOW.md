@@ -73,8 +73,10 @@ and relationship multiplicity rather than forcing the totals to match.
 Missing fields, incomplete retrieval, ambiguous matches, conflicting facts and
 unexplained differences must be recorded and resolved before validated analysis
 or final reporting. Do not claim error-free collection or full coverage from a
-sample page. See the README for the strict CLI import contract; other finding
-categories require a reviewed case-specific process.
+sample page. The local CLI supports only UTF-8 AWS/Azure privileged-credential
+Security Graph CSVs, optionally enriched with matching issue exports. An issue
+export alone is not supported. Use `python -m remediation --help` for local
+options; other finding categories require a reviewed case-specific process.
 
 Collect the finding title/control, reported severity, observation times, exact
 resource and cloud scope, ownership, permissions, exposure, dependencies,
