@@ -1,39 +1,124 @@
+<div align="center">
+
 # Cloud Security Remediations
 
-**Investigate Wiz findings, prepare clear reports and coordinate remediation
-through an assistant-led Wiz MCP workflow.**
+### From Wiz findings to informed action.
+
+**Evidence-led investigation. Clear reporting. Approval-controlled remediation.**
+
+**Wiz MCP** &nbsp; / &nbsp; **AWS + Azure** &nbsp; / &nbsp; **Assistant-led workflow**
+
+[Workflow](#eight-stage-remediation-workflow) &nbsp; · &nbsp;
+[Setup](#setup) &nbsp; · &nbsp;
+[Example requests](#start-an-investigation) &nbsp; · &nbsp;
+[Privacy](#safety-and-privacy) &nbsp; · &nbsp;
+[Guides](#guides)
+
+</div>
+
+---
 
 Describe the finding or reporting scope in your approved assistant environment.
-The assistant uses authorized Wiz tools to collect evidence, explain the risk
-and prepare deliverables for review.
+Use authorized Wiz MCP tools to collect evidence, understand the risk and prepare
+deliverables for review, without losing sight of who approves the next step.
 
-**Request → Collect from Wiz → Analyze → Report → Approve → Remediate → Verify**
+| **01 / Understand** | **02 / Communicate** | **03 / Act with approval** |
+| :--- | :--- | :--- |
+| Explain findings using actual resource, permission and exposure evidence. | Turn the investigation into readable reports and stakeholder drafts. | Plan scoped changes, verify outcomes and retain the evidence. |
 
-[Setup](#setup) · [Start an investigation](#start-an-investigation) ·
-[What gets automated](#what-gets-automated) · [Safety](#safety-and-privacy)
-
-> **Where the automation runs:** Wiz MCP operates in your configured assistant
+> [!IMPORTANT]
+> **Connected through your assistant, not a hosted service.**
+> Wiz MCP operates in your configured assistant
 > environment, not inside this repository's Python CLI. This repository provides
 > supporting local tooling and documented review practices; cloning or installing
 > it does not create a Wiz connection or an unattended remediation service.
 
 ## What you get
 
-- **Plain-language explanations:** what Wiz found, why it matters and what the
-  evidence actually supports.
-- **Scoped investigation:** affected resources, permissions, exposure and
-  relevant dependencies, where available through the authorized tools.
-- **Practical recommendations:** remediation options tailored to the environment,
-  with prerequisites, limitations and approval requirements.
-- **Review-ready deliverables:** requested Excel reports, assessments and
-  stakeholder email drafts, prepared and checked by the assistant/operator.
-- **Traceable follow-up:** retained evidence, reporting cutoffs, decisions,
-  blockers and verification results.
+| Deliverable | Purpose |
+| :--- | :--- |
+| **Risk explanation** | What Wiz found, why it matters and what the evidence supports |
+| **Scoped assessment** | Affected resources, access paths, safeguards and evidence gaps |
+| **Practical remediation plan** | Environment-aware options, prerequisites and approval requirements |
+| **Excel report and stakeholder drafts** | Reviewed findings, recommendations and a clear decision request |
+| **Progress and verification history** | Observation cutoffs, decisions, blockers and retained evidence |
 
 Deliverables depend on the available evidence, local tools and requested scope.
 There is no universal report generator for every finding type.
 
+## Eight-stage remediation workflow
+
+**Automate preparation. Keep decisions accountable. Verify before closure.**
+
+```mermaid
+flowchart TB
+    subgraph evidence["READ-ONLY INVESTIGATION AND PREPARATION"]
+        A["1. Collect and reconcile<br/>Wiz MCP - complete scoped evidence"]
+        B["2. Explain and analyze<br/>Risk, causes and practical options"]
+        C["3. Prepare reports and outreach<br/>Validate deliverables and prepare drafts"]
+        A --> B --> C
+    end
+
+    D{"4. Scoped approval<br/>Authorized to proceed?"}
+    H["Await decision or revise scope<br/>No changes executed"]
+
+    subgraph change["AUTHORIZED OPERATOR CHANGE AND VERIFICATION"]
+        E["5. Prepare the change<br/>Prechecks, recovery and rollback"]
+        F["6. Execute approved changes<br/>Authorized operator and tooling"]
+        G["7. Verify results<br/>Technical checks, owners and fresh Wiz evidence"]
+        E --> F --> G
+    end
+
+    V{"Closure criteria met?"}
+    R["Retain blockers and reassess<br/>New scope requires new approval"]
+    I["8. Report outcomes and close<br/>Record disposition and preserve evidence"]
+
+    C --> D
+    D -->|Not yet| H
+    H -.->|Reviewed scope| C
+    D -->|Approved scope only| E
+    G --> V
+    V -->|No| R
+    R -.-> B
+    V -->|Yes| I
+
+    classDef investigate fill:#EAF2FF,stroke:#2563EB,color:#17365D,stroke-width:2px
+    classDef gate fill:#FFF4D6,stroke:#B7791F,color:#694400,stroke-width:2px
+    classDef action fill:#E5F5F2,stroke:#168575,color:#14594F,stroke-width:2px
+    classDef pending fill:#F1F5F9,stroke:#64748B,color:#334155
+    classDef complete fill:#16324F,stroke:#16324F,color:#FFFFFF,stroke-width:2px
+    class A,B,C investigate
+    class D,V gate
+    class E,F,G action
+    class H,R pending
+    class I complete
+```
+
+| Blue: prepare | Amber: decide | Teal: act and verify | Navy: close |
+| :--- | :--- | :--- | :--- |
+| Read-only collection and reviewed analysis | Explicit authorization and closure gates | Operator-controlled changes within approved scope | Evidence-backed outcome, not an assumed fix |
+
+**In plain language:** collect → analyze → report → obtain approval → prepare →
+execute → verify → close. Without approval, wait or revise the scope. If
+verification fails, retain blockers and reassess rather than claiming closure.
+
+> [!NOTE]
+> The diagram describes a **human-reviewed process**, not eight autonomous CLI
+> features. Security creates the required ticket through the approved process
+> before outreach. ServiceNow remains authoritative for approvals, changes,
+> exceptions and closure.
+
+Read the [workflow guide](docs/WORKFLOW.md) for the detailed evidence and approval gates.
+
+---
+
 ## Setup
+
+**Five steps to a verified, read-only connection.**
+
+| 1 | 2 | 3 | 4 | 5 |
+| :--- | :--- | :--- | :--- | :--- |
+| Approved assistant | Wiz MCP connection | Open the project | Verify access | Private output folder |
 
 ### 1. Prepare your assistant environment
 
@@ -71,7 +156,10 @@ Set-Location .\Cloud-Security-Remediations
 Open the folder in your approved assistant environment. If you already have the
 project, open the existing checkout instead.
 
-**Optional local Python setup:** if you will use the repository's supporting
+<details>
+<summary><strong>Optional: install the supporting Python tools</strong></summary>
+
+If you will use the repository's supporting
 Python tools, install [Python 3.12+](https://www.python.org/downloads/) and run:
 
 ```powershell
@@ -83,6 +171,8 @@ python -m venv .venv
 Stop if a command fails. Virtual-environment activation and PowerShell
 execution-policy changes are not required. This installs local dependencies
 only; it does not configure MCP or add report-format capabilities to the assistant.
+
+</details>
 
 ### 4. Verify access before investigating
 
@@ -109,6 +199,8 @@ and drafts together for the investigation, with access controls appropriate to
 their sensitivity.
 
 ## Start an investigation
+
+**Copy a request, replace the placeholders, confirm the scope.**
 
 Give the assistant an issue/control identifier or a precise reporting scope.
 Include accounts/projects, statuses, severities and the deliverables you need.
@@ -150,27 +242,15 @@ report request does not install a scheduler.
 | **Remediation planning** | Assistant prepares scoped steps, prechecks and rollback guidance | Explicit approval is required before execution |
 | **Verification** | Assistant reviews execution evidence and fresh Wiz observations | Execution success or scanner resolution alone does not prove closure |
 
-**Not provided out of the box:** a hosted Wiz connector, universal report
-generation, scheduled collection, automatic email/ticket delivery or autonomous
-cloud remediation.
-
-## Eight-stage remediation workflow
-
-1. **Collect and reconcile** the complete in-scope evidence.
-2. **Explain and analyze** the risk and practical options.
-3. **Prepare reports and outreach**; Security creates the required ticket through
-   the approved process before stakeholder outreach.
-4. **Obtain scoped approval**, including exclusions and access to retain.
-5. **Prepare the change**, with current-state checks, recovery and rollback.
-6. **Execute approved changes** through an authorized operator and tooling.
-7. **Verify results**, including owner checks and fresh Wiz evidence.
-8. **Report outcomes and close** only when the agreed criteria are met.
-
-These are human-reviewed stages, not eight autonomous product features.
-ServiceNow remains authoritative for approvals, changes, exceptions and closure.
-See the [workflow guide](docs/WORKFLOW.md) for detailed evidence and approval gates.
+> [!WARNING]
+> **Not provided out of the box:** a hosted Wiz connector, universal report
+> generation, scheduled collection, automatic email/ticket delivery or autonomous
+> cloud remediation.
 
 ## Troubleshooting
+
+<details>
+<summary><strong>Connection, evidence and report troubleshooting</strong></summary>
 
 | Problem | Next step |
 | --- | --- |
@@ -182,12 +262,20 @@ See the [workflow guide](docs/WORKFLOW.md) for detailed evidence and approval ga
 | An output workbook is locked | Close it after saving your work, then retry; never discard user edits automatically |
 | A daily update did not run | This workflow is on demand unless a separate approved scheduler has actually been configured |
 
+</details>
+
+---
+
 ## Safety and privacy
 
 ### Public code, private data
 
-**The public repository is for reusable code, documentation and synthetic tests,
-not client data.** In this workflow, collected Wiz evidence, generated reports
+> [!IMPORTANT]
+> **Public code. Private evidence. No automatic publishing.**
+> The public repository is for reusable code, documentation and synthetic tests,
+> not client data.
+
+In this workflow, collected Wiz evidence, generated reports
 and stakeholder drafts are saved in your designated private folder outside the
 repository. Report preparation does not automatically commit, push or publish
 these files to GitHub.
@@ -235,8 +323,16 @@ be bypassed or misconfigured.
 
 ## Maintainer
 
+<div align="center">
+
 **[Prashant Kumar](https://github.com/PrashantAHD)**
 
 Cloud Security Engineer @AHEAD
 
 [GitHub](https://github.com/PrashantAHD) · [LinkedIn](https://www.linkedin.com/in/iprashantkr)
+
+---
+
+**Evidence before conclusions. Approval before changes. Verification before closure.**
+
+</div>
