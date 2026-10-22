@@ -135,6 +135,22 @@ Obtain the approved server endpoint or launch command and authentication
 instructions from your Wiz/platform administrator. Request only the permissions
 needed for read-only investigation.
 
+#### Before authentication: sign in to the client's SSO
+
+> [!IMPORTANT]
+> **For client SSO-based access, sign in to the client's SSO in Chrome before
+> starting Wiz MCP authentication.** Use your authorized client identity and
+> complete any required MFA, then launch Wiz through the approved SSO portal
+> to confirm you can access the intended organization.
+
+When VS Code opens the authentication page, make sure it opens in that same
+signed-in Chrome profile, not a personal profile or an incognito window. If it
+opens in another browser/profile, use the organization-approved browser session
+and restart authentication as needed. A signed-in SSO session does not grant
+Wiz access by itself: your identity still needs the required Wiz permissions.
+Follow your client's policy if a different browser or authentication method is
+required.
+
 #### First-time connection in VS Code
 
 1. Press **Ctrl+Shift+P** to open the Command Palette.
