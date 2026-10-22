@@ -131,18 +131,53 @@ server. It does not itself grant Wiz permissions or authorize remediation.
 
 ### 2. Connect the approved Wiz MCP server
 
-Obtain the server connection details and authentication instructions from your
-Wiz/platform administrator, then:
+Obtain the approved server endpoint or launch command and authentication
+instructions from your Wiz/platform administrator. Request only the permissions
+needed for read-only investigation.
 
-1. Add the approved server through your assistant host's MCP configuration.
-2. Authenticate using your organization's supported method.
-3. Request only the permissions needed for read-only investigation.
-4. Enable the relevant tools and review the host's tool-approval settings.
+#### First-time connection in VS Code
+
+1. Press **Ctrl+Shift+P** to open the Command Palette.
+2. Run **MCP: Add Server**.
+3. Select the connection type supplied by your administrator:
+   **HTTP (HTTP or Server-Sent Events)** for an endpoint, or **Command (stdio)**
+   for an approved local launch command. Do not guess a Wiz endpoint.
+4. Enter the approved connection details and a server name such as `wiz`.
+5. Choose an approved user/global configuration outside this public checkout.
+   In current Copilot setups this can appear as **Global → Copilot Global**;
+   the destination depends on your VS Code version and selected agent harness.
+6. Review the server trust prompt and complete the approved sign-in flow.
+   Enable the needed tools in your assistant session and review tool approvals.
+
+#### Start, stop and authenticate an existing server
+
+**Ctrl+Shift+P → MCP: List Servers → select your Wiz server → choose an action**
+
+| Action | What to do |
+| :--- | :--- |
+| **Start Server** | Start the configured connection and respond to any trust or sign-in prompts |
+| **Authenticate / sign in, when offered** | Complete the organization's supported authentication flow; this may be prompted during startup rather than shown as a separate menu action |
+| **Stop Server** | Stop the current connection; a later tool request may start it again |
+| **Restart Server** | Restart after an approved configuration change or troubleshooting; if unavailable, stop and start |
+| **Enable / Disable** | Control whether the server is available to the assistant; disable it when stopping alone is not sufficient |
+
+Available actions depend on server state, authentication method, VS Code version
+and agent harness. If there is no separate **Authenticate** option, follow the
+startup sign-in prompt or your administrator's instructions; do not paste
+tokens into chat. If startup fails, inspect the server output before retrying
+and redact sensitive details before sharing logs.
+
+**A running server is not proof of working Wiz access.** Complete the read-only
+verification in step 4 below before starting an investigation.
 
 The endpoint, configuration format and authentication method depend on your
 deployment and assistant host. This repository does **not** supply a server,
 credentials or a connection installer. Do not copy authentication values into
 source files, prompts or reports.
+
+Official VS Code guidance:
+[Add MCP servers](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
+and [Manage MCP servers](https://code.visualstudio.com/docs/agents/run/manage-mcp-servers).
 
 ### 3. Open this project
 
