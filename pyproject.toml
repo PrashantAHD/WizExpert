@@ -19,6 +19,7 @@ dev = [
     "ruff>=0.12,<1",
     "bandit>=1.8.6,<2",
     "pip-audit>=2.9,<3",
+    "certifi>=2026.10.19",
 ]
 
 [project.scripts]
