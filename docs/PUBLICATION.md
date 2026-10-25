@@ -8,8 +8,9 @@ boundary: an ignored file can still be force-added.
 
 ## Local verification and push gate
 
-Create `.venv` and install the development extra (`python -m pip install -e
-".[dev]"`). Install the hook **for this repository only**:
+Create `.venv` and install the development and governance extras (`python -m pip
+install -e ".[dev,governance]"`); the governance tests need both. Install the hook
+**for this repository only**:
 
 ```powershell
 git config --local core.hooksPath .githooks

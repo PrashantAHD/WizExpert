@@ -13,6 +13,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+governance = [
+    "python-pptx>=1.0.2,<2",
+    "Pillow>=10.0,<14",
+    "rich>=13.0,<16",
+    "questionary>=2.0,<3",
+]
 dev = [
     "pip>=26.2,<27",
     "pytest>=8.3,<10",
