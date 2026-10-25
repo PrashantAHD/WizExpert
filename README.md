@@ -419,6 +419,25 @@ be bypassed or misconfigured.
 - Review every deliverable before sharing. Preparation does not authorize sending,
   ticket creation, finding-status changes or cloud actions.
 
+### Built-in security controls
+
+These protections are implemented in the code and covered by tests. They reduce
+risk from malformed or hostile inputs; they do not replace review.
+
+| Risk | Control |
+| --- | --- |
+| Malicious workbook XML (entity expansion, external entities) | Workbooks are read with `defusedxml`; `openpyxl` is pinned to it even when the governance extra installs `lxml`. PowerPoint templates are parsed with entity resolution disabled |
+| Formula injection in Excel outputs | Imported values are always stored as literal text, never as formulas; the CSV report and remediation update also recheck generated workbooks for unexpected formulas or external links |
+| Formula injection in CSV outputs | The governance actions CSV prefixes values starting with `=`, `+`, `-`, `@`, tab or CR with `'` |
+| Overwriting or redirecting files | Symlinked inputs/outputs are refused, new files are created exclusively, and replacements are staged, hash-checked and backed up before publishing |
+| Concurrent or interrupted runs | Per-month lock files and recovery records stop parallel runs and require explicit recovery after a crash |
+| Wrong or swapped evidence | Templates, prior decks and history files are bound by SHA-256; counts, dates and partitions are validated before saving |
+| Oversized inputs | The CSV report and workflow tracker bound text, row, cell and file sizes |
+| Client data reaching GitHub | An offline publication guard scans tracked files, staged changes and all reachable history for client names, account IDs, addresses and secrets; Bandit, Ruff and pytest run before every push and in CI, plus an opt-in dependency vulnerability audit |
+| Client details in source | Client names, baselines and branding live only in a private client profile outside the repository |
+
+See [publication checks](docs/PUBLICATION.md) for how the guard and audit run.
+
 ## Guides
 
 | Guide | Covers |
