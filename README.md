@@ -45,6 +45,7 @@ deliverables for review, without losing sight of who approves the next step.
 | **Practical remediation plan** | Environment-aware options, prerequisites and approval requirements |
 | **Excel report and stakeholder drafts** | Reviewed findings, recommendations and a clear decision request |
 | **Progress and verification history** | Observation cutoffs, decisions, blockers and retained evidence |
+| **Monthly governance reporting** | Per-client governance workbook, executive dashboard and governance-call deck from approved templates ([guide](docs/GOVERNANCE.md)) |
 
 Deliverables depend on the available evidence, local tools and requested scope.
 There is no universal report generator for every finding type.
@@ -314,6 +315,27 @@ These are assistant requests, not built-in CLI commands. Case-specific report
 layouts and recurrence rules must be agreed and retained privately. A daily
 report request does not install a scheduler.
 
+## Monthly governance reporting
+
+**One tool, any client: the client's rules live in a private profile.**
+
+```powershell
+python -m pip install -e ".[governance]"
+wizexpert governance setup      # first time per client: name, snapshot day, baseline, logo
+wizexpert governance monthly --month 2026-10 --input <csv...> `
+  --previous-report <last workbook> --template <last dashboard> --output-dir <private folder>
+```
+
+| Command | Builds |
+| --- | --- |
+| `wizexpert governance monthly` | The month's governance workbook and executive dashboard, with backups |
+| `wizexpert governance workbook` | The governance workbook on its own (new, append or remove severities) |
+| `wizexpert governance dashboard` | The three-slide executive dashboard from a reviewed workbook |
+| `wizexpert governance deck` | The ten-slide operational governance deck from a reviewed Wiz snapshot |
+
+Profiles, templates, exports and generated reports are private client material;
+keep them outside this repository. See the [governance guide](docs/GOVERNANCE.md).
+
 ## What gets automated
 
 | Activity | How it works | Review boundary |
@@ -327,7 +349,8 @@ report request does not install a scheduler.
 
 > [!WARNING]
 > **Not provided out of the box:** a hosted Wiz connector, universal report
-> generation, scheduled collection, automatic email/ticket delivery or autonomous
+> generation (governance reporting uses each client's approved templates),
+> scheduled collection, automatic email/ticket delivery or autonomous
 > cloud remediation.
 
 ## Troubleshooting
@@ -402,6 +425,8 @@ be bypassed or misconfigured.
 | --- | --- |
 | [Workflow](docs/WORKFLOW.md) | Evidence collection, analysis, stakeholder communication and approval gates |
 | [Execution follow-up](docs/EXECUTION.md) | Supported local-account evidence imports and blocker tracking |
+| [Governance reporting](docs/GOVERNANCE.md) | Client profiles, monthly workbook, executive dashboard and governance deck |
+| [Governance snapshot](docs/GOVERNANCE-SNAPSHOT.md) | Read-only collection and schema for the operational governance deck |
 | [Development and publication](docs/PUBLICATION.md) | Local verification, development dependencies and pre-push checks |
 
 ## Maintainer
