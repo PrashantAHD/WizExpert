@@ -19,6 +19,12 @@ Use synthetic fixtures and approved external locations such as
   reach the same reporting interface. Runtime dependencies: openpyxl and
   defusedxml for hardened workbook XML reads;
   Python minimum: 3.12.
+- Governance reporting (`wizexpert governance ...`, source in
+  `wizexpert/governance`) is an optional extra (`.[governance]`: python-pptx,
+  Pillow, rich, questionary); core commands must never import it. Client rules
+  come from a private client profile, never from source. Keep `openpyxl` pinned
+  to defusedxml (`OPENPYXL_LXML=False` in `wizexpert/__init__.py`) because the
+  extra installs lxml.
 - Preserve the legacy `remediation` module aliases, `cloud-remediations`
   command and support for pre-rename workbooks. New source belongs in
   `wizexpert`; aliases must delegate rather than duplicate implementation.

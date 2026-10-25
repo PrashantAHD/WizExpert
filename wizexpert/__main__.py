@@ -5,9 +5,54 @@ from collections.abc import Sequence
 
 from wizexpert.csv_report import main as report_main
 
+GOVERNANCE_COMMANDS = {
+    "setup": "wizexpert.governance.profile",
+    "workbook": "wizexpert.governance.wiz_report",
+    "dashboard": "wizexpert.governance.dashboard",
+    "monthly": "wizexpert.governance.monthly",
+    "deck": "wizexpert.governance.governance",
+}
+GOVERNANCE_USAGE = (
+    "usage: wizexpert governance {setup,workbook,dashboard,monthly,deck} [options]\n\n"
+    "  setup      create or update the client profile (client name, snapshot day, baseline, logo)\n"
+    "  workbook   build or modify the governance Excel workbook from Wiz CSV exports\n"
+    "  dashboard  build the executive dashboard deck from a reviewed workbook\n"
+    "  monthly    create or refresh the month's workbook + dashboard pair, with backups\n"
+    "  deck       build the ten-slide operational governance deck from a reviewed snapshot\n\n"
+    "Requires the governance extra: pip install \"wizexpert[governance]\"\n"
+)
+
+
+def governance_main(arguments: list[str]) -> int:
+    if not arguments or arguments[0] not in GOVERNANCE_COMMANDS:
+        print(GOVERNANCE_USAGE, file=sys.stderr if arguments else sys.stdout, end="")
+        return 0 if not arguments or arguments[0] in {"-h", "--help"} else 2
+    from importlib import import_module
+
+    command, rest = arguments[0], arguments[1:]
+    try:
+        module = import_module(GOVERNANCE_COMMANDS[command])
+    except ModuleNotFoundError as error:
+        print(
+            f"Governance reporting needs an optional dependency ({error.name}). "
+            'Install it with: pip install "wizexpert[governance]"',
+            file=sys.stderr,
+        )
+        return 2
+    original = sys.argv
+    # Some governance commands read sys.argv directly; present them their own command line.
+    sys.argv = [f"wizexpert governance {command}", *rest]
+    try:
+        result = module.main(rest) if command in {"setup", "deck"} else module.main()
+    finally:
+        sys.argv = original
+    return result or 0
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "governance":
+        return governance_main(arguments[1:])
     if arguments and arguments[0] == "workflow":
         from wizexpert.workflow import main as workflow_main
 
