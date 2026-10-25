@@ -68,7 +68,8 @@ Shallow repositories fail closed; fetch complete history before checking.
 Only the root project metadata files explicitly listed in the guard,
 application source under `wizexpert` and compatibility aliases under
 `remediation`, Python tests under `tests`, Python and
-PowerShell tools under `scripts`, Markdown under `docs`, workflow YAML directly
+PowerShell tools under `scripts`, Markdown and SVG images (text, scanned like
+any other file) under `docs`, workflow YAML directly
 under `.github/workflows`, the exact instruction file
 `.github/instructions/production-workflow.instructions.md`, and the pre-push
 hook are allowed. Other instruction paths are not implicitly allowed. File names and
