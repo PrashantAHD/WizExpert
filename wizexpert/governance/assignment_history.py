@@ -127,11 +127,20 @@ def find_gaps(
     )
 
 
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_text(value: object) -> str:
+    """Make a value inert in spreadsheet apps: text starting like a formula gets a leading quote."""
+    text = "" if value is None else str(value)
+    return "'" + text if text.startswith(FORMULA_PREFIXES) else text
+
+
 def write_actions_csv(gaps: list[dict], path: Path) -> None:
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=GAP_FIELDS)
         writer.writeheader()
-        writer.writerows({key: gap.get(key) or "" for key in GAP_FIELDS} for gap in gaps)
+        writer.writerows({key: csv_text(gap.get(key) or "") for key in GAP_FIELDS} for gap in gaps)
 
 
 def action_lines(gaps: list[dict]) -> list[str]:
