@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" alt="WizExpert logo" width="132">
-
-# WizExpert
+<h1><img src="docs/assets/logo.svg" alt="WizExpert" width="380"></h1>
 
 ### Analyze. Report. Validate. Coordinate. Remediate.
 

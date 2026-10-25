@@ -1,19 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="168" height="168" viewBox="0 0 168 168" role="img" aria-labelledby="t">
+<svg xmlns="http://www.w3.org/2000/svg" width="824" height="256" viewBox="0 0 412 128" role="img" aria-labelledby="t">
   <title id="t">WizExpert</title>
   <defs>
-    <linearGradient id="shield" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="40" x2="152" y2="110">
       <stop offset="0" stop-color="#1D4ED8"/>
-      <stop offset="0.55" stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#0EA5A4"/>
+      <stop offset="1" stop-color="#0EA5E9"/>
     </linearGradient>
-    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    <linearGradient id="s" gradientUnits="userSpaceOnUse" x1="74" y1="14" x2="106" y2="46">
+      <stop offset="0" stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#F59E0B"/>
     </linearGradient>
   </defs>
-  <path d="M84 6 L148 28 V78 C148 119 121 147 84 162 C47 147 20 119 20 78 V28 Z" fill="url(#shield)"/>
-  <path d="M84 6 L148 28 V78 C148 119 121 147 84 162 C47 147 20 119 20 78 V28 Z" fill="none" stroke="url(#edge)" stroke-width="3"/>
-  <path d="M40 56 L58 116 L84 76 L110 116 L128 56" fill="none" stroke="#FFFFFF" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="84" cy="44" r="7" fill="#5EEAD4"/>
-  <path d="M129 22 l3.5 8 8 3.5 -8 3.5 -3.5 8 -3.5 -8 -8 -3.5 8 -3.5 Z" fill="#FDE68A"/>
+  <g fill="none" stroke="url(#g)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 52 L27 98 L41 62 L55 98 L68 52"/><path d="M90 54 V98"/><path d="M112 52 H150 L112 98 H152"/>
+  </g>
+  <path d="M90 14 C92 26 94 28 106 30 C94 32 92 34 90 46 C88 34 86 32 74 30 C86 28 88 26 90 14 Z" fill="url(#s)"/>
+  <g fill="none" stroke="#14B8A6" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M172 81 H206 A17 17 0 1 0 202 92"/><path d="M218 64 L244 98 M244 64 L218 98"/><path d="M258 66 V118 M258 81 a17 17 0 1 0 34 0 a17 17 0 1 0 -34 0"/><path d="M304 81 H338 A17 17 0 1 0 334 92"/><path d="M350 98 V72 Q350 64 360 64 H370"/><path d="M388 52 V90 Q388 98 398 98 H402 M380 66 H402"/>
+  </g>
 </svg>
