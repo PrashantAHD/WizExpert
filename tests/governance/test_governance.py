@@ -931,7 +931,7 @@ class GovernanceTests(unittest.TestCase):
             self.build()
         self.payload["open"]["LOW"] = 3
         self.build(refresh=True)
-        backups = list((self.root / "report-backups").glob(f"governance-*\\{output.name}"))
+        backups = list((self.root / "report-backups").glob(f"governance-*/{output.name}"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), old)
         self.payload["prior"]["source_sha256"] = "0" * 64
