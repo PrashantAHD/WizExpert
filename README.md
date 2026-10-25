@@ -134,12 +134,13 @@ into how it is used.
 | Ruff | Every push and CI run | Code errors and unsafe constructs |
 | Dependency audit (`pip-audit`) | Every push (local hook) | Known vulnerabilities in installed packages |
 | GitHub secret scanning and push protection | Every push to GitHub | Committed credentials |
+| Dependabot | Continuously | Newly disclosed vulnerabilities in dependencies, with automatic update pull requests |
 
 CI runs with a read-only token, no secrets and GitHub actions pinned to exact
 commits. Dependencies are kept minimal, version-bounded and raised to patched
 releases when advisories appear; the governance extra is optional, so the core
-install stays small. Changes reach `main` through pull requests with passing
-checks.
+install stays small. `main` is protected: changes merge only through pull
+requests whose `verify` check passes, and force-pushes or deletion are blocked.
 
 **Protections in the tools themselves**
 
