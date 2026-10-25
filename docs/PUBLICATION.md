@@ -65,7 +65,8 @@ refspecs. This conservative policy may reject unrelated local historical refs.
 Shallow repositories fail closed; fetch complete history before checking.
 
 Only the root project metadata files explicitly listed in the guard,
-application source under `remediation`, Python tests under `tests`, Python and
+application source under `wizexpert` and compatibility aliases under
+`remediation`, Python tests under `tests`, Python and
 PowerShell tools under `scripts`, Markdown under `docs`, workflow YAML directly
 under `.github/workflows`, the exact instruction file
 `.github/instructions/production-workflow.instructions.md`, and the pre-push

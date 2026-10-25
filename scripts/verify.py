@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         guard,
         ["-m", "pytest", "-q"],
         ["-m", "ruff", "check", "."],
-        ["-m", "bandit", "-q", "-r", "remediation", "scripts"],
+        ["-m", "bandit", "-q", "-r", "wizexpert", "remediation", "scripts"],
     ]
     try:
         for arguments in checks:

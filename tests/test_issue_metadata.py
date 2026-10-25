@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from remediation.issue_metadata import Enrichment, enrich_records
+from wizexpert.issue_metadata import Enrichment, enrich_records
 
 
 @pytest.fixture

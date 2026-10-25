@@ -203,8 +203,8 @@ and [Manage MCP servers](https://code.visualstudio.com/docs/agents/run/manage-mc
 With [Git](https://git-scm.com/downloads) installed, run in PowerShell:
 
 ```powershell
-git clone https://github.com/PrashantAHD/Cloud-Security-Remediations.git
-Set-Location .\Cloud-Security-Remediations
+git clone https://github.com/PrashantAHD/WizExpert.git
+Set-Location .\WizExpert
 ```
 
 Open the folder in your approved assistant environment. If you already have the
@@ -220,6 +220,7 @@ Python tools, install [Python 3.12+](https://www.python.org/downloads/) and run:
 python --version
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\wizexpert.exe --help
 ```
 
 Stop if a command fails. Virtual-environment activation and PowerShell
@@ -227,6 +228,34 @@ execution-policy changes are not required. This installs local dependencies
 only; it does not configure MCP or add report-format capabilities to the assistant.
 
 </details>
+
+#### Existing installations
+
+The repository, Python distribution and canonical module are now **WizExpert**,
+`wizexpert` and `python -m wizexpert`. The installed command is `wizexpert`.
+The old `cloud-remediations` command and `remediation` module imports remain
+compatibility aliases, including the workflow and execution-update entry points.
+Previously generated workbooks and private workflow records remain supported;
+the rename does not rewrite reports, evidence, approvals or Git history.
+New reports without an explicit output path go to
+`%LOCALAPPDATA%\WizExpert\reports`. Existing files under
+`%LOCALAPPDATA%\CloudSecurityRemediations\reports` stay untouched and can still
+be updated using their explicit paths.
+
+For an existing editable installation, remove the old distribution before
+installing the renamed one so the packages do not compete for the legacy aliases:
+
+```powershell
+git remote set-url origin https://github.com/PrashantAHD/WizExpert.git
+.\.venv\Scripts\python.exe -m pip uninstall cloud-security-remediations
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\wizexpert.exe --help
+```
+
+Developers should use `-e '.[dev]'` for the install step. If moving a checkout,
+recreate its virtual environment at the new location; Windows console launchers
+and editable installations can contain absolute paths. Keep private output
+folders outside the checkout and preserve existing files during migration.
 
 ### 4. Verify access before investigating
 

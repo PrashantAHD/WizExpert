@@ -75,7 +75,7 @@ unexplained differences must be recorded and resolved before validated analysis
 or final reporting. Do not claim error-free collection or full coverage from a
 sample page. The local CLI supports only UTF-8 AWS/Azure privileged-credential
 Security Graph CSVs, optionally enriched with matching issue exports. An issue
-export alone is not supported. Use `python -m remediation --help` for local
+export alone is not supported. Use `python -m wizexpert --help` for local
 options; other finding categories require a reviewed case-specific process.
 
 Collect the finding title/control, reported severity, observation times, exact
@@ -471,7 +471,7 @@ audit trail.
 For example, after actually completing and reviewing Stage 1:
 
 ```powershell
-.\.venv\Scripts\python.exe -m remediation workflow record `
+.\.venv\Scripts\python.exe -m wizexpert workflow record `
   --tracker "C:\PrivateReports\finding.workflow.json" --stage 1 --status complete `
   --summary "Both sources reconciled for the agreed scope." `
   --next-action "Explain the validated finding and remediation options." `

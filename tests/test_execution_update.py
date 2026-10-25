@@ -13,7 +13,7 @@ from openpyxl import load_workbook as read_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Font, PatternFill
 
-from remediation.execution_update import parse_result, update_report
+from wizexpert.execution_update import parse_result, update_report
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 HEADERS = [
@@ -689,7 +689,7 @@ def test_scope_change_requires_reconciliation(workspace):
 def test_publish_failure_restores_memory_and_removes_unsent_draft(
     workspace, monkeypatch, existing_memory,
 ):
-    from remediation import execution_update
+    from wizexpert import execution_update
 
     report = workbook(workspace)
     if existing_memory:
@@ -715,7 +715,7 @@ def test_publish_failure_restores_memory_and_removes_unsent_draft(
 
 
 def test_cli_routes_existing_csv_and_new_update_command(workspace, monkeypatch, capsys):
-    from remediation import __main__, execution_update
+    from wizexpert import __main__, execution_update
 
     calls = []
     monkeypatch.setattr(__main__, "report_main", lambda args: calls.append(args) or 0)

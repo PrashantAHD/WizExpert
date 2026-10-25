@@ -58,7 +58,7 @@ review unusually long notes in Excel.
 ## Import results
 
 ```powershell
-.\.venv\Scripts\python.exe -m remediation update-remediation `
+.\.venv\Scripts\python.exe -m wizexpert update-remediation `
   --report "C:\Reports\local-account-report.xlsx" `
   --result "C:\Evidence\result-one.txt" `
   --result "C:\Evidence\result-two.txt" `
@@ -74,7 +74,7 @@ To draft an update from the existing report and available private memory without
 changing either:
 
 ```powershell
-.\.venv\Scripts\python.exe -m remediation update-remediation `
+.\.venv\Scripts\python.exe -m wizexpert update-remediation `
   --report "C:\Reports\local-account-report.xlsx" --email-only `
   --email-output "C:\Reports\stakeholder-draft.txt"
 ```
@@ -128,7 +128,7 @@ example-account,example-vm,example-region,Blocked,VM is deallocated,Leave stoppe
 ```
 
 ```powershell
-.\.venv\Scripts\python.exe -m remediation update-remediation `
+.\.venv\Scripts\python.exe -m wizexpert update-remediation `
   --report "C:\Reports\local-account-report.xlsx" `
   --blockers "C:\Evidence\blockers.csv" `
   --email-output "C:\Reports\blocker-update.txt"

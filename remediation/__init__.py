@@ -1,1 +1,1 @@
-"""Local cloud security remediation workspace."""
+"""Compatibility package for scripts written before the WizExpert rename."""

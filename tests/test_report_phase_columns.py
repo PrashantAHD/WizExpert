@@ -1,6 +1,6 @@
 import pytest
 
-from remediation.csv_layout import follow_up_columns
+from wizexpert.csv_layout import follow_up_columns
 
 
 def test_initial_report_omits_follow_up_columns():
