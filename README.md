@@ -1,8 +1,8 @@
 <div align="center">
 
-# Cloud Security Remediations
+# WizExpert
 
-### From Wiz findings to informed action.
+### Analyze. Report. Validate. Coordinate. Remediate.
 
 **Evidence-led investigation. Clear reporting. Approval-controlled remediation.**
 
@@ -17,6 +17,9 @@
 </div>
 
 ---
+
+WizExpert is an independent cloud security reporting and remediation assistant
+for Wiz, not an official Wiz product or certification.
 
 Describe the finding or reporting scope in your approved assistant environment.
 Use authorized Wiz MCP tools to collect evidence, understand the risk and prepare
