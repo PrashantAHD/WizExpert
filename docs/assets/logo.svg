@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="168" height="168" viewBox="0 0 168 168" role="img" aria-labelledby="t">
+  <title id="t">WizExpert</title>
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#0EA5A4"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M84 8 L146 30 V78 C146 118 120 146 84 160 C48 146 22 118 22 78 V30 Z" fill="url(#shield)"/>
+  <path d="M84 8 L146 30 V60 C110 70 58 70 22 60 V30 Z" fill="url(#shine)"/>
+  <circle cx="76" cy="74" r="30" fill="none" stroke="#FFFFFF" stroke-width="9"/>
+  <path d="M97 96 L120 119" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round"/>
+  <path d="M62 75 L72 85 L91 64" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M128 40 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3 Z" fill="#FDE68A"/>
+</svg>
