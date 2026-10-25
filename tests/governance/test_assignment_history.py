@@ -1,3 +1,4 @@
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -193,6 +194,34 @@ class AssignmentHistoryTests(unittest.TestCase):
             "issue_id,rule_id,rule_name,status,suggested_owner,suggested_owner_id,basis,event_at",
         )
         self.assertEqual(len(lines), 4)
+
+    def test_actions_csv_neutralises_formula_like_values(self):
+        payloads = ['=HYPERLINK("x","y")', "+1", "-1", "@SUM(A1)", "\t=1", "\r=1"]
+        gaps = [
+            {
+                "issue_id": value,
+                "rule_id": "r",
+                "rule_name": value,
+                "status": "OPEN",
+                "suggested_owner": None,
+                "suggested_owner_id": None,
+                "basis": value,
+                "event_at": None,
+            }
+            for value in payloads
+        ]
+        gaps.append({"issue_id": "plain", "rule_name": "Rule - with dash", "basis": "ok"})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "actions.csv"
+            write_actions_csv(gaps, path)
+            with path.open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        for row, value in zip(rows, payloads, strict=False):
+            for key in ("issue_id", "rule_name", "basis"):
+                self.assertEqual(row[key], "'" + value)
+        self.assertEqual(
+            (rows[-1]["issue_id"], rows[-1]["rule_name"]), ("plain", "Rule - with dash")
+        )
 
 
 if __name__ == "__main__":
