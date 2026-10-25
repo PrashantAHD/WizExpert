@@ -24,7 +24,7 @@ SOURCE_SUFFIXES = {
     "remediation": {".py", ".html", ".css", ".js"},
     "tests": {".py"},
     "scripts": {".py", ".ps1"},
-    "docs": {".md"},
+    "docs": {".md", ".svg"},
 }
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")

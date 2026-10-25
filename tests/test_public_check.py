@@ -93,6 +93,8 @@ def test_detects_sensitive_shapes(value, category):
         ".github/instructions/nested/production-workflow.instructions.md",
         ".github/instructions/production-workflow.instructions.md.csv",
         "data/customer.txt",
+        "docs/assets/logo.png",
+        "docs/assets/diagram.svgz",
     ],
 )
 def test_disallows_non_source_files(name):
@@ -116,6 +118,7 @@ def test_disallows_non_source_files(name):
         ".github/workflows/checks.yml",
         ".github/instructions/production-workflow.instructions.md",
         "docs/PUBLICATION.md",
+        "docs/assets/logo.svg",
     ],
 )
 def test_allows_source_files(name):
