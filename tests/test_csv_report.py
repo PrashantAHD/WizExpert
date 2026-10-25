@@ -16,8 +16,8 @@ from zipfile import ZipFile
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from remediation import csv_report
-from remediation.csv_report import (
+from wizexpert import csv_report
+from wizexpert.csv_report import (
     KEY,
     PERMISSION,
     PRINCIPAL,
@@ -536,7 +536,7 @@ def test_default_output_is_unique_localappdata_and_as_of_defaults_to_utc(workspa
     second = generate_report([source])
     after = datetime.now(UTC).date()
     assert first.path != second.path
-    assert first.path.parent == workspace / "CloudSecurityRemediations" / "reports"
+    assert first.path.parent == workspace / "WizExpert" / "reports"
     assert any(day.isoformat() in first.path.name for day in (before, after))
     monkeypatch.delenv("LOCALAPPDATA")
     with pytest.raises(ValueError, match="LOCALAPPDATA"):
@@ -579,7 +579,9 @@ def test_long_header_cannot_be_silently_truncated(workspace):
         generate_report([source], output=workspace / "report.xlsx")
 
 
-@pytest.mark.parametrize("module", ["remediation", "remediation.csv_report"])
+@pytest.mark.parametrize(
+    "module", ["wizexpert", "wizexpert.csv_report", "remediation", "remediation.csv_report"]
+)
 def test_successful_module_cli_prints_only_path_and_counts(workspace, module):
     source = export(workspace, [record()])
     notes = workspace / "notes.txt"
@@ -601,6 +603,7 @@ def test_successful_module_cli_prints_only_path_and_counts(workspace, module):
     assert "Synthetic" not in result.stdout
     assert "graph-key-one" not in result.stdout
     workbook = load_workbook(output)
+    assert workbook.properties.creator == "WizExpert"
     cover_text = "\n".join(str(cell.value) for row in workbook["Cover"] for cell in row)
     assert "Medium" in cover_text
     assert "Synthetic rule" in cover_text

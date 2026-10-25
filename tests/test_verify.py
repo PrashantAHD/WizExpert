@@ -33,7 +33,7 @@ def test_default_verification_runs_all_offline_checks(monkeypatch):
         ["scripts/public_check.py"],
         ["-m", "pytest", "-q"],
         ["-m", "ruff", "check", "."],
-        ["-m", "bandit", "-q", "-r", "remediation", "scripts"],
+        ["-m", "bandit", "-q", "-r", "wizexpert", "remediation", "scripts"],
     ]
 
 

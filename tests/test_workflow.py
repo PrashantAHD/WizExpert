@@ -8,9 +8,9 @@ import pytest
 from openpyxl import load_workbook
 from test_csv_report import export, record, workspace  # noqa: F401
 
-from remediation import csv_report, workflow
-from remediation.__main__ import main
-from remediation.workflow import GATES, create_tracker, load_tracker, record_progress
+from wizexpert import csv_report, workflow
+from wizexpert.__main__ import main
+from wizexpert.workflow import GATES, create_tracker, load_tracker, record_progress
 
 
 def create(path):

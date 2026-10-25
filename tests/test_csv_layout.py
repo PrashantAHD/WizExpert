@@ -8,7 +8,7 @@ from zipfile import ZipFile
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from remediation.csv_layout import (
+from wizexpert.csv_layout import (
     MAX_ROWS,
     MAX_TEXT,
     TABLE_FIELDS,

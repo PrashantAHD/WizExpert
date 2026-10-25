@@ -20,6 +20,7 @@ ROOT_FILES = {
     "pyproject.toml",
 }
 SOURCE_SUFFIXES = {
+    "wizexpert": {".py", ".html", ".css", ".js"},
     "remediation": {".py", ".html", ".css", ".js"},
     "tests": {".py"},
     "scripts": {".py", ".ps1"},

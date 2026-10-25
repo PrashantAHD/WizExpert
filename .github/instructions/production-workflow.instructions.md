@@ -14,11 +14,14 @@ Use synthetic fixtures and approved external locations such as
 
 ## Product boundaries
 
-- Preserve a local CSV-first CLI: `python -m remediation`,
-  `python -m remediation.csv_report` and installed `cloud-remediations` must
+- Preserve a local CSV-first CLI: `python -m wizexpert`,
+  `python -m wizexpert.csv_report` and installed `wizexpert` must
   reach the same reporting interface. Runtime dependencies: openpyxl and
   defusedxml for hardened workbook XML reads;
   Python minimum: 3.12.
+- Preserve the legacy `remediation` module aliases, `cloud-remediations`
+  command and support for pre-rename workbooks. New source belongs in
+  `wizexpert`; aliases must delegate rather than duplicate implementation.
 - Do not restore a browser app, Flask/Waitress, routes, templates, SQLite
   case history or approval tracking. Leave existing external private artifacts
   untouched. No email sending, ServiceNow/Wiz API calls or cloud execution
@@ -132,7 +135,7 @@ Incorrect: "Every CSV row is a separate issue and matching names prove identity.
   workbook links. Do not embed complete original CSVs.
 - Preserve input evidence read-only. Output must be an absolute `.xlsx`
   outside the checkout; the Windows default is
-  `%LOCALAPPDATA%\CloudSecurityRemediations\reports` with dated unique names.
+  `%LOCALAPPDATA%\WizExpert\reports` with dated unique names.
 - Group private deliverables by issue/campaign, keeping reports, analysis, email
   drafts, trackers and evidence together; keep shared client context separate.
   Update active path references on moves, verify hashes, and retain a relocation
@@ -185,7 +188,7 @@ These are consulting stages, not eight automated product features. The CSV
 importer's optional issue enrichment remains backward compatible; it does not
 waive the two-source evidence requirement for the complete consulting workflow.
 
-Use `python -m remediation workflow` for an optional external private JSON
+Use `python -m wizexpert workflow` for an optional external private JSON
 progress tracker, not a new approval system. Read its persisted state before
 showing progress at a stage transition or on request; do not repeatedly display
 it after routine messages. Include current stage, completion/blocker information,

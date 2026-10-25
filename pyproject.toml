@@ -3,9 +3,9 @@ requires = ["setuptools>=78"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cloud-security-remediations"
+name = "wizexpert"
 version = "0.1.0"
-description = "Local CSV-first cloud security evidence reporting"
+description = "WizExpert: analyze, report, validate, coordinate and remediate"
 requires-python = ">=3.12"
 dependencies = [
     "openpyxl>=3.1.5,<4",
@@ -24,10 +24,11 @@ dev = [
 ]
 
 [project.scripts]
-cloud-remediations = "remediation.__main__:main"
+wizexpert = "wizexpert.__main__:main"
+cloud-remediations = "wizexpert.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["remediation*"]
+include = ["wizexpert*", "remediation*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
