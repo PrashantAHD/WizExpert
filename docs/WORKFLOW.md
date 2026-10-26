@@ -11,7 +11,8 @@ the public repository.
 
 For an authorized end-to-end assessment, continue through the available
 read-only investigation and the requested deliverable set: internal analysis HTML,
-client-facing assessment HTML, Excel report and stakeholder email HTML, retaining the required plain-text
+client-facing assessment HTML, PDF versions of the analyses, Excel when useful,
+and stakeholder email HTML. Do not generate duplicate `.txt` report or email
 companions. An initial analysis or a list of next steps is a progress update,
 not completion while actionable preparation remains. Respect narrower requests,
 explicit pauses and scope changes. After a side question or factual correction,
@@ -188,6 +189,33 @@ approach and any business constraints." Keep internal stage numbers, evidence
 collection tasks and ticket-routing reminders out of the stakeholder narrative;
 retain them in the private tracker or evidence notes. A draft may still be written
 for stakeholders without implying that it is approved or has been sent.
+
+Wiz monitoring, issue tracking, rechecks, status reconciliation and security
+closure verification belong to the reporting operator. Keep those tasks in
+internal analysis, private trackers and evidence checklists, not client-facing
+recommendations, Excel action/closure requests or stakeholder emails. Do not
+include a "verify and track in Wiz" step or narrate the internal responsibility
+assignment to clients. Client owners supply remediation decisions, authorized
+implementation, functional validation and completion/change evidence. Their
+completion message does not replace the operator's independent verification.
+Preserve factual Wiz findings, source status and material risk qualifications.
+Case-specific generators must separate these audiences consistently across
+HTML, PDF and Excel.
+
+Present **Recommended Remediation Approaches**, not a staged plan or internal
+execution checklist. Explain when each approach applies and which controls are
+complementary rather than alternatives. Request confirmation of the chosen
+approach and whether stakeholders will implement it through their approved
+process or explicitly authorize the reporting team to implement the agreed
+scope. Selecting an approach alone does not authorize execution.
+
+Keep detailed evidence qualifications, collection limitations, scanner
+discrepancies and open investigation questions in internal analysis/private
+evidence. Do not include a lengthy "Evidence qualifications and open questions"
+section in client reports. Preserve material uncertainty in concise natural
+wording beside the relevant finding or recommendation, including unverified
+exploitability or configuration freshness where they affect the decision.
+
 The cover has distinct purposes: the issue description explains the affected
 resource/access relationship; the risk description explains conditional impact;
 the recommendation proposes a change; the requested response addresses the
@@ -227,7 +255,8 @@ names. Do not copy unrelated execution statuses from a reference template.
 
 The **security team creates and assigns the ServiceNow ticket before outreach**.
 Include its reference in the reviewed email; never ask stakeholders to create
-or provide the ticket. Attach the Excel report and keep the message concise
+or provide the ticket. Name the actual selected report attachment (PDF for a
+PDF-only case; Excel only when included) and keep the message concise
 and professional. Request the desired approach, not a promised completion
 date. Do not invent remediation deadlines or SLAs.
 
@@ -239,15 +268,16 @@ Subject: Review requested: [Finding summary] | SNOW: [Ticket number]
 
 Hi Team,
 
-Issue Description
+### Issue Description:
 [Plain-English summary and risk, without an unsupported compromise claim.]
 
-Issue Details
+### Issue Details:
 SNOW: [Ticket number]
 [Brief affected scope and validated observation; note material uncertainty.]
-The attached Excel report contains the consolidated evidence for your review.
+[Wiz control ID | Actual Wiz issue ID, for each in-scope issue when available.]
+The attached [assessment PDF / Excel report, as selected] contains the findings for your review.
 
-Recommended Remediation
+### Recommended Remediation Approaches:
 1. [Preferred practical option and key dependency or access precheck.]
 2. [Feasible alternative, including any material trade-off.]
 
@@ -256,6 +286,14 @@ Please review the attached report and confirm the desired remediation approach. 
 Best Regards,
 [Security team]
 ```
+
+Render the three section titles as level-three headings with trailing colons
+(`<h3>` in HTML, not literal `###` text).
+Control IDs identify rules, not individual issue instances. Preserve that
+distinction in the email. Keep unresolved ticket references visibly pending in
+drafts; obtain the Security-owned reference before outreach rather than inventing
+one. Case-specific generators must retain these headings and the approved
+closing while honoring the selected attachment and execution-approval wording.
 
 Initial risk interpretation and outreach require human or approved chat review,
 not an automated general-purpose analysis feature. For post-approval local-account
@@ -288,15 +326,36 @@ Active use, existing safeguards or a promise to review permissions does not
 constitute risk acceptance. Retain the rationale, authorized decision and exact
 scope under the approval process below. Drafting or approving email wording
 does not authorize sending, changing issue statuses or declaring remediation.
-Keep HTML and plain-text reply companions aligned.
+Keep the email HTML aligned with the reviewed findings and decisions.
 
 ### Internal analysis, client assessment and email companions
 
+Use the same private preview wrapper for every email draft, including initial,
+progress, blocker and closure messages:
+
+- Dark navy header with the uppercase label **PRIVATE COMMUNICATION DRAFT**.
+- Descriptive communication title and a pale gold badge:
+  **Draft - not sent | \<draft date\>**.
+- A pale gold notice below the header:
+  **Internal preparation note - do not copy into email:** Confirm named
+  recipients and the Security-owned ServiceNow reference before outreach.
+  Attachment identities must be confirmed when sending.
+- A separate copyable email body containing the greeting, applicable template
+  sections and approved signature. The header and preparation notice are local
+  preview content, not part of the stakeholder email.
+
+The badge date identifies draft preparation, not a new evidence observation.
+Never use it to relabel old findings as freshly verified. Keep the wrapper
+self-contained, responsive and free of external assets.
+
 Prepare internal analysis, a separate client-facing assessment, and all initial,
-progress, blocker and closure email drafts as standalone private HTML pages
-alongside plain-text copies. This is an
-operator/approved-chat deliverable convention; the CLI's execution follow-up
-command still produces plain text, not automatic HTML.
+progress, blocker and closure email drafts as standalone private HTML pages.
+Provide PDF versions of the analyses; do not create duplicate `.txt` companions.
+Validate PDF content directly against visible HTML extracted in memory.
+Preserve raw evidence, logs and historical archives rather than broadly deleting
+text files. This is an operator/approved-chat deliverable convention; the CLI's
+execution follow-up command still produces plain text on stdout, not automatic
+HTML. Console output is not a requirement to save a `.txt` attachment.
 
 Analysis pages are an internal learning channel, distinct from stakeholder
 communications. Explain the finding with a short overview, clearly labeled
