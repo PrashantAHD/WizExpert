@@ -171,8 +171,8 @@ Supported `kind` values are `email`, `html`, `pdf`, `xlsx`, `pptx` and
   HTTPS hyperlinks can be listed in `allowed_links`; this is not permission
   to load remote assets. Browser rendering is still required.
 - **PDF:** actual PyMuPDF extraction checks `page_count` and full
-  `expected_text`; encrypted/unreadable content and links without a supported
-  contract block. Install the optional `.[qa]` extra for this adapter.
+  `expected_text`; encrypted/unreadable content and unreviewed links
+  block. Install the optional `.[qa]` extra for this adapter.
   Scanned/image-only content cannot pass as checked text. Visual review must
   still inspect charts, positioning and clipping.
 - **XLSX/PPTX:** `reference_artifact`, `reference_basis`, `reference_sources`
@@ -211,6 +211,23 @@ review, not naive text equality.
 internal analysis. Full-text checks reject local workstation paths in client
 content. Optional `forbidden_text` enforces additional exact wording exclusions.
 Office references and semantic review cover the corresponding Office content.
+
+HTML, PDF and XLSX contracts must record `confidentiality_footer`: the exact
+required line, or `null` when the applicable conventions explicitly require
+none. A missing decision blocks rather than silently passing.
+
+- HTML needs exactly one visible `<footer>` with that exact text.
+- **Every** PDF page must contain it. PDF `expected_text` describes the content
+  once, without those per-page footers (one occurrence per page is removed
+  before comparison). Links must be in the reviewed HTTPS `allowed_links`.
+- Every worksheet's odd footer, plus even/first-page footers when enabled,
+  must contain it in the left, center or right section.
+- PPTX contracts may set it; each slide then must contain the line. Approved
+  presentation templates with their own footer remain governed by the
+  reference comparison instead.
+
+HTML/PDF parity ignores the footer's per-page repetition but requires the
+companions to use the same footer decision.
 
 Every rendered artifact also requires its own retained native/visual record:
 `schema_version: 1`, `status: "passed"`, `kind`, `artifact_sha256`, `reviewer`
@@ -284,6 +301,12 @@ paths to SHA256), and `issue_mappings` (objects with `control_id`, `issue_id`).
 These element IDs identify existing regions; they do not prescribe a new visual
 template. The approved template must be an independently approved reference,
 not a copy of the new draft presented as its own approval.
+
+Every email contract also records `confidentiality`: the exact private-wrapper
+confidentiality line, or `null` when none is required. When set,
+`confidentiality_id` must identify one visible wrapper element outside the
+copyable body, with that exact text and the approved template's styling. The
+line must not appear in the body that is sent. A missing decision blocks.
 
 For `kind` reply, progress, blocker or closure, supply `approved_subject` and
 `approved_body` containing the independently reviewed full wording. The checker

@@ -570,6 +570,13 @@ enforced control-ID match.
 Generating a report never advances the tracker. Stages 1-2 produce a draft
 snapshot, not a claim of final validated analysis.
 
+`--footer "<line>"` sets the left page footer on every workbook tab (default
+`Confidential - internal review`), for example an organization's required
+confidentiality line. Keep organization-specific wording in private
+instructions and pass it explicitly; it must be one plain line without `&`.
+Apply the same line to HTML footers and every PDF page (for example print CSS
+`@page{@bottom-center{content:"<line>"}}`) when your conventions require it.
+
 ## Report maintenance
 
 Place detailed, numbered remediation options and material prerequisites on the
