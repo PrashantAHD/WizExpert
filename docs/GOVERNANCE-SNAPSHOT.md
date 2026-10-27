@@ -7,6 +7,16 @@ explicitly approved **tenant-wide** scope; it does not imply project filtering.
 
 ## Read-only collection through Copilot
 
+Before bulk issue collection, follow the runbook's
+[retained-evidence collection plan](GOVERNANCE-RUNBOOK.md#2-plan-collection-from-retained-evidence-then-reconcile).
+Reuse approved prior snapshots and archived issue history. The queries below
+collect current operational evidence; they do not require re-fetching all
+historical closed findings. Prefer a verified complete change feed; otherwise
+reconcile current active findings, new findings, interval closures and accepted
+risk, with explicit checks for unexplained prior IDs. Creation-date filtering
+alone misses changes to older issues. Record unsupported change coverage rather
+than treating unchanged aggregate counts as proof of unchanged records.
+
 1. Record a UTC collection start. Agree the prior cutoff and scheduled end,
    including timezone. The generator currently requires UTC timestamps.
 2. Through Wiz `discover`, inspect the current tool schemas, then use `execute`:
@@ -15,7 +25,8 @@ explicitly approved **tenant-wide** scope; it does not imply project filtering.
      search; retain the exact framework IDs/names/version, then call
      `get_compliance_ratings(framework_ids=[...])`.
    - `list_issues(status=["OPEN","IN_PROGRESS"], severity=[severity], first=1)`
-     for **each** severity; use `totalCount`, never the number of sampled nodes.
+     for each of Critical, High, Medium and Low; use `totalCount`, never the
+     number of sampled nodes. Do not collect informational issues for this workflow.
    - Repeat individual severity totals for `status=["IN_PROGRESS"]`.
    - Repeat for `status=["RESOLVED"]` with `resolved_at_after` equal to the
      prior cutoff and `resolved_at_before` equal to the actual coverage cutoff
@@ -81,9 +92,9 @@ Dates are examples in the past so they can be validated at any later refresh.
     "hipaa": {"value": 90, "source": "Prior slide 3"},
     "hitrust": {"value": 85, "source": "Prior slide 3"}
   },
-  "open": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 3, "LOW": 2, "INFORMATIONAL": 1},
-  "in_progress": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFORMATIONAL": 0},
-  "resolved": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFORMATIONAL": 0},
+  "open": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 3, "LOW": 2},
+  "in_progress": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0},
+  "resolved": {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0},
   "security_score": {"value": 96, "source": "wm-security-score, collection timestamp"},
   "hipaa": {"value": 91, "source": "Framework ID/name/version, collection timestamp"},
   "hitrust": {"value": null, "source": "Wiz framework query", "unavailable_reason": "HTTP 504"},
@@ -96,7 +107,8 @@ Dates are examples in the past so they can be validated at any later refresh.
 - `open` means OPEN **plus** IN_PROGRESS. IN_PROGRESS must not exceed it.
 - All counts are nonnegative integers (not booleans, floats or numeric strings).
 - Metrics are 0-100 or `null` with an explicit `unavailable_reason`.
-- `prior.open` has four severities; all current count dictionaries have five.
+- Prior and current count dictionaries use the four tracked severities. Legacy
+  informational keys remain load-compatible but are excluded from displayed totals.
 - Resolution bounds are exclusive/inclusive as named. Collection cannot be in
   the future. The cover preserves scheduled dates but never labels early data
   as the later scheduled snapshot.
@@ -256,7 +268,8 @@ Wiz assignments or establish who performed remediation.
 
 ### Resolved closures versus credited work
 
-Resolved slides retain tenant-wide closure totals but omit personal assignee
+Without the optional reviewed `team_resolved` object, resolved slides retain
+tenant-wide closure totals but omit personal assignee
 labels, regardless of `assignment_scope`. They explicitly display **Attribution
 Pending** and **not credited team work**. Even a current assignee on every
 resolved finding does not establish ownership before the resolution date.
@@ -279,6 +292,13 @@ listed team member. Unassigned closures are excluded. When the optional
 `team_resolved` object is present, resolved slides are titled **Resolved by
 Team**, and show only those groups with assignee names. Tenant totals remain on the
 summary slides.
+
+The approved workflow can also use retained **issue-level history** to support a
+team attribution when the current assignee is empty. Record this distinct basis
+in `team_resolved.basis`, the assignment source and private audit, and retain the
+missing-assignee action. This is not permission to infer work from a rule owner,
+sample or Wiz automatic event. Validate the chosen policy for each reporting
+period rather than silently switching between current-assignee and history rules.
 
 ```json
 "team_resolved": {
@@ -395,8 +415,9 @@ Informational issues, and slides never mention them.
 
 #### Missing assignees: history check and Wiz action list (`assignment_gaps`)
 
-Each run checks issue history for issues whose Wiz **assignee field is empty**
-(`wizexpert/governance/assignment_history.py`):
+During approved read-only collection, check issue history for issues whose Wiz
+**assignee field is empty** (`wizexpert/governance/assignment_history.py`).
+The CLI consumes the prepared evidence; it does not perform this Wiz query:
 
 1. Query the Issue > History data (portal GraphQL `issueHistoryEvents`, filter
    `issue: [ids]`, `dateTime.inLast` 730 days; up to 50 issue IDs per request) for
@@ -424,7 +445,13 @@ recapture; the gap list should then be empty.
   new hash. If the previous deck was preliminary, do not treat it as EOD data.
 - A template hash binds provenance, not approval of every number. Human review
   of prior values and narrative evidence remains mandatory.
+- A `period.final_approval` records a specific approved early-final exception
+  (`approved_by`, UTC `approved_at`, `reason`). It must never be inherited into a
+  new month or used as evidence that later hours were collected. Retain the
+  actual collection window and disclose the gap during release review.
 - Inspect speaker notes and the companion JSON before sending externally;
   they contain confidential IDs and evidence.
 - Test implementation changes with
   `python -m pytest tests/governance/test_governance.py -v`.
+- Verify the complete prepared set with `wizexpert governance verify`, then
+  complete the [runbook's manual release gates](GOVERNANCE-RUNBOOK.md).

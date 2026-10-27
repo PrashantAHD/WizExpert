@@ -73,6 +73,7 @@ class ProfileLookupTests(unittest.TestCase):
         )
         self.env.start()
         os.environ.pop(profile.ENV_VAR, None)
+        os.environ.pop(profile.LEGACY_ENV_VAR, None)
         profile.use(None)
 
     def tearDown(self):
@@ -105,6 +106,35 @@ class ProfileLookupTests(unittest.TestCase):
             profile.ensure(interactive=False)
         with self.assertRaisesRegex(profile.ProfileError, "wizexpert governance setup"):
             profile.active()
+
+    def test_legacy_per_user_profile_is_last_resort_without_migration(self):
+        legacy = profile.save(make(client_name="Legacy"), profile.legacy_user_profile_path())
+        self.assertEqual(profile.find_profile(), legacy)
+        self.assertEqual(profile.ensure(interactive=False).client_name, "Legacy")
+        current = profile.save(make(client_name="Current"), profile.user_profile_path())
+        self.assertEqual(profile.find_profile(), current)
+        current.write_text("{invalid", encoding="utf-8")
+        profile.use(None)
+        with self.assertRaisesRegex(SystemExit, "not valid JSON"):
+            profile.ensure(interactive=False)
+
+    def test_legacy_profile_locations_match_standalone_platform_rules(self):
+        with (
+            mock.patch.object(profile, "Path", type(self.root)),
+            mock.patch.object(profile.os, "name", "nt"),
+        ):
+            self.assertEqual(
+                str(profile.legacy_user_profile_path()),
+                str(self.root / "appdata" / "wizgov" / "profile.json"),
+            )
+        with (
+            mock.patch.object(profile, "Path", type(self.root)),
+            mock.patch.object(profile.os, "name", "posix"),
+        ):
+            self.assertEqual(
+                str(profile.legacy_user_profile_path()),
+                str(self.root / "config" / "wizgov" / "profile.json"),
+            )
 
     def test_scripted_setup_writes_profile_and_show_reads_it(self):
         logo = self.root / "logo.png"

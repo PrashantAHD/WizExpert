@@ -8,8 +8,8 @@ boundary: an ignored file can still be force-added.
 
 ## Local verification and push gate
 
-Create `.venv` and install the development and governance extras (`python -m pip
-install -e ".[dev,governance]"`); the governance tests need both. Install the hook
+Create `.venv` and install the development, governance and PDF-QA extras (`python -m pip
+install -e ".[dev,governance,qa]"`); full validation includes the optional-format tests. Install the hook
 **for this repository only**:
 
 ```powershell

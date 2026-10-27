@@ -140,6 +140,13 @@ class WorkbookData:
     def previous(self) -> date:
         return self.dates[-2]
 
+    @property
+    def reporting_date(self) -> date:
+        if not self.preliminary:
+            return self.latest
+        year, month = divmod(self.previous.year * 12 + self.previous.month, 12)
+        return date(year, month + 1, baseline_day().day)
+
     def open_at(self, day: date) -> int:
         return sum(value.open for value in self.snapshots[day].values())
 
@@ -284,8 +291,10 @@ def read_workbook(path: Path, allow_preliminary: bool = False) -> WorkbookData:
         require(dates == list(by_severity["HIGH"]), "Critical and High snapshot dates differ.")
         latest = dates[-1]
         previous = dates[-2]
+        next_year, next_month = divmod(previous.year * 12 + previous.month, 12)
+        scheduled = date(next_year, next_month + 1, baseline_day().day)
         require(
-            (latest.year * 12 + latest.month) - (previous.year * 12 + previous.month) == 1,
+            previous < latest <= scheduled if preliminary else latest == scheduled,
             "The latest workbook must include the immediately preceding month's snapshot.",
         )
         for severity in SEVERITIES:
@@ -390,13 +399,12 @@ def combine_trend(data: WorkbookData, history: dict[date, int]) -> dict[date, in
         points[baseline] = sum(baseline_open(data).values())
     else:
         points[baseline] = history[baseline]
-    months = (data.latest.year - baseline.year) * 12 + data.latest.month - baseline.month + 1
-    require(months >= 2, "Dashboard requires a post-baseline reporting month.")
+    last_approved = data.previous if data.preliminary else data.latest
+    months = (last_approved.year - baseline.year) * 12 + last_approved.month - baseline.month + 1
+    require(data.latest > baseline, "Dashboard requires a post-baseline reporting month.")
     for offset in range(months):
         year, month = divmod(baseline.year * 12 + baseline.month - 1 + offset, 12)
         day = date(year, month + 1, baseline.day)
-        if data.preliminary and offset == months - 1:
-            day = data.latest
         require(
             day in points,
             f"Missing approved trend point for {day}; provide history, do not interpolate.",
