@@ -270,12 +270,15 @@ def build_deck(
     subtitle, chart_subtitle, takeaway = trend_language(data)
     month, previous_month = latest.strftime("%B"), previous.strftime("%b")
     latest_short = latest.strftime("%b")
+    cover_date = date_ordinal(latest)
+    if data.preliminary:
+        month = f"{data.reporting_date:%B} preview"
+        previous_month, latest_short = previous.strftime("%b %d"), latest.strftime("%b %d")
+        cover_date = f"{data.reporting_date:%B %Y} (Preliminary)\nAs of {date_ordinal(latest)}"
     addressed = "resolved / accepted" if data.accepted_risk_supported else "resolved / ignored"
     if not data.accepted_risk_supported:
         takeaway = takeaway.replace("resolved or accepted", "resolved or ignored")
-    replace_text(
-        deck.slides[0], 2, [date_ordinal(latest) + (" (Preliminary)" if data.preliminary else "")]
-    )
+    replace_text(deck.slides[0], 2, cover_date.splitlines())
     progress = deck.slides[1]
     fewer = base_total - latest_open
     progress_values = {
@@ -318,7 +321,7 @@ def build_deck(
     achievement_values = {
         4: [f"Severity progress and key exposure risks closed by {full_date(latest)}"],
         6: [str(latest_closed)],
-        7: [f"{addressed.capitalize()}\nBy {latest_short} {latest.day}, across Critical and High."],
+        7: [f"{addressed.capitalize()}\nBy {latest:%b} {latest.day}, across Critical and High."],
         9: [str(latest_open)],
         10: ["Open findings remaining", f"{base_month} baseline: {base_total} open findings."],
         12: [pct(high.addressed_pct)],

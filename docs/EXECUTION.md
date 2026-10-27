@@ -11,6 +11,13 @@ It does not execute guest commands, send email, create tickets, change Wiz
 statuses, or track scans/closure. No network access, AI service or MCP connection
 is required. All examples are synthetic.
 
+**Legacy output boundary:** the TXT drafts shown below are internal working
+outputs of this importer, not compliant stakeholder deliverables. Current
+[workflow conventions](WORKFLOW.md) require reviewed HTML communications and
+keep internal Wiz rechecks out of the stakeholder body. Convert/review the
+content against the approved contract and run [workflow QA](WORKFLOW-QA.md);
+do not attach/send the TXT output or treat importer success as handoff approval.
+
 ## Existing workbook contract
 
 Required tabs: `AWS Data`, `Azure Data`, `Pending Review`, `Pending Remediation`.
