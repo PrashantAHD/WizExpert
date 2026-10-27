@@ -11,6 +11,23 @@ from wizexpert.office_qa import package_signature
 from wizexpert.workflow_qa import digest, load, require
 
 KINDS = {"email", "html", "pdf", "xlsx", "pptx", "validation_receipt"}
+FOOTER_KINDS = {"html", "pdf", "xlsx"}
+
+
+def footer_line(contract: dict, kind: str) -> str | None:
+    """Return the required confidentiality line; an explicit null records 'not required'."""
+    if kind not in FOOTER_KINDS and "confidentiality_footer" not in contract:
+        return None
+    require(
+        "confidentiality_footer" in contract,
+        "Contract must record the confidentiality-footer decision (text or null).",
+    )
+    value = contract["confidentiality_footer"]
+    require(
+        value is None or (isinstance(value, str) and bool(compact(value))),
+        "Confidentiality footer must be nonempty text or null.",
+    )
+    return compact(value) if value else None
 
 
 def check_text(actual: str, contract: dict) -> None:
@@ -56,6 +73,23 @@ def check_workbook(path: Path, contract: dict) -> None:
                 and not any(d.hidden for d in sheet.column_dimensions.values()),
                 "Hidden workbook rows/columns are not allowed.",
             )
+            line = footer_line(contract, "xlsx")
+            if line:
+                settings = sheet.HeaderFooter
+                footers = [settings.oddFooter]
+                if settings.differentOddEven:
+                    footers.append(settings.evenFooter)
+                if settings.differentFirst:
+                    footers.append(settings.firstFooter)
+                require(
+                    all(
+                        any(
+                            line in compact(part.text or "") for part in (f.left, f.center, f.right)
+                        )
+                        for f in footers
+                    ),
+                    f"Worksheet {sheet.title!r} lacks the confidentiality page footer.",
+                )
     finally:
         book.close()
 
@@ -147,18 +181,40 @@ def validate_artifact(item: dict, evidence: dict) -> dict:
             if re.fullmatch(r"h[1-6]", e.tag)
         ]
         require([list(h) for h in headings] == contract["headings"], "HTML section layout differs.")
+        line = footer_line(contract, "html")
+        if line:
+            footers = [
+                e
+                for e in document.root.elements(visible_only=True)
+                if e.tag == "footer" and e.text() == line
+            ]
+            require(len(footers) == 1, "HTML lacks the exact visible confidentiality footer.")
     elif kind == "pdf":
         try:
             import pymupdf
         except ModuleNotFoundError as error:
             raise ValueError('PDF QA needs the qa extra: pip install "wizexpert[qa]"') from error
+        line = footer_line(contract, "pdf")
         with pymupdf.open(path) as document:
             require(not document.is_encrypted, "Encrypted PDF cannot be validated.")
             require(document.page_count == contract["page_count"], "PDF page count differs.")
-            check_text("\n".join(page.get_text() for page in document), contract)
+            pages = []
+            for number, page in enumerate(document, 1):
+                text = compact(page.get_text())
+                if line:
+                    require(line in text, f"PDF page {number} lacks the confidentiality footer.")
+                    # Expected text describes the content once, without per-page footers.
+                    text = text.replace(line, "", 1)
+                pages.append(text)
+            check_text(" ".join(pages), contract)
+            allowed = set(contract.get("allowed_links", []))
             require(
-                all(not page.get_links() for page in document),
-                "PDF links require an explicitly supported contract.",
+                all(
+                    link.get("uri", "").startswith("https://") and link["uri"] in allowed
+                    for page in document
+                    for link in page.get_links()
+                ),
+                "PDF contains links outside the reviewed HTTPS allowlist.",
             )
     elif kind in {"xlsx", "pptx"}:
         from defusedxml.ElementTree import fromstring
@@ -193,6 +249,22 @@ def validate_artifact(item: dict, evidence: dict) -> dict:
                 ".//{http://schemas.openxmlformats.org/presentationml/2006/main}sldId"
             )
             require(len(slides) == contract["slide_count"], "Presentation slide count differs.")
+            line = footer_line(contract, "pptx")
+            if line:
+                with ZipFile(path) as archive:
+                    names = sorted(
+                        n
+                        for n in archive.namelist()
+                        if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)
+                    )
+                    for name in names:
+                        texts = fromstring(archive.read(name)).iter(
+                            "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
+                        )
+                        require(
+                            line in compact(" ".join(t.text or "" for t in texts)),
+                            f"Slide part {name} lacks the confidentiality footer.",
+                        )
     else:
         # Existing specialized validators keep responsibility for their own domain logic.
         actual = load(path)
@@ -339,8 +411,23 @@ def validate_deliverables(review: dict, evidence: dict) -> list:
         if item["kind"] != "validation_receipt":
             validate_native_review(item, review, evidence)
     by_id = {item["id"]: item for item in artifacts}
+
+    def content(name: str) -> str:
+        # HTML shows the confidentiality footer once; PDF repeats it on each page.
+        contract = load(Path(by_id[name]["contract"]))
+        text = compact(contract["expected_text"])
+        footer = contract.get("confidentiality_footer")
+        return compact(text.replace(compact(footer), " ")) if footer else text
+
     for group in groups:
-        texts = [compact(load(Path(by_id[name]["contract"]))["expected_text"]) for name in group]
+        texts = [content(name) for name in group]
+        footers = [
+            load(Path(by_id[name]["contract"])).get("confidentiality_footer") for name in group
+        ]
+        require(
+            len({compact(f) if f else None for f in footers}) == 1,
+            "HTML/PDF companions use different confidentiality footer decisions.",
+        )
         require(
             len(set(texts)) == 1, "HTML/PDF text parity failed despite individual artifact checks."
         )

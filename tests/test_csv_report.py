@@ -579,6 +579,27 @@ def test_long_header_cannot_be_silently_truncated(workspace):
         generate_report([source], output=workspace / "report.xlsx")
 
 
+def test_footer_applies_to_every_tab_and_defaults_to_internal_review(workspace):
+    line = "Confidential - Example Org | Example Security | Source: Wiz | Reporting dates: UTC"
+    _, workbook = report(workspace, [record()], footer=line)
+    assert [sheet.oddFooter.left.text for sheet in workbook] == [line] * len(csv_report.SHEETS)
+    assert {sheet.oddFooter.right.text for sheet in workbook} == {"Page &P of &N"}
+    default = generate_report(
+        [export(workspace, [record()], name="second.csv")],
+        output=workspace / "default.xlsx", as_of="2026-04-01",
+    )
+    assert {s.oddFooter.left.text for s in load_workbook(default.path)} == {
+        "Confidential - internal review"
+    }
+
+
+@pytest.mark.parametrize("footer", ["", " padded", "A & B", "two\nlines", "x" * 201])
+def test_invalid_footer_is_rejected_before_output(workspace, footer):
+    with pytest.raises(ValueError, match="Footer"):
+        report(workspace, [record()], footer=footer)
+    assert not (workspace / "report.xlsx").exists()
+
+
 @pytest.mark.parametrize(
     "module", ["wizexpert", "wizexpert.csv_report", "remediation", "remediation.csv_report"]
 )

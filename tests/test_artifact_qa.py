@@ -14,37 +14,52 @@ def save(path, payload):
     return path
 
 
-def artifact(tmp_path, kind):
+FOOTER = "Confidential - Example Org | Example Security | Source: Wiz | Reporting dates: UTC"
+
+
+def artifact(tmp_path, kind, *, pages=1):
     output = tmp_path / f"report.{kind}"
     contract = {"schema_version": 1}
+    if kind in {"html", "pdf", "xlsx"}:
+        contract["confidentiality_footer"] = FOOTER
     source = tmp_path / "source.txt"
     source.write_text("Synthetic reviewed input", encoding="utf-8")
     reference = tmp_path / f"reference.{kind}"
     if kind == "html":
         output.write_text(
             '<html><body><main id="report"><h1>Findings</h1>'
-            "<p>Reviewed evidence.</p></main></body></html>",
+            f"<p>Reviewed evidence.</p><footer>{FOOTER}</footer></main></body></html>",
             encoding="utf-8",
         )
         copyfile(output, reference)
         contract.update(
             body_id="report",
-            expected_text="Findings Reviewed evidence.",
+            expected_text=f"Findings Reviewed evidence. {FOOTER}",
             headings=[["h1", "Findings"]],
             approved_template=str(reference),
         )
     elif kind == "pdf":
         pymupdf = pytest.importorskip("pymupdf")
         with pymupdf.open() as document:
-            page = document.new_page()
-            page.insert_text((72, 72), "Findings\nReviewed evidence.")
+            for number in range(pages):
+                page = document.new_page()
+                heading = "Findings" if pages == 1 else f"Findings {number + 1}"
+                page.insert_text((72, 72), f"{heading}\nReviewed evidence.")
+                page.insert_text((72, 800), FOOTER, fontsize=8)
             document.save(output)
-        contract.update(page_count=1, expected_text="Findings Reviewed evidence.")
+        contract.update(
+            page_count=pages,
+            expected_text=" ".join(
+                ("Findings" if pages == 1 else f"Findings {n + 1}") + " Reviewed evidence."
+                for n in range(pages)
+            ),
+        )
     elif kind == "xlsx":
         book = Workbook()
         book.active.title = "Findings"
         book.active.append(["Issue", "Count"])
         book.active.append(["Synthetic issue", 2])
+        book.active.oddFooter.left.text = FOOTER
         book.save(output)
         book.close()
         copyfile(output, reference)
@@ -215,12 +230,74 @@ def test_html_pdf_parity_is_not_replaced_by_individual_passes(tmp_path):
     output, contract_path = Path(html["path"]), Path(html["contract"])
     output.write_text(output.read_text().replace("Reviewed evidence.", "Different evidence."))
     contract = json.loads(contract_path.read_text())
-    contract["expected_text"] = "Findings Different evidence."
+    contract["expected_text"] = f"Findings Different evidence. {FOOTER}"
     save(contract_path, contract)
     evidence.update({str(output): digest(output), str(contract_path): digest(contract_path)})
     native_review(tmp_path, html, evidence)
     with pytest.raises(ValueError, match="parity failed"):
         validate_deliverables(review, evidence)
+
+
+def rewrite_contract(item, evidence, **changes):
+    path = Path(item["contract"])
+    contract = json.loads(path.read_text())
+    for key, value in changes.items():
+        if value is KeyError:
+            contract.pop(key)
+        else:
+            contract[key] = value
+    save(path, contract)
+    evidence[str(path)] = digest(path)
+
+
+@pytest.mark.parametrize("kind", ["html", "pdf", "xlsx"])
+def test_footer_decision_is_mandatory_but_can_be_explicitly_not_required(tmp_path, kind):
+    item, evidence = artifact(tmp_path, kind)
+    rewrite_contract(item, evidence, confidentiality_footer=KeyError)
+    with pytest.raises(ValueError, match="confidentiality-footer decision"):
+        validate_artifact(item, evidence)
+    rewrite_contract(item, evidence, confidentiality_footer=None)
+    if kind == "pdf":
+        # Without a footer requirement, the drawn footer is ordinary page content.
+        rewrite_contract(item, evidence, expected_text=f"Findings Reviewed evidence. {FOOTER}")
+    assert validate_artifact(item, evidence)["status"] == "artifact_checks_passed"
+
+
+def test_html_without_exact_visible_footer_is_blocked(tmp_path):
+    item, evidence = artifact(tmp_path, "html")
+    rewrite_contract(item, evidence, confidentiality_footer=FOOTER.replace("UTC", "IST"))
+    with pytest.raises(ValueError, match="confidentiality footer"):
+        validate_artifact(item, evidence)
+
+
+def test_every_pdf_page_must_carry_the_footer(tmp_path):
+    import pymupdf
+
+    item, evidence = artifact(tmp_path, "pdf", pages=3)
+    assert validate_artifact(item, evidence)["status"] == "artifact_checks_passed"
+    output = Path(item["path"])
+    with pymupdf.open(output) as document:
+        document[1].add_redact_annot(document[1].search_for(FOOTER)[0])
+        document[1].apply_redactions()
+        document.save(tmp_path / "redacted.pdf")
+    copyfile(tmp_path / "redacted.pdf", output)
+    evidence[str(output)] = digest(output)
+    with pytest.raises(ValueError, match="page 2 lacks the confidentiality footer"):
+        validate_artifact(item, evidence)
+
+
+def test_every_worksheet_must_carry_the_footer(tmp_path):
+    item, evidence = artifact(tmp_path, "xlsx")
+    output, reference = Path(item["path"]), tmp_path / "reference.xlsx"
+    book = load_workbook(output)
+    book.create_sheet("Second")
+    book.save(output)
+    book.close()
+    copyfile(output, reference)
+    evidence.update({str(output): digest(output), str(reference): digest(reference)})
+    rewrite_contract(item, evidence, sheet_names=["Findings", "Second"])
+    with pytest.raises(ValueError, match="'Second' lacks the confidentiality page footer"):
+        validate_artifact(item, evidence)
 
 
 def test_specialized_receipt_must_bind_current_sources_and_execution(tmp_path):

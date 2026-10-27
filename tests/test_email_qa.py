@@ -7,6 +7,8 @@ from wizexpert.__main__ import main
 from wizexpert.email_qa import CLOSING, NOTICE, validate_email
 from wizexpert.workflow_qa import digest
 
+FOOTER = "Confidential - Example Org | Example Security | Source: Wiz | Reporting dates: UTC"
+
 
 @pytest.fixture
 def email(tmp_path):
@@ -19,6 +21,7 @@ def email(tmp_path):
     <h1>Synthetic finding</h1></header>
     <p id="badge" class="gold">Draft - not sent | 2026-10-27</p>
     <p id="notice" class="gold">{NOTICE}</p>
+    <p id="confidentiality" class="gold">{FOOTER}</p>
     <p id="subject">Subject: Review requested: Synthetic finding | SNOW: INC123</p>
     <section id="email-body"><p>Hi Team,</p>
     <h3>Issue Description:</h3><p>Observed synthetic risk.</p>
@@ -43,6 +46,8 @@ def email(tmp_path):
         "header_id": "header",
         "badge_id": "badge",
         "notice_id": "notice",
+        "confidentiality": FOOTER,
+        "confidentiality_id": "confidentiality",
         "approved_template": str(template),
         "approved_template_sha256": digest(template),
         "attachments": {str(attachment): digest(attachment)},
@@ -75,6 +80,11 @@ def test_actual_template_pass_remains_draft(email):
         ("Review the scoped permissions.", "Please provide the ServiceNow ticket.", "Disallowed"),
         ("Assessment.pdf contains", "Other.xlsx contains", "attachment"),
         ("Draft - not sent | 2026-10-27", "Sent successfully", "badge"),
+        (f'<p id="confidentiality" class="gold">{FOOTER}</p>', "", "confidentiality"),
+        (f'class="gold">{FOOTER}', 'class="gold">Confidential', "confidentiality"),
+        (f'class="gold">{FOOTER}', f'class="gold" hidden>{FOOTER}', "confidentiality"),
+        (f'class="gold">{FOOTER}', f'class="other">{FOOTER}', "confidentiality styling"),
+        ("<p>Hi Team,</p>", f"<p>Hi Team,</p><p>{FOOTER}</p>", "leaked"),
     ],
 )
 def test_style_and_workflow_drift_fail(email, old, new, expected):
@@ -83,6 +93,19 @@ def test_style_and_workflow_drift_fail(email, old, new, expected):
     result = validate_email(target, contract)
     assert result["status"] == "blocked"
     assert any(expected.lower() in e.lower() for e in result["errors"])
+
+
+def test_confidentiality_decision_must_be_recorded(email):
+    target, contract = email
+    payload = json.loads(contract.read_text())
+    del payload["confidentiality"]
+    contract.write_text(json.dumps(payload), encoding="utf-8")
+    assert any(
+        "confidentiality-line decision" in e for e in validate_email(target, contract)["errors"]
+    )
+    payload["confidentiality"] = None
+    contract.write_text(json.dumps(payload), encoding="utf-8")
+    assert validate_email(target, contract)["errors"] == []
 
 
 def test_pending_ticket_is_draft_only(email):

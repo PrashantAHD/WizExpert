@@ -197,6 +197,24 @@ def validate_email(html: Path, contract_path: Path) -> dict:
         errors.append("Required internal preparation notice is missing or changed.")
     if NOTICE in actual or "PRIVATE COMMUNICATION DRAFT" in actual:
         errors.append("Internal preview text leaked into the copyable body.")
+    confidentiality = None
+    if "confidentiality" not in contract:
+        errors.append("Contract must record the confidentiality-line decision (text or null).")
+    elif contract["confidentiality"] is not None:
+        line = compact(str(contract["confidentiality"]))
+        try:
+            confidentiality = document.by_id(contract["confidentiality_id"])
+        except (KeyError, ValueError):
+            errors.append("Required confidentiality line is missing from the private wrapper.")
+        if confidentiality is not None:
+            if not any(node is confidentiality for node in visible_nodes):
+                errors.append("Confidentiality line is hidden by itself or an ancestor.")
+            if any(node is confidentiality for node in body.elements()):
+                errors.append("Confidentiality line must be in the private wrapper, not the body.")
+            if not line or confidentiality.text() != line:
+                errors.append("Confidentiality line differs from the approved text.")
+        if line and line in actual:
+            errors.append("Confidentiality line leaked into the copyable body.")
     for forbidden in (
         r"###",
         r"staged approach",
@@ -278,6 +296,17 @@ def validate_email(html: Path, contract_path: Path) -> dict:
             regions[name].attrs.get(a, "") != reference.attrs.get(a, "") for a in ("class", "style")
         ):
             errors.append(f"{name} styling differs from the approved template.")
+    if confidentiality is not None:
+        try:
+            reference = approved.by_id(contract["confidentiality_id"])
+        except ValueError:
+            errors.append("Approved template lacks the confidentiality wrapper line.")
+        else:
+            if any(
+                confidentiality.attrs.get(a, "") != reference.attrs.get(a, "")
+                for a in ("class", "style")
+            ):
+                errors.append("confidentiality styling differs from the approved template.")
     return {
         "status": "blocked" if errors else "email_template_checks_passed",
         "errors": errors,
