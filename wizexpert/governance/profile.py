@@ -10,6 +10,7 @@ It is looked up in this order:
    ``~/.config/wizexpert/governance-profile.json``)
 
 The former ``WIZGOV_PROFILE`` variable and ``wizgov-profile.json`` file are still accepted.
+The standalone per-user ``wizgov/profile.json`` is the last fallback.
 
 When none exists, interactive commands start ``wizexpert governance setup`` once;
 non-interactive runs stop with instructions instead of guessing client details.
@@ -170,13 +171,26 @@ def user_profile_path() -> Path:
     )
 
 
+def legacy_user_profile_path() -> Path:
+    if os.name == "nt" and os.environ.get("APPDATA"):
+        return Path(os.environ["APPDATA"]) / "wizgov" / "profile.json"
+    return (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "wizgov" / "profile.json"
+    )
+
+
 def find_profile(explicit: Path | str | None = None) -> Path | None:
     if explicit:
         return Path(explicit)
     for variable in (ENV_VAR, LEGACY_ENV_VAR):
         if os.environ.get(variable):
             return Path(os.environ[variable])
-    for candidate in (Path.cwd() / LOCAL_NAME, Path.cwd() / LEGACY_LOCAL_NAME, user_profile_path()):
+    for candidate in (
+        Path.cwd() / LOCAL_NAME,
+        Path.cwd() / LEGACY_LOCAL_NAME,
+        user_profile_path(),
+        legacy_user_profile_path(),
+    ):
         if candidate.is_file():
             return candidate
     return None

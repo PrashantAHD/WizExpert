@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +13,7 @@ from pptx import Presentation
 from test_dashboard import history_payload, make_template
 
 from wizexpert.governance.dashboard import shape, template_history
-from wizexpert.governance.dashboard_data import DashboardError, read_workbook
+from wizexpert.governance.dashboard_data import DashboardError, combine_trend, read_workbook
 from wizexpert.governance.monthly import build_monthly_workbook, reporting_month, run_monthly
 from wizexpert.governance.monthly_files import digest, monthly_lock, publish_pair
 from wizexpert.governance.wiz_report import REQUIRED_COLUMNS
@@ -200,7 +200,10 @@ class MonthlyWorkflowTests(unittest.TestCase):
             deck_path.name, "ExampleHealth_Remediation_Executive_Dashboard_9.13.26_PRELIMINARY.pptx"
         )
         deck = Presentation(deck_path)
-        self.assertEqual(shape(deck.slides[0], 2).text, "September 13th, 2026 (Preliminary)")
+        self.assertEqual(
+            shape(deck.slides[0], 2).text,
+            "September 2026 (Preliminary)\nAs of September 13th, 2026",
+        )
         self.assertIn("Preliminary", deck.core_properties.title)
         history = template_history(deck, None, allow_preliminary=True)
         self.assertEqual(max(history).isoformat(), "2026-09-13")
@@ -209,6 +212,102 @@ class MonthlyWorkflowTests(unittest.TestCase):
             DashboardError, "preliminary dashboard cannot be used as a template"
         ):
             template_history(deck, None)
+
+    def test_next_period_preview_before_calendar_month_preserves_approved_trend(self):
+        from wizexpert.governance.dashboard import build_deck
+
+        prior = self.root / "approved-october.xlsx"
+        build_monthly_workbook(
+            [self.csv], [], prior, reporting_month("2026-10"), "Example Provider"
+        )
+        self.close_remaining_high("2026-10-20")
+        workbook = self.root / "november-preview.xlsx"
+        build_monthly_workbook(
+            [self.csv],
+            [prior],
+            workbook,
+            reporting_month("2026-11"),
+            "Example Provider",
+            collected_at=datetime(2026, 10, 27, 6, 0, tzinfo=UTC),
+        )
+        data = read_workbook(workbook, allow_preliminary=True)
+        self.assertEqual(data.previous, date(2026, 10, 15))
+        self.assertEqual(data.latest, date(2026, 10, 27))
+        self.assertEqual(data.reporting_date, date(2026, 11, 15))
+        self.assertEqual(data.open_at(data.previous), 1)
+        self.assertEqual(data.open_at(data.latest), 0)
+        history = json.loads(self.history.read_text())
+        history["points"].extend(
+            [
+                {"date": "2026-09-15", "open": 1},
+                {"date": "2026-10-15", "open": 1},
+            ]
+        )
+        self.history.write_text(json.dumps(history), encoding="utf-8")
+        approved = {date.fromisoformat(p["date"]): p["open"] for p in history["points"]}
+        points = combine_trend(data, approved)
+        self.assertEqual(list(points)[-2:], [date(2026, 10, 15), date(2026, 10, 27)])
+        self.assertEqual([points[d] for d in list(points)[-2:]], [1, 0])
+        broken = dict(approved)
+        del broken[date(2026, 9, 15)]
+        with self.assertRaisesRegex(DashboardError, "Missing approved trend"):
+            combine_trend(data, broken)
+        deck = Presentation(
+            build_deck(workbook, self.template, history_path=self.history, allow_preliminary=True)
+        )
+        self.assertEqual(
+            shape(deck.slides[0], 2).text,
+            "November 2026 (Preliminary)\nAs of October 27th, 2026",
+        )
+        self.assertIn("Oct 15", shape(deck.slides[1], 13).text)
+        self.assertIn("Oct 27", shape(deck.slides[1], 13).text)
+        self.assertEqual(template_history(deck, None, allow_preliminary=True), points)
+        wb = load_workbook(workbook)
+        try:
+            self.assertIn("Scheduled cutoff 2026-11-15", wb["HIGH Issues"]["A2"].value)
+            row = next(r for r in wb["HIGH Issues"].iter_rows() if r[0].value == "HIGH-95")
+            self.assertEqual(row[6].value, "November 2026")
+        finally:
+            wb.close()
+
+    def test_preliminary_collection_outside_reporting_interval_is_rejected(self):
+        for collected in (
+            datetime(2026, 8, 15, 23, 59, 59, tzinfo=UTC),
+            datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
+            datetime(2026, 9, 16, tzinfo=UTC),
+        ):
+            with (
+                self.subTest(collected=collected),
+                self.assertRaisesRegex(DashboardError, "scheduled cutoff"),
+            ):
+                build_monthly_workbook(
+                    [self.csv],
+                    [self.previous],
+                    self.root / "invalid.xlsx",
+                    reporting_month("2026-09"),
+                    "Example Provider",
+                    collected_at=collected,
+                )
+
+    def test_reopened_issue_updates_latest_without_rewriting_approved_snapshot(self):
+        original = self.previous.read_bytes()
+        old = read_workbook(self.previous)
+        next(r for r in self.rows if r["Issue ID"] == "HIGH-0").update(
+            Status="OPEN", **{"Resolved Time": ""}
+        )
+        save_csv(self.csv, self.rows)
+        target = self.root / "reopened.xlsx"
+        build_monthly_workbook(
+            [self.csv], [self.previous], target, reporting_month("2026-09"), "Example Provider"
+        )
+        data = read_workbook(target)
+        self.assertEqual(data.snapshots[data.previous], old.snapshots[old.latest])
+        prior_high = old.snapshots[old.latest]["HIGH"]
+        current_high = data.snapshots[data.latest]["HIGH"]
+        self.assertEqual(current_high.open, prior_high.open + 1)
+        self.assertEqual(current_high.closed, prior_high.closed - 1)
+        self.assertFalse(any(f.issue_id == "HIGH-0" for f in data.findings))
+        self.assertEqual(self.previous.read_bytes(), original)
 
     def test_kpi_splits_remaining_into_in_progress_and_open(self):
         next(r for r in self.rows if r["Issue ID"] == "LOW-0")["Status"] = "IN_PROGRESS"
@@ -458,10 +557,13 @@ class MonthlyWorkflowTests(unittest.TestCase):
         existing = self.run_september()
         before = (existing.workbook.read_bytes(), existing.deck.read_bytes())
         self.close_remaining_high()
-        with patch(
-            "wizexpert.governance.monthly.build_deck",
-            side_effect=DashboardError("unsupported template"),
-        ), self.assertRaisesRegex(DashboardError, "unsupported template"):
+        with (
+            patch(
+                "wizexpert.governance.monthly.build_deck",
+                side_effect=DashboardError("unsupported template"),
+            ),
+            self.assertRaisesRegex(DashboardError, "unsupported template"),
+        ):
             self.run_september()
         self.assertEqual(before, (existing.workbook.read_bytes(), existing.deck.read_bytes()))
         self.assertFalse((self.root / ".wiz-monthly-2026-09.lock").exists())
@@ -578,10 +680,13 @@ class PairPublicationTests(unittest.TestCase):
         for path in self.targets:
             path.write_bytes(b"old")
         expected = {p: digest(p) for p in self.targets}
-        with patch(
-            "wizexpert.governance.monthly_files.shutil.copy2",
-            side_effect=OSError("backup disk full"),
-        ), self.assertRaisesRegex(OSError, "backup disk full"):
+        with (
+            patch(
+                "wizexpert.governance.monthly_files.shutil.copy2",
+                side_effect=OSError("backup disk full"),
+            ),
+            self.assertRaisesRegex(OSError, "backup disk full"),
+        ):
             publish_pair(self.staged, self.targets, expected, "2026-09")
         self.assertTrue(all(p.read_bytes() == b"old" for p in self.targets))
 
@@ -596,10 +701,13 @@ class PairPublicationTests(unittest.TestCase):
                 raise PermissionError("locked")
             return original_replace(source, target)
 
-        with patch(
-            "wizexpert.governance.monthly_files.os.replace",
-            side_effect=fail_publication_and_restore,
-        ), self.assertRaisesRegex(DashboardError, "manual recovery"):
+        with (
+            patch(
+                "wizexpert.governance.monthly_files.os.replace",
+                side_effect=fail_publication_and_restore,
+            ),
+            self.assertRaisesRegex(DashboardError, "manual recovery"),
+        ):
             publish_pair(self.staged, self.targets, expected, "2026-09")
         archive = next((self.root / "report-backups").iterdir())
         self.assertEqual((archive / "report.xlsx").read_bytes(), b"old")

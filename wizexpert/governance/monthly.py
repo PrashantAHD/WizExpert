@@ -127,8 +127,8 @@ def build_monthly_workbook(
         actual = collected_at.replace(tzinfo=None)
         scheduled = snapshots[-1][1]
         require(
-            actual.year == month.year and actual.month == month.month and actual < scheduled,
-            "Preliminary collection must be in the reporting month "
+            snapshots[-2][1] < actual < scheduled,
+            "Preliminary collection must be after the previous scheduled cutoff "
             "and before its scheduled cutoff.",
         )
         snapshots[-1] = (actual.strftime("%b %d, %Y"), actual)

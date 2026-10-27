@@ -1,5 +1,5 @@
 ---
-description: "Use when investigating Wiz findings, preparing analysis, Excel reports and stakeholder emails, tracking approvals or performing safe production remediation"
+description: "Use when investigating Wiz findings, preparing governance reports, analysis, Excel reports and stakeholder emails, tracking approvals or performing safe production remediation"
 applyTo: '**'
 ---
 
@@ -13,6 +13,20 @@ Use synthetic fixtures and approved external locations such as
 `C:\PrivateEvidence\graph.csv` and `C:\PrivateReports\finding.xlsx`.
 
 ## Product boundaries
+
+- For monthly governance preparation, read `docs/GOVERNANCE-RUNBOOK.md`,
+  `docs/GOVERNANCE.md` and the snapshot guide before collecting or generating.
+  Keep the workbook, executive dashboard and operational deck workflows distinct.
+  Do not apply a single-issue email/report template in place of an approved
+  governance template. Use `wizexpert governance verify` for the prepared
+  four-severity set, then complete native/visual and release checks. Its success
+  never certifies source completeness, work attribution or permission to share.
+  Before bulk pagination, reuse approved prior evidence and record the runbook's
+  collection plan, endpoint coverage and request estimate. Prefer complete change
+  evidence or focused current-state reconciliation; never default to re-fetching
+  historical closed findings. Creation-date-only deltas and matching aggregate
+  counts cannot prove older issues unchanged. Record the reason and obtain
+  report-owner agreement before escalating to a full historical refresh.
 
 - Preserve a local CSV-first CLI: `python -m wizexpert`,
   `python -m wizexpert.csv_report` and installed `wizexpert` must
@@ -38,6 +52,28 @@ Use synthetic fixtures and approved external locations such as
   ServiceNow is authoritative for approvals, changes, exceptions and evidence.
 
 ## Preparation continuity and completion
+
+- Use `docs/WORKFLOW-QA.md` for evidence-backed workflow compliance checks before
+  bulk collection, generation and handoff. Do not substitute arithmetic tests,
+  a checklist assertion or the preparer's own review for process QA.
+  Bind current rule versions, private instructions, sources and actual activity
+  records. Validate the real initial-outreach HTML with `wizexpert email-qa`;
+  preserve the approved CSS/wrapper, headings, closing, signature and identifiers.
+  Missing, failed or unsupported checks block the affected stage. Never backdate
+  a review to cover already-performed unreviewed actions. Verify hook activation
+  before claiming bulk-tool runtime enforcement.
+  Apply QA across setup, finding, governance, campaign, remediation and
+  publication workflows, not just emails or arithmetic. Use schema-2 section
+  coverage with all applicable private rules; retain the original request,
+  exact requested-deliverable manifest and explicit scope decisions. Review
+  every applicable documented section, not just the fixed check IDs.
+  Validate actual HTML/PDF/Office/email outputs and specialized-validator
+  receipts; check all required companion parity pairs and bind native/visual
+  evidence separately for each rendered file. Unsupported formats, missing
+  requested outputs, unresolved rule conflicts and stale evidence block
+  completion. Use immutable tracker snapshots and actual approval/execution/
+  verification evidence for remediation; passing QA never authorizes execution,
+  sending, publication or closure. Semantic/native review is not machine proof.
 
 - For an authorized end-to-end finding assessment, continue through available
   read-only investigation, internal analysis HTML, client-facing assessment HTML,

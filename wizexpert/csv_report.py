@@ -24,7 +24,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.utils.exceptions import InvalidFileException
 
-from wizexpert.csv_layout import cover, remediation_page, resource_table
+from wizexpert.csv_layout import DEFAULT_FOOTER, cover, remediation_page, resource_table
 from wizexpert.issue_metadata import enrich_records
 from wizexpert.workflow import Tracker, load_tracker
 
@@ -336,6 +336,7 @@ def _workbook(
     notes: str,
     issues: list[dict[str, str]] | None = None,
     workflow: Tracker | None = None,
+    footer: str = DEFAULT_FOOTER,
 ) -> BytesIO:
     workbook = Workbook()
     workbook.remove(workbook.active)
@@ -353,6 +354,8 @@ def _workbook(
     ):
         resource_table(workbook, name, subset)
     remediation_page(workbook, notes=notes)
+    for sheet in workbook:
+        sheet.oddFooter.left.text = footer
     workbook.active = 0
     stream = BytesIO()
     workbook.save(stream)
@@ -471,6 +474,7 @@ def generate_report(
     issues: Sequence[str | Path] | None = None,
     update: bool = False,
     workflow: str | Path | None = None,
+    footer: str | None = None,
 ) -> ReportResult:
     """Publish four tabs outside this repository and return non-identifying counts.
 
@@ -483,12 +487,15 @@ def generate_report(
     manual workbook edits are replaced. Close Excel and avoid concurrent writers.
     ``workflow`` optionally snapshots a private tracker with the same control ID;
     scope still requires human review. Report generation never advances it.
+    ``footer`` replaces the left page footer on every tab (for example an
+    organization's confidentiality line); it must be one plain line.
     """
     if not paths or isinstance(paths, (str, Path)):
         raise ValueError("Supply one or more CSV paths as a sequence.")
     if severity not in (*SEVERITIES, NOT_SUPPLIED):
         raise ValueError("Severity must be Critical, High, Medium, Low or Informational.")
     day = _as_of(as_of)
+    footer = _footer(footer)
     if isinstance(issues, (str, Path)):
         raise ValueError("Supply issue CSV paths as a sequence.")
     destination = _output_path(output, day, update=update)
@@ -524,10 +531,25 @@ def generate_report(
     )
     stream = _workbook(
         evidence, result, day, title or DEFAULT_TITLE, severity, rule_id, note_text, issue_records,
-        tracker,
+        tracker, footer,
     )
     _publish(stream, destination, expected_digest=expected_digest)
     return result
+
+
+def _footer(value: str | None) -> str:
+    if value is None:
+        return DEFAULT_FOOTER
+    if (
+        not isinstance(value, str) or not value.strip() or value != value.strip()
+        or len(value) > 200 or "&" in value
+        or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in value)
+    ):
+        raise ValueError(
+            "Footer must be one plain line of at most 200 characters without '&' or control "
+            "characters."
+        )
+    return value
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -551,6 +573,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--workflow", help="Private tracker JSON; retain its snapshot in cover cell notes",
     )
+    parser.add_argument(
+        "--footer",
+        help="Left page-footer text on every tab, e.g. an organization's confidentiality line",
+    )
     args = parser.parse_args(argv)
     if args.update:
         print(
@@ -562,7 +588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = generate_report(
             args.paths, output=args.output, as_of=args.as_of, title=args.title,
             severity=args.severity, rule_id=args.rule_id, notes=args.notes,
-            issues=args.issues, update=args.update, workflow=args.workflow,
+            issues=args.issues, update=args.update, workflow=args.workflow, footer=args.footer,
         )
     except ValueError as error:
         print(f"Report not created: {error}", file=sys.stderr)

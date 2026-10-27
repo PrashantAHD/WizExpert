@@ -143,6 +143,9 @@ def _height(text: str, width: float, size: int = 10, minimum: float = 24) -> flo
     return height
 
 
+DEFAULT_FOOTER = "Confidential - internal review"
+
+
 def _print_setup(sheet: Worksheet, *, landscape: bool = False) -> None:
     sheet.sheet_view.showGridLines = False
     sheet.sheet_view.zoomScale = 100
@@ -155,7 +158,7 @@ def _print_setup(sheet: Worksheet, *, landscape: bool = False) -> None:
     sheet.page_margins.top = 0.35
     sheet.page_margins.bottom = 0.5
     sheet.page_margins.header = sheet.page_margins.footer = 0.15
-    sheet.oddFooter.left.text = "Confidential - internal review"
+    sheet.oddFooter.left.text = DEFAULT_FOOTER
     sheet.oddFooter.right.text = "Page &P of &N"
     sheet.print_options.horizontalCentered = True
 

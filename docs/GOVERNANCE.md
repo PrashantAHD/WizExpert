@@ -5,6 +5,10 @@ workbook, a three-slide executive dashboard and a ten-slide operational
 governance deck, all built from reviewed Wiz evidence and the client's
 approved templates.
 
+For preparation, use the [governance runbook](GOVERNANCE-RUNBOOK.md). It separates
+source reconciliation, generation, automated verification and release approval;
+an ordinary successful build is not evidence that those gates were completed.
+
 > [!IMPORTANT]
 > Client exports, workbooks, decks, profiles, evidence and backups are private.
 > Keep them in approved storage **outside this repository**. Relative output
@@ -30,8 +34,13 @@ does not change how workbooks are read.
 | Generate or modify a workbook on its own | `wizexpert governance workbook` | Governance workbook with severity and scope tabs |
 | Build a dashboard from a reviewed workbook | `wizexpert governance dashboard` | New PowerPoint from the approved template |
 | Prepare the governance-call presentation | `wizexpert governance deck` | Ten-slide operational deck from a dated Wiz snapshot |
+| Verify the prepared four-severity report set | `wizexpert governance verify` | Read-only replay, count reconciliation and file-hash record; not release approval |
+| Plan collection and reconcile historical/fresh evidence | `wizexpert governance reconcile` | Request estimate, issue-level changes and a hash-bound reconciliation audit |
 
-Every command accepts `--help` and `--profile PATH`. The two presentation
+Every command accepts `--help`. Reporting commands accept `--profile PATH`;
+`reconcile` instead uses an explicit collection plan. `verify` also requires a
+generation-phase `--workflow-review` from [workflow QA](WORKFLOW-QA.md).
+The two presentation
 workflows are distinct: the executive dashboard is derived from the Excel
 workbook; the operational deck is derived from a reviewed Wiz snapshot. Neither
 silently substitutes its historical figures for the other.
@@ -62,7 +71,13 @@ The profile is found in this order: `--profile PATH`, the `WIZEXPERT_PROFILE`
 environment variable, `wizexpert-profile.json` in the current folder, then the
 per-user profile (`%APPDATA%\WizExpert\governance-profile.json`). Profiles from
 the former standalone reporter (`WIZGOV_PROFILE`, `wizgov-profile.json`) still
-load. For several clients keep one private profile per client:
+load.
+The old per-user location (`%APPDATA%\wizgov\profile.json`, or
+`$XDG_CONFIG_HOME/wizgov/profile.json`) is also read as a last fallback without
+moving or rewriting it. An invalid selected profile fails; it is not silently
+replaced with another client's profile.
+
+For several clients keep one private profile per client:
 
 ```powershell
 wizexpert governance setup --client-name "Example Health" --file-prefix ExampleHealth `
@@ -110,6 +125,14 @@ formulas.
 
 These are separate risks: splitting exports does not recover retained history,
 and carrying history forward does not prove current exports are complete.
+
+For repeat-month collection, **reuse the approved history before requesting
+bulk data**. Follow the runbook's
+[collection strategy](GOVERNANCE-RUNBOOK.md#2-plan-collection-from-retained-evidence-then-reconcile):
+estimate requests, prefer complete change evidence, and reconcile older issues
+that reopened or changed. A complete historical re-fetch is an escalation,
+not the default. The CLI merges supplied inputs; it does not select or execute
+MCP queries or certify that a delta is exhaustive.
 
 ### Exporting more than 5,000 issues
 
@@ -246,6 +269,11 @@ For an early, workbook-only review, the Python helper
 PRELIMINARY with the collection time and scheduled cutoff, and
 `build_deck(..., allow_preliminary=True)` creates a matching `_PRELIMINARY`
 dashboard. A preliminary dashboard cannot be the next month's template.
+Collection must be strictly after the previous scheduled cutoff and before the
+current cutoff, not necessarily in the report's calendar month. For example, an
+October 27 collection can preview a November 15 period: retain the approved
+October 15 trend point, add October 27 as the actual observation, and label the
+dashboard November PRELIMINARY. Never relabel that observation as November 15.
 
 ## Executive dashboard
 
@@ -284,8 +312,9 @@ Dashboard rules:
   snapshot; missing months fail rather than being interpolated.
 - Open backlog = Critical + High Open / In Progress. Resolved / accepted is
   cumulative and can exceed the baseline as new findings enter scope.
-- The latest two snapshots must be consecutive months. Flat or rising backlog is
-  never presented as improvement.
+- Final snapshots must be consecutive months. A preliminary observation must
+  follow the prior approved cutoff and fall no later than the next scheduled
+  cutoff. Flat or rising backlog is never presented as improvement.
 - Exposure examples use only RESOLVED findings on or before the cutoff; ignored
   findings are never described as eliminated exposure.
 
@@ -310,9 +339,11 @@ and approval checks.
   generated deck into the snapshot before regeneration.
 - Nothing after the period end (snapshot day, 23:59:59 UTC) is counted; early
   collections are marked PRELIMINARY on every slide.
-- Resolved slides are tenant closure statistics labelled **Attribution
-  Pending**, not credited team work. REJECTED is not remediation, and resolution
-  status alone never claims a resource was secured.
+- Without reviewed `team_resolved` evidence, resolved slides show tenant closure
+  statistics labelled **Attribution Pending**, not credited team work. With that
+  evidence, highlights use only the supported team subset, including separately
+  labelled Accepted Risk where approved. REJECTED is not technical remediation,
+  and resolution status alone never proves a resource was secured.
 
 Speaker notes and companion JSON contain confidential evidence; review them as
 well as the visible slides before sharing.

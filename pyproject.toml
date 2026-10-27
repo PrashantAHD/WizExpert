@@ -13,6 +13,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+qa = [
+    "PyMuPDF>=1.26,<2",
+]
 governance = [
     "python-pptx>=1.0.2,<2",
     "Pillow>=10.0,<14",
