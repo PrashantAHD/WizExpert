@@ -28,6 +28,9 @@ SOURCE_SUFFIXES = {
 }
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+SYNTHETIC_MERGE_SUBJECT = re.compile(
+    r"\AMerge ([0-9a-f]{40}|[0-9a-f]{64}) into ([0-9a-f]{40}|[0-9a-f]{64})(?=\n|\Z)"
+)
 PUBLIC_ATTRIBUTION = (
     "Co-authored-by: Copilot <223556219+Copilot" + "@users.noreply.github.com>"
 )
@@ -80,7 +83,9 @@ def git(root: Path, *args: str) -> bytes:
     return result.stdout
 
 
-def content_issues(data: bytes, *, commit_message: bool = False) -> list[str]:
+def content_issues(
+    data: bytes, *, commit_message: bool = False, parents: frozenset[str] = frozenset()
+) -> list[str]:
     if len(data) > MAX_FILE_BYTES:
         return ["file exceeds publication size limit"]
     if b"\x00" in data:
@@ -89,6 +94,11 @@ def content_issues(data: bytes, *, commit_message: bool = False) -> list[str]:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return ["content is not UTF-8 text"]
+    merge = SYNTHETIC_MERGE_SUBJECT.match(text) if commit_message else None
+    if merge and len(parents) == 2 and set(merge.groups()) == parents:
+        # GitHub's synthetic PR merge subject names the commit's own two parents; their hex
+        # digits can look like account IDs. Only that verified generated subject is neutralised.
+        text = "Merge <oid> into <oid>" + text[merge.end() :]
     email_text = text
     ending = "\n\n" + PUBLIC_ATTRIBUTION
     if commit_message and text.rstrip("\r\n").endswith(ending):
@@ -206,10 +216,15 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
     # tips cover detached commits and explicit SHA refspecs absent from --all.
     revisions = git(root, "rev-list", "--all", *(outgoing or [])).decode("ascii").splitlines()
     for revision in revisions:
+        parents = frozenset(
+            git(root, "show", "-s", "--format=%P", revision).decode("ascii").split()
+        )
         report(
             f"commit message {revision[:12]}",
             content_issues(
-                git(root, "show", "-s", "--format=%B", revision), commit_message=True
+                git(root, "show", "-s", "--format=%B", revision),
+                commit_message=True,
+                parents=parents,
             ),
         )
         for entry in git(root, "ls-tree", "-r", "-z", revision).split(b"\0"):
