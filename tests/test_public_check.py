@@ -230,6 +230,66 @@ def test_public_attribution_does_not_exempt_other_sensitive_patterns():
     assert "AWS account ID" in public_check.content_issues(message.encode(), commit_message=True)
 
 
+def test_synthetic_merge_subject_object_ids_are_not_account_ids():
+    head = "b75aad7c43498ee304f" + "6" + "27814458483" + "a466246ed"
+    base = "d" * 40
+    message = f"Merge {head} into {base}\n".encode()
+    parents = frozenset({head, base})
+    assert public_check.content_issues(message, commit_message=True, parents=parents) == []
+    assert "AWS account ID" in public_check.content_issues(message, commit_message=True)
+    assert "AWS account ID" in public_check.content_issues(message)
+
+
+def test_synthetic_merge_exemption_covers_64_hex_and_second_id():
+    first, second = "a" * 64, "b" * 52 + "1" * 12
+    message = f"Merge {first} into {second}".encode()
+    parents = frozenset({first, second})
+    assert public_check.content_issues(message, commit_message=True, parents=parents) == []
+
+
+@pytest.mark.parametrize(("body", "label"), [
+    ("Contact synthetic" + "@example.invalid", "email address"),
+    ("gh" + "p_" + "A" * 24, "GitHub token"),
+    ("1" * 12, "AWS account ID"),
+])
+def test_synthetic_merge_exemption_still_scans_body(body, label):
+    first, second = "a" * 40, "b" * 28 + "1" * 12
+    message = f"Merge {first} into {second}\n\n{body}".encode()
+    parents = frozenset({first, second})
+    assert label in public_check.content_issues(message, commit_message=True, parents=parents)
+
+
+A40, B40 = "a" * 40, "b" * 40
+
+
+@pytest.mark.parametrize(("message", "parents"), [
+    ("Merge " + "1" * 12 + "a" * 28 + " into " + B40, {"1" * 12 + "a" * 28, "c" * 40}),
+    ("Merge " + A40 + " into " + "b" * 28 + "1" * 12 + "b" * 5, {A40, "b" * 28 + "1" * 12}),
+    ("Merge " + A40 + " into " + B40 + " " + "1" * 12, {A40, B40}),
+    ("Merge " + A40 + " into " + B40 + "\n\n" + "1" * 12, {A40, B40}),
+    ("Subject\nMerge " + "1" * 12 + "a" * 28 + " into " + B40, {"1" * 12 + "a" * 28, B40}),
+    ("Merge " + "1" * 12 + "A" * 28 + " into " + B40, {"1" * 12 + "A" * 28, B40}),
+    ("Merge " + "1" * 12 + "a" * 28 + " into " + B40 + "\r\n", {"1" * 12 + "a" * 28, B40}),
+    ("Merge " + "1" * 12 + "a" * 28 + " into " + B40, {"1" * 12 + "a" * 28}),
+])
+def test_synthetic_merge_exemption_is_exact(message, parents):
+    issues = public_check.content_issues(
+        message.encode(), commit_message=True, parents=frozenset(parents)
+    )
+    assert "AWS account ID" in issues
+
+
+def test_real_merge_commit_subject_naming_its_parents_passes(repository):
+    run_git(repository, "commit", "--allow-empty", "-qm", "Base")
+    base = run_git(repository, "rev-parse", "HEAD").strip()
+    run_git(repository, "checkout", "-qb", "topic")
+    run_git(repository, "commit", "--allow-empty", "-qm", "Topic")
+    head = run_git(repository, "rev-parse", "HEAD").strip()
+    run_git(repository, "checkout", "-q", "-")
+    run_git(repository, "merge", "--no-ff", "-qm", f"Merge {head} into {base}", "topic")
+    assert public_check.inspect_repository(repository) == []
+
+
 def test_index_symlink_is_rejected_without_following_it(repository):
     blob = run_git(repository, "hash-object", "-w", "README.md")
     run_git(repository, "update-index", "--add", "--cacheinfo", f"120000,{blob},docs/link.md")
