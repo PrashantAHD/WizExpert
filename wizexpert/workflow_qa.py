@@ -299,15 +299,32 @@ def normalized_query(arguments: dict) -> dict:
     }
 
 
+WIZ_BULK_TOOLS = {"list_issues", "list_issues_grouped", "execute_graph_query"}
+PARALLEL_TOOLS = {"multi_tool_use.parallel", "parallel"}
+WIZ_EXECUTE_SUFFIXES = ("wiz-execute", "mcp__wiz__execute", "mcp_wiz_execute")
+
+
+def normalize_tool_name(name: object) -> str | None:
+    return name.strip().lower() if isinstance(name, str) else None
+
+
+def is_wiz_execute(name: object) -> bool:
+    normalized = normalize_tool_name(name)
+    return normalized is not None and normalized.endswith(WIZ_EXECUTE_SUFFIXES)
+
+
 def is_bulk(arguments: dict) -> bool:
     tool = arguments.get("tool_name", "")
-    if tool not in {"list_issues", "list_issues_grouped", "execute_graph_query"}:
+    require(isinstance(tool, str), "Invalid Wiz tool name.")
+    if tool.strip().lower() not in WIZ_BULK_TOOLS:
         return False
     parameters = arguments.get("parameters", {})
     require(isinstance(parameters, dict), "Invalid Wiz parameters.")
     first = parameters.get("first", 10)
     require(type(first) is int and first > 0, "Invalid Wiz page size.")
-    return first > 1 or bool(parameters.get("after"))
+    cursor = parameters.get("after")
+    require(cursor is None or (isinstance(cursor, str) and cursor != ""), "Invalid Wiz cursor.")
+    return first > 1 or cursor is not None
 
 
 def is_full_history(query: dict) -> bool:
@@ -462,7 +479,7 @@ def audit_activity(path: Path, review: dict, previous: dict) -> None:
                 continue
             data = event.get("data", {})
             tool = data.get("toolName", "")
-            if not tool.endswith("wiz-execute"):
+            if not is_wiz_execute(tool):
                 continue
             args = data.get("arguments", {})
             if is_bulk(args):
@@ -503,25 +520,32 @@ def receipt(path: Path, phase: str | None = None) -> dict:
     }
 
 
-def hook(payload: dict, review_path: Path | None) -> dict:
-    require(isinstance(payload, dict), "Hook input must be an object.")
-    tool = payload.get("tool_name", "")
-    args = payload.get("tool_input", {})
-    if tool in {"multi_tool_use.parallel", "parallel"}:
-        require(
-            isinstance(args, dict) and isinstance(args.get("tool_uses"), list),
-            "Invalid parallel tool input.",
-        )
-        for call in args["tool_uses"]:
-            hook(
-                {"tool_name": call["recipient_name"], "tool_input": call["parameters"]}, review_path
-            )
-        return {}
-    if not isinstance(tool, str) or not tool.endswith("wiz-execute"):
-        return {}
+NAME_KEYS = ("name", "tool", "toolName", "tool_name", "recipient_name")
+ARG_KEYS = ("args", "arguments", "input", "parameters", "toolArgs", "tool_input")
+BATCH_KEYS = ("toolCalls", "tool_calls", "calls")
+WIZ_NAME_MARKERS = ("wiz-execute", "mcp__wiz__execute", "mcp_wiz_execute")
+
+
+def hook_args(args: object) -> object:
+    """Tool args may be an object or a JSON-encoded string; only called for Wiz calls."""
+    if isinstance(args, str):
+        return json.loads(args, object_pairs_hook=unique_object)
+    return args
+
+
+def all_args(element: dict) -> list:
+    """Every present args value (args, arguments, input, ...), so none can hide a query."""
+    return [element[key] for key in ARG_KEYS if element.get(key) is not None]
+
+
+def hook_wiz_check(args: object, review_path: Path | None) -> None:
+    require(args is not None, "Wiz call has no readable query arguments.")
+    args = hook_args(args)
     require(isinstance(args, dict), "Invalid tool input.")
+    inner = args.get("tool_name")
+    require(isinstance(inner, str) and inner.strip() != "", "Wiz call has no inner tool name.")
     if not is_bulk(args):
-        return {}
+        return
     require(
         review_path is not None, "Bulk Wiz collection requires a workflow QA collection review."
     )
@@ -530,7 +554,139 @@ def hook(payload: dict, review_path: Path | None) -> dict:
         normalized_query(args) in review["allowed_wiz_queries"],
         "Bulk Wiz query is outside the reviewed plan; stop and obtain a new review.",
     )
+
+
+class BatchDeny(ValueError):
+    """Deny for one call in a batch; the message is already path-free."""
+
+
+def safe_call_id(call: object) -> str:
+    value = call.get("id") if isinstance(call, dict) else None
+    return re.sub(r"[^A-Za-z0-9_.-]", "", value)[:64] if isinstance(value, str) else "unknown"
+
+
+def scan_text(text: str, markers: tuple[str, ...]) -> bool:
+    """Case-insensitive marker scan that also sees JSON \\uXXXX escapes."""
+    text = text.lower()
+    unescaped = re.sub(r"\\u([0-9a-f]{4})", lambda m: chr(int(m.group(1), 16)), text)
+    return any(marker in candidate for candidate in (text, unescaped) for marker in markers)
+
+
+def unreadable_may_be_wiz(value: object) -> bool:
+    """Scan a whole decoded element for Wiz names or the bulk inner tool names."""
+    try:
+        text = value if isinstance(value, str) else json.dumps(value, default=str)
+        return scan_text(text, (*WIZ_NAME_MARKERS, *WIZ_BULK_TOOLS))
+    except Exception:  # noqa: BLE001 - cannot inspect it, so cannot prove it is not Wiz
+        return True
+
+
+def call_names(element: dict) -> tuple[list[str], bool]:
+    """Normalised names from every name key, and whether any name key is non-string."""
+    names, odd = [], False
+    for key in NAME_KEYS:
+        value = element.get(key)
+        if isinstance(value, str):
+            names.append(value.strip().lower())
+        elif value is not None:
+            odd = True
+    return names, odd
+
+
+def wrapper_inner(element: dict) -> tuple[list, bool]:
+    """Inner calls from every args value of a parallel wrapper, and whether all were readable."""
+    calls: list = []
+    values = all_args(element)
+    readable = bool(values)
+    for value in values:
+        try:
+            args = hook_args(value)
+        except ValueError:
+            readable = False
+            continue
+        if isinstance(args, dict) and isinstance(args.get("tool_uses"), list):
+            calls += args["tool_uses"]
+        else:
+            readable = False
+    return calls, readable
+
+
+def classify(element: object) -> list[tuple[str, object]]:
+    """Findings for one call: ("wiz", call) or ("unreadable", call) that may be Wiz."""
+    if not isinstance(element, dict):
+        return [("unreadable", element)] if unreadable_may_be_wiz(element) else []
+    found: list[tuple[str, object]] = []
+    names, odd = call_names(element)
+    if (not names or odd) and unreadable_may_be_wiz(element):
+        found.append(("unreadable", element))
+    if any(name in PARALLEL_TOOLS for name in names):
+        inner, readable = wrapper_inner(element)
+        if not readable and unreadable_may_be_wiz(element):
+            found.append(("unreadable", element))
+        for call in inner:
+            found += classify(call)
+    if any(is_wiz_execute(name) for name in names):
+        found.append(("wiz", element))
+    return found
+
+
+def payload_calls(payload: dict) -> list[tuple[object, bool]]:
+    """(call, is_batch_member) for every call the payload may carry, in any known shape."""
+    calls: list[tuple[object, bool]] = []
+    for key in BATCH_KEYS:
+        if key in payload:
+            batch = payload[key]
+            calls += [(call, True) for call in (batch if isinstance(batch, list) else [batch])]
+    if "toolName" in payload or "tool_name" in payload:
+        calls.append((payload, False))
+    return calls
+
+
+def hook(payload: dict, review_path: Path | None) -> dict:
+    """Raise ValueError to deny; only Wiz execute calls or malformed input that may be one."""
+    require(isinstance(payload, dict), "Hook input must be an object.")
+    for call, in_batch in payload_calls(payload):
+        try:
+            for kind, element in classify(call):
+                require(kind != "unreadable", "Unreadable tool call may be a Wiz call.")
+                queries = all_args(element)
+                require(bool(queries), "Wiz call has no readable query arguments.")
+                for query in queries:
+                    hook_wiz_check(query, review_path)
+        except Exception as error:  # noqa: BLE001 - any failure denies
+            if not in_batch:
+                raise
+            raise BatchDeny(
+                f"call {safe_call_id(call)} denied ({describe_error(error)})"
+            ) from error
     return {}
+
+
+def may_involve_wiz(payload: dict) -> bool:
+    """Decide from decoded data whether any call is, or may hide, a Wiz execute call."""
+    try:
+        return any(classify(call) for call, _ in payload_calls(payload))
+    except Exception:  # noqa: BLE001 - unreadable: cannot prove it is not Wiz
+        return True
+
+
+def mentions_wiz(raw: bytes) -> bool:
+    """Fallback for input that is not valid JSON: scan raw text, including JSON escapes."""
+    return scan_text(raw.decode("utf-8", errors="replace"), WIZ_NAME_MARKERS)
+
+
+def describe_error(error: BaseException) -> str:
+    """Deny reason without absolute paths: error type plus a basename or a path-free message."""
+    kind = type(error).__name__
+    if isinstance(error, BatchDeny):
+        return str(error)
+    if isinstance(error, OSError):
+        name = Path(str(error.filename)).name if error.filename else ""
+        return f"{kind}: review file unavailable" + (f" ({name})" if name else "")
+    message = str(error)
+    if isinstance(error, ValueError) and not re.search(r"[\\/]|\b[A-Za-z]:", message):
+        return f"{kind}: {message}"
+    return kind
 
 
 def require_generation_review(
@@ -547,7 +703,58 @@ def require_generation_review(
     return result
 
 
+def hook_deny(reason: str) -> dict:
+    return {
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        },
+    }
+
+
+def hook_main(argv: list[str]) -> int:
+    """Command hook entry point: always exit 0 with exactly one JSON object.
+
+    Command preToolUse hooks fail closed, so any crash would block every tool.
+    Only Wiz execute calls (or unreadable input that mentions them) are denied.
+    """
+    raw = b""
+    payload: object = None
+    try:
+        review: Path | None = None
+        if "--review" in argv and argv.index("--review") + 1 < len(argv):
+            review = Path(argv[argv.index("--review") + 1])
+        raw = sys.stdin.buffer.read()
+        configured = os.environ.get("WIZEXPERT_QA_REVIEW")
+        path = review or (Path(configured) if configured else None)
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique_object)
+        except (ValueError, RecursionError):
+            payload = None
+        if isinstance(payload, dict):
+            result = hook(payload, path)
+        elif mentions_wiz(raw):
+            result = hook_deny("Workflow QA blocked this action: unreadable Wiz hook input.")
+        else:
+            result = {}
+    except Exception as error:  # noqa: BLE001 - hook must never crash
+        involved = may_involve_wiz(payload) if isinstance(payload, dict) else mentions_wiz(raw)
+        result = hook_deny(f"Workflow QA blocked this action: {describe_error(error)}")
+        if not involved:
+            result = {}
+    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.flush()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "hook":
+        return hook_main(list(argv[1:]))
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     contract = commands.add_parser("requirements")
@@ -575,11 +782,8 @@ def main(argv: list[str] | None = None) -> int:
             }
         elif args.command == "check":
             result = receipt(args.review, args.phase)
-        else:
-            configured = os.environ.get("WIZEXPERT_QA_REVIEW")
-            path = args.review or (Path(configured) if configured else None)
-            payload = json.load(sys.stdin, object_pairs_hook=unique_object)
-            result = hook(payload, path)
+        else:  # pragma: no cover - hook is dispatched before parsing
+            return hook_main([])
         print(json.dumps(result, indent=2))
         return 0
     except (
@@ -592,19 +796,6 @@ def main(argv: list[str] | None = None) -> int:
         DefusedXmlException,
         ParseError,
     ) as error:
-        if args.command == "hook":
-            print(
-                json.dumps(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": f"Workflow QA blocked this action: {error}",
-                        }
-                    }
-                )
-            )
-            return 0
         parser.exit(1, f"Workflow QA blocked: {error}\n")
 
 
