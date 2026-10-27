@@ -36,6 +36,13 @@ reports. **Nothing is changed, sent or published without a person approving it.*
 | **Excel report and stakeholder drafts** | Reviewed findings, recommendations and a clear decision request |
 | **Progress and verification history** | Observation cutoffs, decisions, blockers and retained evidence |
 | **Monthly governance reporting** | Per-client governance workbook, executive dashboard and governance-call deck |
+| **Workflow compliance QA** | Rule-section coverage across setup, findings, governance, campaigns, remediation and publication; actual deliverable checks |
+
+See [workflow QA](docs/WORKFLOW-QA.md) for collection/generation/handoff reviews,
+the requested-output manifest, HTML/PDF/Office/email checks, the optional
+host-loaded bulk-query guard, and `wizexpert email-qa`. PDF QA uses the optional
+`.[qa]` extra. These checks do not authenticate approvals, replace native/semantic
+review or guarantee error-free reasoning.
 
 ## How it works
 
@@ -116,8 +123,11 @@ wizexpert governance monthly --month 2026-10 --input <csv...> `
 | `wizexpert governance workbook` | The governance workbook on its own |
 | `wizexpert governance dashboard` | The three-slide executive dashboard from a reviewed workbook |
 | `wizexpert governance deck` | The ten-slide governance-call deck from a reviewed Wiz snapshot |
+| `wizexpert governance verify` | Read-only replay and reconciliation of the prepared four-severity report set |
 
-See the [governance guide](docs/GOVERNANCE.md).
+Follow the [preparation/release runbook](docs/GOVERNANCE-RUNBOOK.md) and
+[governance guide](docs/GOVERNANCE.md). Automated verification does not replace
+source-completeness, native/visual or release review.
 
 ## How WizExpert stays secure
 

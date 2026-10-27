@@ -46,8 +46,11 @@ Before ending the preparation task:
 - Persist reviewed progress, limitations and the next action before a necessary
   handoff. Do not imply background continuation unless a task is actually running.
 
-This is an assistant/operator completion check, not a new CLI validator or a
-guarantee that an assistant cannot end a response early.
+Use [workflow-compliance QA](WORKFLOW-QA.md) to review these process requirements
+against actual evidence and artifacts. The initial-email checker validates the
+real HTML template, not just the preparer's claim. Semantic conclusions still
+require an independent evidence-backed reviewer; this is not a guarantee that
+an assistant cannot make a mistake or end a response early.
 
 ## 1. Collect and reconcile evidence
 
@@ -566,6 +569,13 @@ the visible stakeholder response request. Verify scope manually as well as the
 enforced control-ID match.
 Generating a report never advances the tracker. Stages 1-2 produce a draft
 snapshot, not a claim of final validated analysis.
+
+`--footer "<line>"` sets the left page footer on every workbook tab (default
+`Confidential - internal review`), for example an organization's required
+confidentiality line. Keep organization-specific wording in private
+instructions and pass it explicitly; it must be one plain line without `&`.
+Apply the same line to HTML footers and every PDF page (for example print CSS
+`@page{@bottom-center{content:"<line>"}}`) when your conventions require it.
 
 ## Report maintenance
 
