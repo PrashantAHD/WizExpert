@@ -41,7 +41,8 @@ Use synthetic fixtures and approved external locations such as
 
 - For an authorized end-to-end finding assessment, continue through available
   read-only investigation, internal analysis HTML, client-facing assessment HTML,
-  Excel report and stakeholder email HTML, with the required text companions.
+  PDF versions of the analyses, an Excel report when useful and stakeholder
+  email HTML. Do not generate duplicate `.txt` report or email companions.
   Do not stop at an initial analysis
   or a "next steps" list while actionable preparation remains. Respect narrower
   requests, explicit pauses and changes of scope; a question alone does not
@@ -124,6 +125,28 @@ Incorrect: "Every CSV row is a separate issue and matching names prove identity.
   stage numbers and ticket-routing reminders in private tracking/evidence notes,
   not the stakeholder narrative. Do not invent recipients, approvals or completed
   outreach.
+- Present "Recommended Remediation Approaches", not a staged work plan or
+  internal execution checklist. Explain applicability and distinguish alternative
+  choices from complementary controls. Ask stakeholders to confirm the selected
+  approach and either implement it through their approved process or explicitly
+  authorize the reporting team to implement the agreed scope. An approach
+  selection is not execution authorization.
+- Keep detailed evidence qualifications, collection limitations, scanner
+  discrepancies and open investigation questions in internal analysis/private
+  evidence, not a client-facing "Evidence qualifications and open questions"
+  section. Retain material risk qualifications in concise wording alongside
+  the relevant finding or approach. Apply this consistently to client reports,
+  PDFs, workbooks and emails without hiding uncertainty or weakening approvals.
+- Treat Wiz monitoring, issue tracking, rechecks, status reconciliation and
+  security closure verification as reporting-operator responsibilities. Retain
+  them in internal analysis, private trackers and evidence checklists, not client
+  recommendations, Excel action/closure requests or stakeholder emails. Do not
+  add a client-facing "verify and track in Wiz" step or narrate the internal
+  assignment. Ask client owners only for remediation decisions, authorized
+  changes, functional validation and completion/change evidence. Keep factual
+  Wiz findings and material risk qualifications visible; operator verification
+  remains required before closure. Apply this audience separation in every
+  generated format, including PDFs, HTML, workbooks and emails.
 - Initial reports omit Blocker and Next Action/Next Step columns. Remediation
   status starts at Pending review; source Wiz lifecycle status stays separate.
   Add follow-up columns only after an operator-reviewed stakeholder approval
@@ -210,8 +233,12 @@ local-account execution evidence memory remains separate.
 
 The email must include "Hi Team," or the confirmed coordinating team's greeting,
 Issue Description, Issue Details, the Security-owned ticket reference (or an
-unresolved placeholder in drafts), the attached Excel report, concise
-Recommended Remediation options and the user's approved signature. Use
+unresolved placeholder in drafts), the actual selected attachment (PDF for a
+PDF-only case; Excel only when included), concise Recommended Remediation
+Approaches and the user's approved signature. Include actual Wiz issue IDs
+alongside control IDs when available; do not label a control ID as an issue ID.
+Retain the template's headings and closing in case-specific email generators
+and test them rather than substituting an unstructured narrative. Use
 first-person plural and request the review/approval appropriate to the phase:
 
 Please review the attached report and confirm the desired remediation approach. Let us know if you need any assistance.
@@ -224,6 +251,18 @@ existing safeguards rather than requesting duplicate implementation.
 Never ask stakeholders to create/provide the ticket, promise remediation dates
 or invent SLAs/deadlines. Technical expiry dates are facts, not SLAs.
 Use the complete template in `docs/WORKFLOW.md`.
+
+Wrap every local email draft (initial, update, blocker and closure) in the
+standard private preview design: a dark navy header, small uppercase
+"PRIVATE COMMUNICATION DRAFT" label, descriptive title, and a pale gold
+"Draft - not sent | <draft date>" badge. Beneath it, show a pale gold notice:
+"Internal preparation note - do not copy into email: Confirm named recipients
+and the Security-owned ServiceNow reference before outreach. Attachment
+identities must be confirmed when sending." Keep this wrapper outside the
+copyable email body; never include it in the message sent to stakeholders.
+The draft date is preparation metadata, not a fresh evidence cutoff. Preserve
+the actual observation date in the email. The body retains level-three section
+headings with trailing colons, the approved closing and the selected attachment.
 
 ## Learnings
 
@@ -246,7 +285,7 @@ Use the complete template in `docs/WORKFLOW.md`.
   existing short row action unless the user explicitly requests row-level detail.
   Keep both levels consistent and validate wrapping, row heights and native
   Excel rendering without changing evidence, statuses or unrelated formatting.
-- Prepare a separate client-facing assessment HTML/text pair alongside the
+- Prepare a separate client-facing assessment HTML/PDF pair alongside the
   internal analysis, concise email and detailed workbook; do not replace or
   expose the internal learning page as the client attachment.
   Include an executive summary, dated scope, verified finding and qualified
@@ -254,7 +293,7 @@ Use the complete template in `docs/WORKFLOW.md`.
   retaining material evidence limitations in stakeholder language.
   Exclude debugging, workflow-stage labels, raw evidence dumps and internal
   links; use self-contained, print-friendly HTML and verify desktop/mobile,
-  print rendering, text parity and any workbook link.
+  print rendering, PDF-to-visible-HTML content parity and any workbook link.
   "Client-ready" means suitable for stakeholder review, not final validation,
   approved remediation or permission to send; preserve draft and outreach gates.
 - Name each new private case folder `<Short-Descriptive-Topic>-<Control-ID>`
@@ -278,7 +317,10 @@ Use the complete template in `docs/WORKFLOW.md`.
   Keep the resulting HTML analysis, report and email aligned, removing irrelevant
   advice but retaining material caveats and scoped approval requirements.
 - Produce private analysis companions and initial, progress, blocker and closure
-  email drafts as standalone local HTML pages, retaining plain-text companions.
+  email drafts as standalone local HTML pages; analysis also has a PDF version.
+  Do not create `.txt` companions. Extract visible HTML content in memory for
+  PDF validation. Preserve raw evidence, logs and historical archives; do not
+  treat this format preference as permission to delete unrelated text files.
   Analysis is an internal learning channel: use evidence-backed diagrams,
   labeled counts, explanations and expandable details; emails remain concise,
   first-person and copyable with consistent inline formatting.
