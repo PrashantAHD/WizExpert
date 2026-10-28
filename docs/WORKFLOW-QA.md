@@ -42,7 +42,11 @@ are named; the log shows an unbounded historical `list_issues` query with no
 `full_refresh_reason`; a Wiz call has unreadable arguments; the log has no events
 in the interval; or any count is missing or does not reconcile. A flagged check
 blocks generation, not collection. Generation reviews must carry hash-bound
-`activity_log` and `collection_manifest`, and `validate_review` re-runs the check.
+`activity_log` and `collection_manifest`, and `validate_review` re-runs the check. A manifest may
+add a `campaign_collection` block (one staging directory, complete, no reused
+previous inventory, authentication confirmed); a partial or stitched campaign
+pack flags the report. Collection has no fixed time limit: only a stalled or
+repeatedly failing run is abandoned (see [campaigns](CAMPAIGNS.md)).
 
 ## Whole-workflow coverage
 
@@ -51,7 +55,7 @@ blocks generation, not collection. Generation reviews must carry hash-bound
 | `setup` | Approved tenant/access/storage, installation reuse, credentials, actual read-only readiness and honest capability claims |
 | `finding` | Rule/configuration and representative issues, complete inventory, identity joins, plain-language risk, practical remediation, requested reports and communications |
 | `governance` | Historical reuse and cost, reopened/changed findings, cutoffs, approved prior sources, exceptions, attribution, workbook/deck contracts and current observations |
-| `campaign` | Private campaign rules/state, observation windows, findings versus assets, new detections, ownership, daily history and verified closure criteria |
+| `campaign` | Private campaign rules/state, stall-based collection (no fixed time limit), auth/availability, findings versus assets, new detections, ownership, daily history, qualified wording and verified closure criteria; see [campaigns](CAMPAIGNS.md) |
 | `remediation` | Exact approval scope, dependencies, recovery, execution evidence, partial outcomes, technical/owner/Wiz validation and closure |
 | `publication` | Public-only scope, privacy/history/untracked review, tests/lint/security/dependency gates and exact approved outgoing refs |
 
@@ -317,6 +321,12 @@ Browser/native review remains necessary for actual colors, layout, visibility,
 clipping and responsiveness. Factual accuracy and whether recommendations fit
 the environment also need evidence-backed review. Keyword checks cannot prove
 every paraphrase compliant. Ticket-pending drafts never imply outreach readiness.
+
+Campaign update emails (kind `progress`, or `"campaign": true`) are also checked
+for wording: any mention of Rejected findings is flagged; "Resolved" must be
+qualified as the Wiz lifecycle status (not verified patching); and reconstructed
+or partial-day values (or `partial_day`/`reconstructed` set in the contract) must
+name the UTC cutoff time. See [campaigns](CAMPAIGNS.md).
 
 ## Trust boundary
 

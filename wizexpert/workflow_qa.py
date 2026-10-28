@@ -44,7 +44,11 @@ SPECIFIC = {
         ),
     },
     "campaign": {
-        "collection": ("campaign-active-and-fixed-scope", "snapshot-inventory-window-and-identity"),
+        "collection": (
+            "campaign-active-and-fixed-scope",
+            "snapshot-inventory-stall-and-identity",
+            "wiz-auth-and-model-availability",
+        ),
         "generation": (
             "finding-versus-asset-metrics",
             "new-detection-versus-count-delta",
@@ -54,6 +58,7 @@ SPECIFIC = {
             "campaign-layout-and-removed-columns",
             "scanner-status-versus-patching",
             "campaign-closure-criteria",
+            "no-partial-pack-and-qualified-wording",
         ),
     },
     "remediation": {
@@ -159,6 +164,7 @@ def rule_hashes(workflow: str) -> dict:
     else:
         paths += (
             "wizexpert/workflow.py",
+            "wizexpert/campaign.py",
             "wizexpert/csv_report.py",
             "wizexpert/execution_update.py",
         )
@@ -520,6 +526,10 @@ def collection_check(log_path: Path, manifest: dict) -> dict:
     if not seen:
         flags.append("Activity log has no events in the collection interval.")
     counts = manifest.get("counts")
+    if "campaign_collection" in manifest:
+        from wizexpert.campaign import campaign_collection_flags
+
+        flags.extend(campaign_collection_flags(manifest["campaign_collection"]))
     if not (isinstance(counts, list) and counts):
         flags.append("Count reconciliation: no counts supplied.")
         counts = []

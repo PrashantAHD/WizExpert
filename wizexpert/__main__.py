@@ -74,6 +74,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from wizexpert.workflow import main as workflow_main
 
         return workflow_main(arguments[1:])
+    if arguments and arguments[0] == "campaign":
+        from wizexpert.campaign import main as campaign_main
+
+        return campaign_main(arguments[1:])
     if arguments and arguments[0] == "update-remediation":
         from wizexpert.execution_update import main as update_main
 

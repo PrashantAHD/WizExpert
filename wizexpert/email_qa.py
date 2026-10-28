@@ -215,6 +215,16 @@ def validate_email(html: Path, contract_path: Path) -> dict:
                 errors.append("Confidentiality line differs from the approved text.")
         if line and line in actual:
             errors.append("Confidentiality line leaked into the copyable body.")
+    if contract["kind"] == "progress" or contract.get("campaign") is True:
+        from wizexpert.campaign import campaign_wording_errors
+
+        errors.extend(
+            campaign_wording_errors(
+                f"{subject} {actual}",
+                partial_day=contract.get("partial_day") is True,
+                reconstructed=contract.get("reconstructed") is True,
+            )
+        )
     for forbidden in (
         r"###",
         r"staged approach",
