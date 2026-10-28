@@ -13,13 +13,16 @@ private storage, never in this repository.
    when it is stuck or failing:
    - *Stalled:* the collection is incomplete and the gap since the last saved
      evidence record exceeds the stall threshold (default 15 minutes,
-     `--stall-seconds` or `stall_seconds` in the config). `next` returns
+     `--stall-seconds` or `stall_seconds` in the config at `start`; the value is
+     stored in `meta.json` and later overrides are ignored). `next` returns
      `abort_stalled` and `save` refuses.
    - *Unable to fetch:* the same call failed three times (`wizexpert campaign fail`
      counts them). `next` returns `abort_unable_to_fetch`.
    - *Authentication:* HTTP 401 or an OAuth challenge means stop and ask the
      operator to reconnect Wiz. Do this before collection starts; do not begin
      or continue until a catalog call succeeds.
+   - The first abort or stop is recorded in `aborted.json`. From then on `next`,
+     `save` and `assemble` refuse that directory; only a new `start` resumes.
 2. **One staging directory per run.** After an abort, run `start` for a new
    directory. Never stitch pages from an aborted run (each record carries its run
    ID and a foreign record blocks) and never rebuild from a previous day's
@@ -34,10 +37,17 @@ private storage, never in this repository.
    4. exact-ID resource lookups in parallel batches of 40 with
       `include_deleted=true`.
 4. **Reconciliation stays.** Grouped totals must equal the finding stream per
-   status group, every finding asset must have its resource record, and the scope
-   must not change. A mismatch means recollect in a new directory.
+   status group, every finding asset must have its resource record, finding IDs
+   must be unique, and the scope must not change. A mismatch means recollect in
+   a new directory. A finding stream must advance: an empty or repeated cursor
+   is refused.
 5. **Helper JSON** (params and responses) is written UTF-8 *without* a BOM,
    outside the staging directory; readers tolerate a BOM. Use `write_json`.
+   `save` refuses helper files older than the run's start (do not replay old
+   responses). `observed_at` is the time the record was *saved*, not a Wiz
+   response time, so it proves when evidence was retained here, not when Wiz
+   produced it. Saves are serialised with an exclusive `save.lock`; remove a
+   stale lock only if no save is running. `assemble --out` never overwrites.
 6. **Model availability:** if the AI model is degraded, switch model and continue.
    Never publish a partial pack or an interim status-only draft instead of the
    validated one.
@@ -81,18 +91,20 @@ Declare these in the workbook artifact contract with `campaign_workbook`:
 
 ## Update emails and reports
 
-- Campaign update emails (kind `progress`, or `"campaign": true` in the email
-  contract) must not mention Rejected findings at all.
+- Campaign update and closure emails (`"campaign": true` in the email contract,
+  any kind) must not mention Rejected findings at all. Non-campaign progress
+  emails are not subject to these wording checks.
 - "Resolved" means the Wiz lifecycle status, not independently verified patch
   completion. Write "Resolved in Wiz" (or state the lifecycle meaning) and never
   claim verified patching from it.
 - Reconstructed data points and partial-day observations must name the UTC
   cutoff time (for example `as of 15:40 UTC`). Set `partial_day` or
   `reconstructed` in the contract to require it even if the wording is missing.
-- `wizexpert email-qa` checks all three. The manifest for
-  `wizexpert workflow-qa collection-check` may carry a `campaign_collection`
-  block (`staging_dirs` with exactly one entry, `complete: true`,
-  `reused_previous_inventory: false`, `auth_ok: true`); anything else flags the
-  pack.
+- `wizexpert email-qa` checks all three. A campaign review's collection manifest
+  must carry a `campaign_collection` block that points at the hash-linked
+  `wizexpert campaign assemble` manifest (`assemble_manifest`,
+  `assemble_manifest_sha256`); `wizexpert workflow-qa collection-check` re-derives
+  from it that the pack is single-run, complete, unaborted and not stitched.
+  Use `collection-check --workflow campaign` to require it.
 
 These are wording and structure checks, not proof that the facts are correct.

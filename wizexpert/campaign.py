@@ -10,9 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +32,9 @@ RESOURCE_BATCH_SIZE = 40
 # No total time limit while data keeps arriving. A run is abandoned only when it is stuck.
 DEFAULT_STALL_SECONDS = 15 * 60
 MAX_CALL_ATTEMPTS = 3
+ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
+ABORT_MARKER = "aborted.json"
+LOCK_NAME = "save.lock"
 EVIDENCE_PREFIXES = ("catalog-", "grouped-", "findings-", "resources-")
 RESPONSE_KEYS = {
     "list_vulnerability_findings_grouped": "vulnerabilityFindingsGroupedByValues",
@@ -61,8 +66,9 @@ class CampaignConfig:
         ids = self.vulnerability_ids
         require(bool(ids), "Campaign needs at least one vulnerability ID; there are no defaults.")
         require(
-            all(isinstance(i, str) and i.strip() for i in ids) and len(set(ids)) == len(ids),
-            "Vulnerability IDs must be unique nonempty strings.",
+            all(isinstance(i, str) and ID_PATTERN.fullmatch(i) for i in ids)
+            and len(set(ids)) == len(ids),
+            "Vulnerability IDs must be unique and match ^[A-Za-z0-9._-]+$.",
         )
         require(
             type(self.stall_seconds) is int and self.stall_seconds > 0,
@@ -102,8 +108,13 @@ def _inside(path: Path, directory: Path) -> bool:
     return directory.resolve() == path.resolve() or directory.resolve() in path.resolve().parents
 
 
-def write_json(path: Path | str, value, *, staging: Path | str | None = None) -> None:
-    """Write UTF-8 JSON with no BOM. Helper/param/response files must live outside staging."""
+def write_json(
+    path: Path | str, value, *, staging: Path | str | None = None, exclusive: bool = False
+) -> None:
+    """Write UTF-8 JSON with no BOM. Helper/param/response files must live outside staging.
+
+    exclusive=True creates the file atomically and refuses to overwrite an existing one.
+    """
     path = Path(path)
     if staging is not None:
         require(
@@ -111,7 +122,15 @@ def write_json(path: Path | str, value, *, staging: Path | str | None = None) ->
             "Helper/param/response JSON must be written outside the staging directory.",
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes((json.dumps(value, indent=2, ensure_ascii=True) + "\n").encode("utf-8"))
+    data = (json.dumps(value, indent=2, ensure_ascii=True) + "\n").encode("utf-8")
+    if exclusive:
+        try:
+            with path.open("xb") as stream:
+                stream.write(data)
+        except FileExistsError:
+            raise ValueError(f"Refusing to overwrite an existing file: {path.name}") from None
+    else:
+        path.write_bytes(data)
 
 
 def utc_now() -> datetime:
@@ -163,6 +182,7 @@ def record_failure(
     """Count a failed call. 401/OAuth stops; the same call failing 3 times aborts the run."""
     directory = Path(directory)
     if classify_failure(status, message) == "stop_reconnect":
+        _write_marker(directory, "stop_reconnect", RECONNECT_REASON)
         return {"action": "stop_reconnect", "reason": RECONNECT_REASON}
     path = directory / "attempts.json"
     attempts = read_json(path) if path.is_file() else {}
@@ -170,12 +190,20 @@ def record_failure(
     attempts[key] = attempts.get(key, 0) + 1
     write_json(path, attempts)
     if attempts[key] >= MAX_CALL_ATTEMPTS:
+        _write_marker(directory, "abort_unable_to_fetch", _unable(tool))
         return {
             "action": "abort_unable_to_fetch",
             "attempts": attempts[key],
             "reason": _unable(tool),
         }
     return {"action": "retry", "attempts": attempts[key], "max_attempts": MAX_CALL_ATTEMPTS}
+
+
+def _write_marker(directory: Path, action: str, reason: str) -> None:
+    """Persist the first abort/stop so later calls can never resume this run."""
+    marker = directory / ABORT_MARKER
+    if not marker.exists():
+        write_json(marker, {"action": action, "reason": reason, "at": iso(utc_now())})
 
 
 def _unable(tool: str) -> str:
@@ -208,6 +236,8 @@ def start(config: CampaignConfig, base: Path | str, now: datetime | None = None)
             "schema_version": 1,
             "run_id": stamp,
             "created_at": iso(now),
+            "stall_seconds": config.stall_seconds,
+            "group_by": list(config.group_by),
             "vulnerability_ids": list(config.vulnerability_ids),
             "note": "One staging directory per run. Never stitch runs or reuse old inventory.",
         },
@@ -237,6 +267,15 @@ def load_staging(config: CampaignConfig, directory: Path | str) -> tuple[Path, d
     return directory, meta, files
 
 
+def _effective(config: CampaignConfig, meta: dict) -> CampaignConfig:
+    """Threshold and grouping are fixed at `start`; later config/CLI overrides are ignored."""
+    return CampaignConfig(
+        tuple(config.vulnerability_ids),
+        meta["stall_seconds"],
+        tuple(meta["group_by"]),
+    )
+
+
 def _grouped_kind(status: list[str]) -> str:
     for name, values in GROUPED_KINDS.items():
         if set(status) == set(values):
@@ -248,8 +287,20 @@ def _by_tool(files: dict, tool: str) -> list[tuple[str, dict]]:
     return [(n, r) for n, r in files.items() if r["request"]["tool_name"] == tool]
 
 
+def _page_name(prefix: str, index: int) -> str:
+    return f"{prefix}{index:04d}.json"
+
+
+def _page_number(name: str) -> int:
+    match = re.search(r"-(\d+)\.json\Z", name)
+    require(match is not None, f"Unexpected page file name: {name}")
+    return int(match[1])
+
+
 def _pages(files: dict, prefix: str) -> list[tuple[str, dict]]:
-    return [(n, files[n]) for n in sorted(files) if n.startswith(prefix)]
+    """Pages in numeric order (not lexical), so 100+ pages stay in sequence."""
+    names = sorted((n for n in files if n.startswith(prefix)), key=_page_number)
+    return [(n, files[n]) for n in names]
 
 
 def _asset_ids(pages: list) -> list[str]:
@@ -273,27 +324,36 @@ def next_call(config: CampaignConfig, directory: Path | str, now: datetime | Non
     """Return the next read-only call to make. Order: catalogs, grouped, one finding stream,
     then exact-ID resource batches. A run is aborted only when stuck or failing."""
     directory, meta, files = load_staging(config, directory)
+    marker = directory / ABORT_MARKER
+    if marker.is_file():
+        recorded = read_json(marker)
+        return {
+            "action": recorded["action"],
+            "reason": recorded["reason"] + " This run is closed; start a new staging directory.",
+            "aborted": True,
+        }
+    config = _effective(config, meta)
     attempts_path = directory / "attempts.json"
     if attempts_path.is_file():
         for key, count in read_json(attempts_path).items():
             if count >= MAX_CALL_ATTEMPTS:
-                return {
-                    "action": "abort_unable_to_fetch",
-                    "reason": _unable(key.split(":")[0]),
-                }
+                _write_marker(directory, "abort_unable_to_fetch", _unable(key.split(":")[0]))
+                return next_call(config, directory, now=now)
     idle = seconds_since_last_save(meta, files, now)
     result = _plan(config, directory, files, idle)
     if result["action"] != "assemble" and idle > config.stall_seconds:
+        reason = (
+            f"No evidence saved for {idle} seconds (limit {config.stall_seconds}) and the "
+            "collection is incomplete: fetching is stuck. Abandon this directory, start a "
+            "new staging directory, do not stitch pages from this run and do not reuse a "
+            "previous day's inventory."
+        )
+        _write_marker(directory, "abort_stalled", reason)
         return {
             "action": "abort_stalled",
             "seconds_since_last_save": idle,
             "stall_threshold_seconds": config.stall_seconds,
-            "reason": (
-                f"No evidence saved for {idle} seconds (limit {config.stall_seconds}) and the "
-                "collection is incomplete: fetching is stuck. Abandon this directory, start a "
-                "new staging directory, do not stitch pages from this run and do not reuse a "
-                "previous day's inventory."
-            ),
+            "reason": reason,
         }
     return result
 
@@ -371,7 +431,7 @@ def _plan(config: CampaignConfig, directory: Path, files: dict, idle: int) -> di
             {"resource_id": batch_ids, "include_deleted": True, "first": RESOURCE_BATCH_SIZE},
         )
         for index, batch_ids in enumerate(planned)
-        if f"resources-{index:02d}.json" not in done
+        if _page_name("resources-", index) not in done
     ]
     if todo:
         return batch(
@@ -399,10 +459,37 @@ def save(
     response: dict,
     now: datetime | None = None,
 ) -> dict:
-    directory, meta, files = load_staging(config, directory)
+    directory = Path(directory)
+    require(directory.is_dir(), "Collection directory does not exist.")
+    with _lock(directory):
+        directory, meta, files = load_staging(config, directory)
+        return _save_locked(
+            _effective(config, meta), directory, meta, files, tool, params, response, now
+        )
+
+
+@contextmanager
+def _lock(directory: Path):
+    """Exclusive-create lockfile: concurrent saves cannot race on the page sequence."""
+    path = directory / LOCK_NAME
+    try:
+        handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise ValueError(
+            f"Another save is in progress ({LOCK_NAME}). If no save is running, remove the stale "
+            "lock file and retry."
+        ) from None
+    try:
+        yield
+    finally:
+        os.close(handle)
+        path.unlink(missing_ok=True)
+
+
+def _save_locked(config, directory, meta, files, tool, params, response, now):
     current = next_call(config, directory, now=now)
     require(
-        current["action"] not in {"abort_stalled", "abort_unable_to_fetch"},
+        current["action"] not in {"abort_stalled", "abort_unable_to_fetch", "stop_reconnect"},
         current.get("reason", ""),
     )
     ids = list(config.vulnerability_ids)
@@ -439,7 +526,7 @@ def save(
         )
         require(params["first"] == FINDING_PAGE_SIZE, "Finding page size must be 20 (Wiz maximum).")
         require(params.get("after") == after, "Broken finding pagination cursor.")
-        name = f"findings-{len(pages):02d}.json"
+        name = _page_name("findings-", len(pages))
     elif tool == "list_cloud_resources":
         pages = _pages(files, "findings-")
         require(
@@ -456,12 +543,14 @@ def save(
             and params["first"] == RESOURCE_BATCH_SIZE,
             "Resource lookups need include_deleted=true and a batch size of 40.",
         )
-        name = f"resources-{index:02d}.json"
+        name = _page_name("resources-", index)
     else:
         raise ValueError("Unsupported evidence tool: " + tool)
     require(name not in files, f"Already saved: {name}")
     body = _response_body(response, tool)
     _validate_response(tool, params, body)
+    if tool == "list_vulnerability_findings":
+        _check_cursor_progress(_pages(files, "findings-"), params, body)
     record = {
         "run_id": meta["run_id"],
         "observed_at": iso(now or utc_now()),
@@ -471,6 +560,24 @@ def save(
     write_json(directory / name, record)
     _clear_failure(directory, tool, params)
     return {"saved": name, "next": next_call(config, directory, now=now)}
+
+
+def _check_cursor_progress(pages: list, params: dict, body: dict) -> None:
+    """A stream must advance: refuse an empty or repeated cursor (an endless loop)."""
+    info = body["vulnerabilityFindings"]["pageInfo"]
+    if not info["hasNextPage"]:
+        return
+    cursor = info.get("endCursor")
+    require(
+        isinstance(cursor, str) and bool(cursor),
+        "Finding page says more data exists but has no endCursor.",
+    )
+    used = {params.get("after")}
+    for _, record in pages:
+        used.add(record["request"]["parameters"].get("after"))
+        used.add(record["response"]["vulnerabilityFindings"]["pageInfo"].get("endCursor"))
+    require(cursor not in used, "Finding pagination repeated a cursor; it is not advancing.")
+    require(bool(body["vulnerabilityFindings"]["nodes"]), "Empty finding page with more data.")
 
 
 def _validate_response(tool: str, params: dict, body: dict) -> None:
@@ -498,6 +605,7 @@ def _validate_response(tool: str, params: dict, body: dict) -> None:
 def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> dict:
     """Verify a complete single-run collection and write a manifest outside staging."""
     directory, meta, files = load_staging(config, directory)
+    config = _effective(config, meta)
     plan = next_call(config, directory)
     require(plan["action"] == "assemble", plan.get("reason") or json.dumps(plan))
     findings = [
@@ -505,6 +613,11 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
         for _, r in _pages(files, "findings-")
         for n in r["response"]["vulnerabilityFindings"]["nodes"]
     ]
+    finding_ids = [n["id"] for n in findings]
+    require(
+        len(finding_ids) == len(set(finding_ids)),
+        "Duplicate finding IDs across pages; recollect in a new directory.",
+    )
     for kind, statuses in GROUPED_KINDS.items():
         record = files[f"grouped-{kind}.json"]
         nodes = record["response"]["vulnerabilityFindingsGroupedByValues"]["nodes"]
@@ -518,6 +631,7 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
     manifest = {
         "schema_version": 1,
         "run_id": meta["run_id"],
+        "staging_dir": str(directory.resolve()),
         "vulnerability_ids": list(config.vulnerability_ids),
         "observed_from": iso(min(times)),
         "observed_to": iso(max(times)),
@@ -529,7 +643,7 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
             for name in sorted(files)
         },
     }
-    write_json(out, manifest, staging=directory)
+    write_json(out, manifest, staging=directory, exclusive=True)
     return manifest
 
 
@@ -660,22 +774,64 @@ def campaign_wording_errors(
 
 
 def campaign_collection_flags(info: object) -> list[str]:
-    """Flags for a collection manifest's optional `campaign_collection` block."""
+    """Verify a manifest's `campaign_collection` block against the hash-linked assemble manifest.
+
+    The block only points at the manifest written by `wizexpert campaign assemble`
+    (`assemble_manifest` absolute path and `assemble_manifest_sha256`). Everything else is
+    re-derived from that manifest and the retained staging evidence, not self-reported.
+    """
     if not isinstance(info, dict):
         return ["Campaign collection block is missing or invalid."]
-    flags = []
-    dirs = info.get("staging_dirs")
-    if not (isinstance(dirs, list) and len(dirs) == 1):
-        flags.append("Campaign pack must come from exactly one staging directory (never stitched).")
-    if info.get("complete") is not True:
-        flags.append(
-            "Partial pack: collection is incomplete. Never publish; restart or switch model."
+    flags: list[str] = []
+    try:
+        path = Path(info["assemble_manifest"])
+        expected = info["assemble_manifest_sha256"]
+        require(path.is_absolute() and path.is_file(), "assemble manifest is not a file")
+        require(hashlib.sha256(path.read_bytes()).hexdigest() == expected, "hash mismatch")
+        manifest = read_json(path)
+        staging = Path(manifest["staging_dir"])
+        meta = read_json(staging / "meta.json")
+        require(meta["run_id"] == manifest["run_id"], "run ID differs")
+        created = parse_utc(meta["created_at"])
+        listed = manifest["files"]
+        on_disk = {p.name for p in staging.glob("*.json") if p.name.startswith(EVIDENCE_PREFIXES)}
+    except (KeyError, TypeError, ValueError, OSError):
+        return [
+            "Campaign pack is not bound to a valid, hash-linked assemble manifest "
+            "(assemble_manifest + assemble_manifest_sha256)."
+        ]
+    if (staging / ABORT_MARKER).exists():
+        flags.append("Partial pack: the staging run was aborted. Never publish; recollect.")
+    if on_disk != set(listed):
+        flags.append("Staging evidence differs from the assemble manifest (partial or stitched).")
+    for name, digest in listed.items():
+        file = staging / name
+        try:
+            changed = hashlib.sha256(file.read_bytes()).hexdigest() != digest
+            record = read_json(file)
+            foreign = record["run_id"] != manifest["run_id"]
+            stale = parse_utc(record["observed_at"]) < created
+        except (KeyError, TypeError, ValueError, OSError):
+            flags.append(f"Evidence record unreadable or missing: {name}")
+            continue
+        if changed:
+            flags.append(f"Evidence changed after assembly: {name}")
+        if foreign:
+            flags.append(f"Evidence record belongs to another run (stitched): {name}")
+        if stale:
+            flags.append(f"Evidence predates this run (reused old data): {name}")
+    return sorted(set(flags))
+
+
+def check_helper_fresh(directory: Path, *helpers: Path) -> None:
+    """Helper/response files must be created after the run started (no replayed old responses)."""
+    meta = read_json(Path(directory) / "meta.json")
+    started = parse_utc(meta["created_at"]).timestamp() - 2  # filesystem timestamp granularity
+    for helper in helpers:
+        require(
+            Path(helper).stat().st_mtime >= started,
+            f"{Path(helper).name} is older than this run's start; do not replay old responses.",
         )
-    if info.get("reused_previous_inventory") is not False:
-        flags.append("A previous day's inventory must never be reused for new counts.")
-    if info.get("auth_ok") is not True:
-        flags.append("Wiz authentication was not confirmed before collection started.")
-    return flags
 
 
 # --- CLI ----------------------------------------------------------------------------------
@@ -736,6 +892,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         not _inside(helper, args.dir),
                         "Helper/param/response JSON must be outside the staging directory.",
                     )
+                check_helper_fresh(args.dir, args.params_file, args.response_file)
                 result = save(
                     config,
                     args.dir,
