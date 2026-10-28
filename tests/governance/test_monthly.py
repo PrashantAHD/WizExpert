@@ -144,10 +144,10 @@ class MonthlyWorkflowTests(unittest.TestCase):
         prior = load_workbook(self.previous)
         try:
             for sheet in wb:
-                self.assertIn("PRELIMINARY", sheet["A2"].value)
+                self.assertIn("EARLY OBSERVATION", sheet["A2"].value)
                 self.assertIn("2026-09-13 12:30:00 UTC", sheet["A2"].value)
                 self.assertIn("Scheduled cutoff 2026-09-15 EOD", sheet["A2"].value)
-                self.assertIn("PRELIMINARY", sheet.oddHeader.center.text)
+                self.assertIn("EARLY OBSERVATION", sheet.oddHeader.center.text)
                 if sheet.title.endswith(" Issues"):
                     approved = read_snapshots(prior[sheet.title])
                     self.assertEqual(sheet.cell(4, 4).value.splitlines()[0], "Sep 13, 2026")
@@ -168,6 +168,16 @@ class MonthlyWorkflowTests(unittest.TestCase):
         self.assertEqual(self.previous.read_bytes(), original)
         with self.assertRaisesRegex(DashboardError, "Preliminary collection"):
             read_workbook(target)
+        legacy = load_workbook(target)
+        try:
+            for sheet in legacy:
+                sheet["A2"] = sheet["A2"].value.replace("EARLY OBSERVATION |", "PRELIMINARY |")
+            legacy.save(target)
+        finally:
+            legacy.close()
+        with self.assertRaisesRegex(DashboardError, "Preliminary collection"):
+            read_workbook(target)
+        read_workbook(target, allow_preliminary=True)
         build_monthly_workbook(
             [self.csv],
             [self.previous],
@@ -197,14 +207,15 @@ class MonthlyWorkflowTests(unittest.TestCase):
             workbook, self.template, history_path=self.history, allow_preliminary=True
         )
         self.assertEqual(
-            deck_path.name, "ExampleHealth_Remediation_Executive_Dashboard_9.13.26_PRELIMINARY.pptx"
+            deck_path.name,
+            "ExampleHealth_Remediation_Executive_Dashboard_9.13.26_EARLY_OBSERVATION.pptx",
         )
         deck = Presentation(deck_path)
         self.assertEqual(
             shape(deck.slides[0], 2).text,
-            "September 2026 (Preliminary)\nAs of September 13th, 2026",
+            "September 2026 (Early observation - not final)\nAs of September 13th, 2026",
         )
-        self.assertIn("Preliminary", deck.core_properties.title)
+        self.assertIn("Early observation", deck.core_properties.title)
         history = template_history(deck, None, allow_preliminary=True)
         self.assertEqual(max(history).isoformat(), "2026-09-13")
         self.assertTrue(all(day.day == 15 for day in history if day != max(history)))
@@ -257,7 +268,7 @@ class MonthlyWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             shape(deck.slides[0], 2).text,
-            "November 2026 (Preliminary)\nAs of October 27th, 2026",
+            "November 2026 (Early observation - not final)\nAs of October 27th, 2026",
         )
         self.assertIn("Oct 15", shape(deck.slides[1], 13).text)
         self.assertIn("Oct 27", shape(deck.slides[1], 13).text)
