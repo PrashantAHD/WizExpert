@@ -133,7 +133,7 @@ def build_monthly_workbook(
         )
         snapshots[-1] = (actual.strftime("%b %d, %Y"), actual)
         preliminary = (
-            f"PRELIMINARY | Collected through {actual:%Y-%m-%d %H:%M:%S} UTC | "
+            f"EARLY OBSERVATION | Collected through {actual:%Y-%m-%d %H:%M:%S} UTC | "
             f"Scheduled cutoff {scheduled:%Y-%m-%d} EOD | Live collection, not EOD history"
         )
     historical_rows: list[dict] = []
@@ -210,7 +210,7 @@ def build_monthly_workbook(
                     horizontal="left", vertical="center", wrap_text=True
                 )
                 sheet.row_dimensions[2].height = 48
-                sheet.oddHeader.center.text = "PRELIMINARY - NOT FINAL MONTH-END DATA"
+                sheet.oddHeader.center.text = "EARLY OBSERVATION - NOT FINAL MONTH-END DATA"
             wb.properties.description = preliminary
         wb.save(output)
     finally:

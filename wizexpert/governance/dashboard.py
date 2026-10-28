@@ -246,7 +246,7 @@ def build_deck(
     base_total = points[baseline]
     base_month, base_short = baseline.strftime("%B"), baseline.strftime("%b")
     fonts = chart_fonts(font_dir or Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts")
-    suffix = "_PRELIMINARY" if data.preliminary else ""
+    suffix = "_EARLY_OBSERVATION" if data.preliminary else ""
     output = (
         output
         or workbook.parent
@@ -274,7 +274,10 @@ def build_deck(
     if data.preliminary:
         month = f"{data.reporting_date:%B} preview"
         previous_month, latest_short = previous.strftime("%b %d"), latest.strftime("%b %d")
-        cover_date = f"{data.reporting_date:%B %Y} (Preliminary)\nAs of {date_ordinal(latest)}"
+        cover_date = (
+            f"{data.reporting_date:%B %Y} (Early observation - not final)\n"
+            f"As of {date_ordinal(latest)}"
+        )
     addressed = "resolved / accepted" if data.accepted_risk_supported else "resolved / ignored"
     if not data.accepted_risk_supported:
         takeaway = takeaway.replace("resolved or accepted", "resolved or ignored")
@@ -415,7 +418,7 @@ def build_deck(
     }
     if data.preliminary:
         evidence["preliminary"] = (
-            f"Latest snapshot is a preliminary live collection before the scheduled "
+            f"Latest snapshot is an early-observation live collection before the scheduled "
             f"{ordinal(baseline.day)} cutoff. Replace with the final dashboard after "
             "the cutoff refresh."
         )
@@ -425,7 +428,7 @@ def build_deck(
         )
     deck.core_properties.title = (
         f"{profile.client_name} Executive Remediation Dashboard - {full_date(latest)}"
-        + (" (Preliminary)" if data.preliminary else "")
+        + (" (Early observation - not final)" if data.preliminary else "")
     )
     # Validate serialization before publishing; exclusive creation avoids overwriting
     # another user's file.

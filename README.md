@@ -47,28 +47,41 @@ review or guarantee error-free reasoning.
 ## How it works
 
 ```mermaid
-flowchart LR
-    A["1-3. Collect, analyze,<br/>prepare reports"] --> D{"4. Approved?"}
-    D -->|No| A
-    D -->|Yes| E["5-6. Prepare and<br/>execute the change"]
-    E --> G["7. Verify with<br/>fresh Wiz evidence"]
-    G -->|Not met| A
-    G -->|Met| I["8. Report and close"]
+flowchart TD
+    A["1. Collect, analyze,<br/>and prepare reports"] --> B["2. Prepare the email package<br/>Attach reports and include the ServiceNow ticket"]
+    B --> C{"Human approves<br/>email package?"}
+    C -->|No| B
+    C -->|Yes| D["3. Human sends the email<br/>outside WizExpert"]
+    D --> E["4. Receive or record the<br/>approved remediation plan"]
+    E --> F{"Change authorization<br/>recorded?"}
+    F -->|No| E
+    F -->|Yes| G["5. Prepare and execute the<br/>approved remediation change"]
+    G --> H["6. Verify the change with<br/>fresh Wiz evidence"]
+    H -->|Not met| A
+    H -->|Met| I["7. Report the<br/>verification result"]
+    I --> J["8. Close the remediation/<br/>reporting workflow"]
 
-    classDef investigate fill:#EAF2FF,stroke:#2563EB,color:#17365D
-    classDef gate fill:#FFF4D6,stroke:#B7791F,color:#694400
-    classDef action fill:#E5F5F2,stroke:#168575,color:#14594F
+    classDef prepare fill:#EAF2FF,stroke:#2563EB,color:#17365D
+    classDef communication fill:#FFF4D6,stroke:#B7791F,color:#694400
+    classDef remediation fill:#E5F5F2,stroke:#168575,color:#14594F
     classDef complete fill:#16324F,stroke:#16324F,color:#FFFFFF
-    class A investigate
-    class D gate
-    class E,G action
-    class I complete
+    classDef gate fill:#FFF4D6,stroke:#B7791F,color:#694400
+    classDef external fill:#F3E8FF,stroke:#7C3AED,color:#4C1D95
+    class A prepare
+    class B communication
+    class C,F gate
+    class D external
+    class E,G,H remediation
+    class I,J complete
 ```
 
-Investigation is read-only. Changes happen only within an approved scope, and a
-finding closes only when fresh evidence shows the closure criteria are met.
-ServiceNow stays authoritative for approvals, changes and exceptions. Details:
-[workflow guide](docs/WORKFLOW.md).
+WizExpert prepares the private email package but does not send it. A person must
+approve and send the email outside WizExpert, with the ServiceNow ticket
+supplied for the work. Remediation happens only after a plan and separate
+change authorization are recorded. A finding closes only when fresh Wiz
+evidence shows that the closure criteria are met; if verification fails, the
+workflow returns to collection and analysis. ServiceNow stays authoritative for
+approvals, changes and exceptions. Details: [workflow guide](docs/WORKFLOW.md).
 
 ## Setup
 
