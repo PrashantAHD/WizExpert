@@ -9,7 +9,7 @@ reasoning. Zero mistakes cannot be guaranteed.
 
 | Phase | Before proceeding | Required review |
 |---|---|---|
-| Collection | Bulk Wiz pagination | Scope/authorization, prior evidence reuse, query plan/cost, lifecycle coverage and approved prior sources |
+| Collection | Nothing is pre-approved or blocked; reuse prior evidence first | Self-attested scope, prior evidence reuse and lifecycle coverage, then the post-collection check below |
 | Generation | Building the reviewed report set | Collection coverage, conflicts, exceptions, dates, historical preservation and attribution |
 | Handoff | Claiming completion or readiness | Actual output checks, rendering, templates, wording, identifiers and truthful status |
 
@@ -19,9 +19,30 @@ Run `wizexpert workflow-qa requirements --workflow governance --phase collection
 to obtain mandatory check IDs, current rule hashes and the documented-section
 inventory. Later phases include all earlier requirements.
 Unknown, missing, failed and unsupported checks block; there is no blanket
-"all good" bypass. A separate reviewer must examine the evidence and recorded
-decision rationale. Different names alone do not authenticate an independent
+"all good" bypass. Generation and handoff reviews need a separate reviewer;
+collection needs none. Different names alone do not authenticate an independent
 review.
+
+## Post-collection check (one gate before generation)
+
+Reuse-first stays the default: start from retained evidence and collect only
+what is missing. Collection itself is **not** pre-approved, allow-listed or
+independently reviewed, and no tool call is ever blocked. After collection and
+before generating, run one check against the recorded activity log:
+
+```powershell
+wizexpert workflow-qa collection-check --activity-log C:\PrivateEvidence\activity.jsonl --manifest C:\PrivateEvidence\collection-manifest.json
+```
+
+The manifest (private, outside Git) holds `started_at`, `ended_at`,
+`reused_sources` (or `no_prior_evidence_reason`), optional `full_refresh_reason`
+and `counts`: `[{"name", "expected", "collected"}]` (integers that must equal).
+It flags the report (exit 1, `status: flagged`) when: no reused sources or reason
+are named; the log shows an unbounded historical `list_issues` query with no
+`full_refresh_reason`; a Wiz call has unreadable arguments; the log has no events
+in the interval; or any count is missing or does not reconcile. A flagged check
+blocks generation, not collection. Generation reviews must carry hash-bound
+`activity_log` and `collection_manifest`, and `validate_review` re-runs the check.
 
 ## Whole-workflow coverage
 
@@ -108,11 +129,7 @@ A review uses this shape (illustrative values, not an actual approval):
       "rationale": "Specific evidence and explanation of how this requirement was satisfied.",
       "evidence": ["C:\\PrivateEvidence\\collection-plan.json"]
     }
-  },
-  "allowed_wiz_queries": [{
-    "tool_name": "list_issues",
-    "parameters": {"first": 20, "severity": ["HIGH"], "status": ["OPEN", "IN_PROGRESS"]}
-  }]
+  }
 }
 ```
 
@@ -122,19 +139,16 @@ public rule hashes, and declare private rule documents in `private_rule_sources`
 assistant's rewritten task. Version-1 process reviews must be reviewed again;
 they cannot satisfy the expanded version-2 coverage.
 Do not copy example verdicts or manufacture reviews from
-the preparer's assertions. Approved queries match exactly except for `after`,
-which permits cursor pagination. A changed filter needs renewed review.
-Unbounded historical closed-issue queries require `full_refresh_approval` with
-`reason`, `approved_by` and `evidence` naming a hashed approval file.
+the preparer's assertions.
 
 Generation/handoff records also require:
 
 - `previous_review`: the hash-bound preceding phase's review, same run/workflow/scope.
 - `activity_log`: a hash-bound, retained JSONL copy of the actual tool event log.
   Preserve the complete relevant interval and failures, not just selected good
-  calls. Each event needs `timestamp`, `type`, and its original `data`. Bulk Wiz
-  requests before collection approval or outside its allowlist block QA even
-  when the review's checkboxes say pass.
+  calls. Each event needs `timestamp`, `type`, and its original `data`. A flagged
+  post-collection check blocks QA even when the review's checkboxes say pass.
+- `collection_manifest`: the hash-bound manifest for the post-collection check.
 - Generation reviews must bind actual input/template/profile/snapshot files.
 - Handoffs require `artifacts` with exactly the requested IDs and kinds.
   Each entry has `id`, `kind`, absolute `path` and absolute `contract`; rendered
@@ -257,89 +271,12 @@ as this protocol. Partial outcomes, owner confirmation, technical validation,
 Wiz reassessment and genuine patching versus scanner disappearance still need
 the independent checks. Completing a report does not mean closing a finding.
 
-## Blocking unreviewed bulk collection
+## Real-time hook (retired)
 
-`python -m wizexpert.workflow_qa hook` reads the `preToolUse` payload from stdin
-as UTF-8 bytes. Accepted shapes, in order of precedence:
-
-1. **`toolCalls` batch (primary).** This is the payload shape observed on the
-   VS Code Copilot SDK host (taken from the session event log): `{"sessionId":...,
-   "cwd":..., "toolCalls":[{"id":"call_...","name":"wiz-execute","args":
-   {"tool_name":"list_issues","parameters":{...}}}]}`, with no `timestamp`.
-   Every other tool (`view`, `powershell`, `rg`, `wiz-discover`) arrives in the
-   same batch shape. Each element is evaluated independently on its decoded
-   name; if any call must be denied the whole batch is denied and the reason
-   names the call id. The keys `tool_calls` and `calls` are evaluated the same
-   way, in any payload.
-2. **camelCase `toolName`/`toolArgs` (fallback).** The shape in the GitHub
-   Copilot hooks reference; `toolArgs` may be an object or a JSON string.
-3. **`tool_name`/`tool_input` (fallback).** VS Code/Claude `PreToolUse` shape.
-   Neither fallback has been verified on a live host here. A payload with none
-   of these fields is allowed with `{}`.
-
-A call's name is read from `name`, `tool`, `toolName`, `tool_name` or
-`recipient_name`. For a Wiz execute call the query is read from `args`,
-`arguments`, `input` (also `parameters`, `toolArgs`, `tool_input`), as an object
-or a JSON string; every present value is checked, and the call is denied if
-none is present, if it is not an object, or if its inner `tool_name` is missing
-or empty. If an element's name is missing, null or not a string, the whole
-decoded element is scanned (JSON escapes included) for Wiz execute names and
-for the bulk inner tool names `list_issues`, `list_issues_grouped` and
-`execute_graph_query`; a match is denied, otherwise the element is allowed.
-
-Set `WIZEXPERT_QA_REVIEW` to the current private collection review, or supply
-`--review PATH`. Tool names are trimmed and lower-cased; any name ending in
-`wiz-execute`, `mcp__wiz__execute` or `mcp_wiz_execute` is Wiz execute. Every
-other tool (including `wiz-discover`) is allowed with `{}` without parsing its
-arguments or reading the review. The hook denies bulk `list_issues`,
-`list_issues_grouped` and `execute_graph_query` calls (inner `tool_name` is
-matched case-insensitively) without a valid matching review, including calls
-inside a parallel wrapper. Count probes (`first=1`, no cursor), schema
-discovery and individual issue lookups remain available for planning. `after`
-is a cursor only when it is missing/`null` (no cursor) or a non-empty string
-(bulk); any other value is denied.
-
-Hook mode always exits 0 and prints exactly one JSON object: `{}` to allow, or
-a top-level `permissionDecision: "deny"` with `permissionDecisionReason` (plus
-a `hookSpecificOutput` copy for PascalCase hosts). Command `preToolUse` hooks
-fail closed, so a crash or non-zero exit would block every tool. Decisions use
-decoded JSON, never raw text, so JSON escapes such as `wiz\u002dexecute` cannot
-hide a call. A malformed call or wrapper is denied only if it is, or may be,
-Wiz; malformed input with readable non-Wiz names is allowed. Only input that is
-not valid JSON (including invalid UTF-8 or excessive nesting) falls back to a
-scan of the raw text for Wiz execute names. Any unexpected error is contained
-the same way. Deny reasons contain the error type and at most a file
-basename, never an absolute path.
-
-Example hook registration (`.github/hooks/*.json`), adapted to the installed
-interpreter and workspace; use the project venv interpreter in both commands:
-
-```json
-{"version":1,"hooks":{"preToolUse":[{"type":"command",
-  "powershell":"& 'C:\\path\\to\\WizExpert\\.venv\\Scripts\\python.exe' -m wizexpert.workflow_qa hook",
-  "bash":"/path/to/WizExpert/.venv/bin/python -m wizexpert.workflow_qa hook",
-  "timeoutSec":15}]}}
-```
-
-Registration requirements: `version` 1, the camelCase `preToolUse` event,
-`powershell`/`bash` keys and `timeoutSec`. On PowerShell a quoted executable
-path followed by arguments must use the call operator (`& 'path\python.exe'
--m ...`); without `&` it is a parse error, which crashed the hook and blocked
-every tool on the host (the original outage). The interpreter must be the one
-that has `wizexpert` installed: a missing interpreter or module is a non-zero
-exit before the hook code runs, which fails closed and blocks every tool.
-
-**Live enforcement is not yet confirmed.** The payload shape above was
-observed, and the unit and subprocess tests exercise the hook, but a live
-retest still allowed a bulk call and the evidence showed the host did not run
-the command hook at all. Hook files appear to be loaded only when the
-agent-host process starts, so a hook written mid-session does nothing until the
-host reloads. Do not claim runtime enforcement until, after the host has
-reloaded its hook files, a denied synthetic/unreviewed bulk request is observed
-through the host itself, and confirm this per host.
-The hook governs these exposed MCP calls, not arbitrary scripts, direct SDK/API
-calls or unknown tool aliases. A tool/transport change requires updating and
-testing the adapter. Do not switch interfaces to evade a gate.
+There is no real-time gate on Wiz calls. `python -m wizexpert.workflow_qa hook`
+remains only as a compatibility no-op that reads stdin and prints `{}`, so an
+old registration cannot block tools. Remove any `preToolUse` registration; use
+the post-collection check instead.
 
 ## Actual email template check
 

@@ -6,8 +6,8 @@ import pytest
 
 from wizexpert.__main__ import main
 from wizexpert.workflow_qa import (
+    collection_check,
     digest,
-    hook,
     receipt,
     required_checks,
     rule_hashes,
@@ -69,7 +69,6 @@ def review_payload(tmp_path, phase="collection", workflow="governance"):
             }
             for name in required_checks(workflow, phase)
         },
-        "allowed_wiz_queries": [QUERY],
     }
 
 
@@ -81,7 +80,6 @@ def reviewed(tmp_path):
 @pytest.mark.parametrize(
     "mutation,message",
     [
-        ("self", "self-certify"),
         ("missing", "Missing or unexpected"),
         ("pending", "not verified"),
         ("evidence", "evidence changed"),
@@ -94,9 +92,7 @@ def reviewed(tmp_path):
 def test_qa_fails_closed(reviewed, mutation, message):
     data = json.loads(reviewed.read_text())
     first = next(iter(data["checks"]))
-    if mutation == "self":
-        data["reviewer"] = " REPORT-PREPARER "
-    elif mutation == "missing":
+    if mutation == "missing":
         del data["checks"][first]
     elif mutation == "pending":
         data["checks"][first]["verdict"] = "not_verified"
@@ -116,268 +112,7 @@ def test_qa_fails_closed(reviewed, mutation, message):
         validate_review(reviewed, now=NOW)
 
 
-def run_hook(monkeypatch, capsys, raw, *extra):
-    import io
-    import sys
-    from types import SimpleNamespace
-
-    from wizexpert.workflow_qa import main as qa_main
-
-    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(raw)))
-    code = qa_main(["hook", *extra])
-    assert code == 0
-    out = capsys.readouterr().out
-    assert len(out.strip().splitlines()) == 1
-    return json.loads(out)
-
-
-def camel(tool, args):
-    return json.dumps(
-        {"sessionId": "s", "timestamp": 1, "cwd": "C:/x", "toolName": tool, "toolArgs": args}
-    ).encode()
-
-
-def test_hook_command_camel_case_never_blocks_other_tools(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    assert run_hook(monkeypatch, capsys, camel("bash", {"command": "ls"})) == {}
-    assert run_hook(monkeypatch, capsys, camel("wiz-discover", {"query": "x"})) == {}
-    count = {"tool_name": "list_issues", "parameters": {"first": 1}}
-    assert run_hook(monkeypatch, capsys, camel("wiz-execute", count)) == {}
-    assert run_hook(monkeypatch, capsys, b"not json at all") == {}
-    assert run_hook(monkeypatch, capsys, b"") == {}
-    payload = {"toolName": "bash", "toolArgs": {"command": "echo caf\u00e9 \u2713"}}
-    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    assert run_hook(monkeypatch, capsys, b"\xef\xbb\xbf" + raw) == {}
-    assert run_hook(monkeypatch, capsys, raw) == {}
-
-
-def test_hook_command_denies_bulk_wiz_execute(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    for tool in ("wiz-execute", "functions.wiz-execute"):
-        for args in (QUERY, json.dumps(QUERY)):
-            result = run_hook(monkeypatch, capsys, camel(tool, args))
-            assert result["permissionDecision"] == "deny"
-            assert "requires" in result["permissionDecisionReason"]
-            assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-    snake = json.dumps({"tool_name": "wiz-execute", "tool_input": QUERY}).encode()
-    assert run_hook(monkeypatch, capsys, snake)["permissionDecision"] == "deny"
-    garbage = run_hook(monkeypatch, capsys, b"{broken wiz-execute")
-    assert garbage["permissionDecision"] == "deny"
-    bad_args = run_hook(monkeypatch, capsys, camel("wiz-execute", "not json"))
-    assert bad_args["permissionDecision"] == "deny"
-
-
-def test_hook_command_allows_reviewed_query_via_string_args(reviewed, monkeypatch, capsys):
-    with patch("wizexpert.workflow_qa.datetime") as clock:
-        clock.now.return_value = NOW
-        clock.fromisoformat = datetime.fromisoformat
-        result = run_hook(
-            monkeypatch, capsys, camel("wiz-execute", json.dumps(QUERY)), "--review", str(reviewed)
-        )
-    assert result == {}
-
-
-def test_hook_command_unexpected_error_is_contained(monkeypatch, capsys):
-    def boom(*_):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr("wizexpert.workflow_qa.hook", boom)
-    assert run_hook(monkeypatch, capsys, camel("bash", {})) == {}
-    denied = run_hook(monkeypatch, capsys, camel("wiz-execute", QUERY))
-    assert denied["permissionDecision"] == "deny"
-    assert "RuntimeError" in denied["permissionDecisionReason"]
-
-
 COUNT = {"tool_name": "list_issues", "parameters": {"first": 1}}
-
-
-def batch(*calls):
-    return json.dumps(
-        {
-            "sessionId": "s",
-            "cwd": "c:\\Users\\Someone\\WizExpert",
-            "toolCalls": [
-                {"id": f"call_{index}", "name": name, "args": args}
-                for index, (name, args) in enumerate(calls, 1)
-            ],
-        }
-    ).encode()
-
-
-def test_hook_batch_shape_is_primary(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    assert run_hook(monkeypatch, capsys, batch(("view", {"path": "C:\\x"}))) == {}
-    assert run_hook(monkeypatch, capsys, batch(("wiz-discover", {"q": "x"}), ("rg", {}))) == {}
-    assert run_hook(monkeypatch, capsys, batch(("wiz-execute", COUNT))) == {}
-    assert run_hook(monkeypatch, capsys, batch()) == {}
-    assert run_hook(monkeypatch, capsys, b'{"sessionId":"s","cwd":"c:\\\\x"}') == {}
-    denied = run_hook(monkeypatch, capsys, batch(("wiz-execute", QUERY)))
-    assert denied["permissionDecision"] == "deny"
-    assert "call_1" in denied["permissionDecisionReason"]
-    mixed = run_hook(monkeypatch, capsys, batch(("view", {}), ("wiz-execute", QUERY)))
-    assert mixed["permissionDecision"] == "deny"
-    assert "call_2" in mixed["permissionDecisionReason"]
-    assert "Someone" not in mixed["permissionDecisionReason"]
-
-
-def test_hook_batch_escaped_name_and_name_variants_are_denied(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    query = json.dumps(QUERY)
-    escaped = (
-        '{"toolCalls":[{"id":"call_x","name":"wiz\\u002dexecute","args":' + query + "}]}"
-    ).encode()
-    assert "wiz-execute" not in escaped.decode()
-    assert run_hook(monkeypatch, capsys, escaped)["permissionDecision"] == "deny"
-    for name in (" Wiz-Execute ", "functions.WIZ-EXECUTE", "mcp__wiz__execute", "MCP_wiz_execute"):
-        result = run_hook(monkeypatch, capsys, batch((name, QUERY)))
-        assert result["permissionDecision"] == "deny", name
-    wrapper = {"tool_uses": [{"recipient_name": "functions.wiz\u002dexecute", "parameters": QUERY}]}
-    for form in (
-        json.dumps({"toolName": "multi_tool_use.parallel", "toolArgs": wrapper}),
-        json.dumps({"tool_name": "parallel", "tool_input": json.dumps(wrapper)}),
-        batch(("parallel", wrapper)).decode(),
-    ):
-        assert run_hook(monkeypatch, capsys, form.encode())["permissionDecision"] == "deny"
-
-
-def test_hook_malformed_input_denied_only_when_it_may_be_wiz(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    bash = {"command": "echo wiz-execute"}
-    # Readable non-Wiz names are never denied, whatever their args say.
-    assert run_hook(monkeypatch, capsys, batch(("bash", bash), ("view", "not json"))) == {}
-    wrapper = {"tool_uses": [{"recipient_name": "bash", "parameters": bash}, {"junk": 1}, 7]}
-    assert run_hook(monkeypatch, capsys, batch(("parallel", wrapper))) == {}
-    assert run_hook(monkeypatch, capsys, camel("parallel", wrapper)) == {}
-    assert run_hook(monkeypatch, capsys, camel("parallel", "not json")) == {}
-    assert run_hook(monkeypatch, capsys, b'{"toolCalls":"nope"}') == {}
-    assert run_hook(monkeypatch, capsys, b'{"toolCalls":[5,{"id":"a"}]}') == {}
-    # Unreadable pieces that mention Wiz are denied.
-    bad = {"tool_uses": [{"parameters": {"tool": "wiz\u002dexecute"}}]}
-    assert run_hook(monkeypatch, capsys, batch(("parallel", bad)))["permissionDecision"] == "deny"
-    unnamed = b'{"toolCalls":[{"id":"a","args":{"x":"wiz\\u002dexecute"}}]}'
-    assert run_hook(monkeypatch, capsys, unnamed)["permissionDecision"] == "deny"
-    assert run_hook(monkeypatch, capsys, b'{"toolCalls":"wiz-execute"}')["permissionDecision"]
-    assert run_hook(monkeypatch, capsys, camel("wiz-execute", "not json"))["permissionDecision"]
-    assert run_hook(monkeypatch, capsys, batch(("wiz-execute", [1])))["permissionDecision"]
-
-
-def test_hook_non_json_and_non_utf8_input(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    assert run_hook(monkeypatch, capsys, b"\xff\xfe\x00bad") == {}
-    assert run_hook(monkeypatch, capsys, b"[1, 2]") == {}
-    assert run_hook(monkeypatch, capsys, b"[" * 200000) == {}
-    assert run_hook(monkeypatch, capsys, b"\xff wiz-execute")["permissionDecision"] == "deny"
-    escaped = b"{broken wiz\\u002dexecute"
-    assert run_hook(monkeypatch, capsys, escaped)["permissionDecision"] == "deny"
-    duplicate = b'{"toolName":"bash","toolName":"wiz-execute"}'
-    assert run_hook(monkeypatch, capsys, duplicate)["permissionDecision"] == "deny"
-
-
-def test_hook_wiz_call_without_readable_query_is_denied(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-
-    def run(*elements):
-        raw = json.dumps({"toolCalls": list(elements)}).encode()
-        return run_hook(monkeypatch, capsys, raw)
-
-    wiz = {"id": "call_9", "name": "wiz-execute"}
-    assert run(wiz)["permissionDecision"] == "deny"
-    assert run(wiz | {"args": None})["permissionDecision"] == "deny"
-    assert "call_9" in run(wiz)["permissionDecisionReason"]
-    for key in ("args", "arguments", "input", "parameters"):
-        assert run(wiz | {key: QUERY})["permissionDecision"] == "deny", key
-        assert run(wiz | {key: json.dumps(QUERY)})["permissionDecision"] == "deny", key
-        assert run(wiz | {key: COUNT}) == {}, key
-        assert run(wiz | {key: json.dumps(COUNT)}) == {}, key
-    # A harmless-looking args value cannot hide a bulk query held under another key.
-    assert run(wiz | {"args": COUNT, "input": QUERY})["permissionDecision"] == "deny"
-    for bad in ({"parameters": {"first": 50}}, {"tool_name": "", "parameters": {"first": 50}}):
-        assert run(wiz | {"args": bad})["permissionDecision"] == "deny"
-        assert run(wiz | {"args": {"tool_name": "  ", **bad}})["permissionDecision"] == "deny"
-
-
-def test_hook_name_under_other_keys_or_unreadable(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-
-    def run(*elements, key="toolCalls"):
-        return run_hook(monkeypatch, capsys, json.dumps({key: list(elements)}).encode())
-
-    for key in ("tool", "toolName", "tool_name", "recipient_name"):
-        denied = run({"id": "c1", key: "wiz-execute", "args": QUERY})
-        assert denied["permissionDecision"] == "deny", key
-        assert run({"id": "c1", key: "wiz-execute", "args": COUNT}) == {}, key
-        assert run({"id": "c1", key: "view", "args": QUERY}) == {}, key
-    for name in (None, 5, ["wiz-execute"], {"n": 1}):
-        element = {"id": "c2", "name": name, "args": QUERY}
-        assert run(element)["permissionDecision"] == "deny", name
-    assert run({"id": "c3", "args": QUERY})["permissionDecision"] == "deny"
-    assert run({"id": "c3", "name": None, "args": {"tool_name": "Execute_Graph_Query"}})
-    escaped = b'{"toolCalls":[{"id":"c4","args":{"x":"wiz\\u002dexecute"}}]}'
-    assert run_hook(monkeypatch, capsys, escaped)["permissionDecision"] == "deny"
-    # Unreadable names with nothing Wiz-like inside are allowed.
-    assert run({"id": "c5", "args": {"command": "ls"}}) == {}
-    assert run({"id": "c5", "name": None, "args": {"command": "ls"}}, 7, "text") == {}
-    assert run({"id": "c5", "name": 12, "args": {}}) == {}
-    # Other batch key spellings are evaluated like toolCalls.
-    for key in ("tool_calls", "calls"):
-        assert run({"id": "c6", "name": "view", "args": {}}, key=key) == {}
-        denied = run({"id": "c6", "name": "wiz-execute", "args": QUERY}, key=key)
-        assert denied["permissionDecision"] == "deny", key
-        assert "c6" in denied["permissionDecisionReason"]
-        assert run({"id": "c7", "args": QUERY}, key=key)["permissionDecision"] == "deny"
-    assert run_hook(monkeypatch, capsys, b'{"foo":1,"bar":[1,2]}') == {}
-    assert run_hook(monkeypatch, capsys, b'{"calls":"wiz-execute"}')["permissionDecision"]
-
-
-def test_hook_parallel_wrapper_reads_every_args_key(monkeypatch, capsys):
-    monkeypatch.delenv("WIZEXPERT_QA_REVIEW", raising=False)
-    harmless = {"tool_uses": [{"recipient_name": "view", "parameters": {}}]}
-    wiz = {"tool_uses": [{"recipient_name": "functions.wiz-execute", "parameters": QUERY}]}
-
-    def run(element):
-        raw = json.dumps({"toolCalls": [element]}).encode()
-        return run_hook(monkeypatch, capsys, raw)
-
-    wrapper = {"id": "call_p", "name": "parallel"}
-    # (a) harmless args, bulk Wiz call under another key.
-    for key in ("arguments", "input", "parameters"):
-        denied = run(wrapper | {"args": harmless, key: wiz})
-        assert denied["permissionDecision"] == "deny", key
-        assert "call_p" in denied["permissionDecisionReason"]
-        assert run(wrapper | {"args": harmless, key: json.dumps(wiz)})["permissionDecision"]
-    # (b) nested wrapper: harmless args, Wiz call under parameters.
-    nested = {"recipient_name": "parallel", "args": harmless, "parameters": wiz}
-    assert run(wrapper | {"args": {"tool_uses": [nested]}})["permissionDecision"] == "deny"
-    # An unreadable second value falls back to scanning the whole element.
-    unreadable = wrapper | {"args": harmless, "arguments": "not json wiz-execute"}
-    assert run(unreadable)["permissionDecision"] == "deny"
-    assert run(wrapper | {"args": harmless, "arguments": "not json"}) == {}
-    assert run(wrapper | {"args": harmless, "input": harmless}) == {}
-    assert run(wrapper | {"args": harmless, "arguments": {"tool_uses": []}}) == {}
-
-
-def test_hook_batch_with_reviewed_query_is_allowed(reviewed, monkeypatch, capsys):
-    with patch("wizexpert.workflow_qa.datetime") as clock:
-        clock.now.return_value = NOW
-        clock.fromisoformat = datetime.fromisoformat
-        raw = batch(("view", {}), ("wiz-execute", QUERY))
-        assert run_hook(monkeypatch, capsys, raw, "--review", str(reviewed)) == {}
-        other = json.loads(json.dumps(QUERY))
-        other["parameters"]["status"] = ["RESOLVED"]
-        raw = batch(("wiz-execute", other))
-        denied = run_hook(monkeypatch, capsys, raw, "--review", str(reviewed))
-        assert denied["permissionDecision"] == "deny"
-
-
-def test_hook_deny_reason_has_no_absolute_paths(tmp_path, monkeypatch, capsys):
-    missing = tmp_path / "private-dir" / "missing-review.json"
-    for raw in (batch(("wiz-execute", QUERY)), camel("wiz-execute", QUERY)):
-        denied = run_hook(monkeypatch, capsys, raw, "--review", str(missing))
-        reason = denied["permissionDecisionReason"]
-        assert str(tmp_path) not in reason
-        assert "private-dir" not in reason
-        assert "FileNotFoundError" in reason or "OSError" in reason
-        assert "missing-review.json" in reason
 
 
 @pytest.mark.parametrize(
@@ -405,77 +140,84 @@ def test_is_bulk_rejects_odd_cursor_values(parameters):
         is_bulk({"tool_name": ["list_issues"], "parameters": {"first": 50}})
 
 
-def test_hook_blocks_unreviewed_bulk_and_allows_count_probe():
-    with pytest.raises(ValueError, match="requires a workflow QA"):
-        hook({"tool_name": "wiz-execute", "tool_input": QUERY}, None)
-    count = {"tool_name": "list_issues", "parameters": {"first": 1}}
-    assert hook({"tool_name": "wiz-execute", "tool_input": count}, None) == {}
-    with pytest.raises(ValueError, match="requires"):
-        hook(
-            {
-                "tool_name": "multi_tool_use.parallel",
-                "tool_input": {
-                    "tool_uses": [{"recipient_name": "functions.wiz-execute", "parameters": QUERY}]
-                },
-            },
-            None,
-        )
-
-
-def test_hook_exact_query_and_pagination(reviewed):
-    with patch("wizexpert.workflow_qa.datetime") as clock:
-        clock.now.return_value = NOW
-        clock.fromisoformat = datetime.fromisoformat
-        page = json.loads(json.dumps(QUERY))
-        page["parameters"]["after"] = "returned-cursor"
-        assert hook({"tool_name": "functions.wiz-execute", "tool_input": page}, reviewed) == {}
-        page["parameters"]["status"] = ["RESOLVED"]
-        with pytest.raises(ValueError, match="outside the reviewed plan"):
-            hook({"tool_name": "wiz-execute", "tool_input": page}, reviewed)
-
-
-def test_full_history_needs_evidence_backed_approval(reviewed):
-    data = json.loads(reviewed.read_text())
-    data["allowed_wiz_queries"][0]["parameters"]["status"] = ["OPEN", "IN_PROGRESS", "RESOLVED"]
-    save(reviewed, data)
-    with pytest.raises(ValueError, match="historical collection"):
-        validate_review(reviewed, now=NOW)
-    data["full_refresh_approval"] = {
-        "reason": "Documented coverage gap",
-        "approved_by": "report-owner",
-        "evidence": next(iter(data["evidence_sha256"])),
+def manifest(tmp_path, **override):
+    data = {
+        "started_at": (NOW - timedelta(hours=2)).isoformat(),
+        "ended_at": (NOW - timedelta(minutes=10)).isoformat(),
+        "reused_sources": ["prior-snapshot"],
+        "counts": [{"name": "open-issues", "expected": 5, "collected": 5}],
     }
-    save(reviewed, data)
-    assert validate_review(reviewed, now=NOW)["phase"] == "collection"
+    data.update(override)
+    return data
 
 
-@pytest.mark.parametrize("premature", [True, False])
-def test_actual_calls_detect_deviation_even_when_all_checkboxes_pass(tmp_path, premature):
+def activity(tmp_path, args=None):
+    log = tmp_path / "activity.jsonl"
+    event = {
+        "timestamp": (NOW - timedelta(minutes=30)).isoformat(),
+        "type": "tool.execution_start",
+        "data": {"toolName": "wiz-execute", "arguments": args or QUERY},
+    }
+    log.write_text(json.dumps(event) + "\n", encoding="utf-8")
+    return log
+
+
+def test_collection_check_passes_reuse_first_and_reconciled_counts(tmp_path):
+    result = collection_check(activity(tmp_path), manifest(tmp_path))
+    assert result["status"] == "pass" and result["flags"] == []
+
+
+@pytest.mark.parametrize(
+    "override,message",
+    [
+        ({"reused_sources": []}, "Reuse-first: name"),
+        ({"counts": [{"name": "n", "expected": 5, "collected": 4}]}, "mismatch"),
+        ({"counts": []}, "no counts"),
+        ({"started_at": "bad"}, "started_at"),
+    ],
+)
+def test_collection_check_flags_report_not_calls(tmp_path, override, message):
+    result = collection_check(activity(tmp_path), manifest(tmp_path, **override))
+    assert result["status"] == "flagged"
+    assert any(message in flag for flag in result["flags"])
+
+
+def test_collection_check_flags_unjustified_full_history_only(tmp_path):
+    full = {"tool_name": "list_issues", "parameters": {"first": 20, "status": ["RESOLVED"]}}
+    log = activity(tmp_path, full)
+    assert collection_check(log, manifest(tmp_path))["status"] == "flagged"
+    justified = manifest(tmp_path, full_refresh_reason="Documented coverage gap")
+    assert collection_check(log, justified)["status"] == "pass"
+
+
+def test_collection_check_cli_exit_codes(tmp_path, capsys):
+    log = activity(tmp_path)
+    ok = save(tmp_path / "ok.json", manifest(tmp_path))
+    bad = save(tmp_path / "bad.json", manifest(tmp_path, reused_sources=[]))
+    base = ["workflow-qa", "collection-check", "--activity-log", str(log)]
+    assert main([*base, "--manifest", str(ok)]) == 0
+    assert main([*base, "--manifest", str(bad)]) == 1
+    assert "flagged" in capsys.readouterr().out
+
+
+def test_generation_requires_independent_reviewer_and_passing_collection_check(tmp_path):
     collection = save(tmp_path / "collection.json", review_payload(tmp_path))
+    assert validate_review(collection, now=NOW)["phase"] == "collection"
     data = review_payload(tmp_path, "generation")
+    data["reviewer"] = " REPORT-PREPARER "
+    path = save(tmp_path / "generation.json", data)
+    with pytest.raises(ValueError, match="self-certify"):
+        validate_review(path, now=NOW)
+    data["reviewer"] = "separate-reviewer"
     data["reviewed_at"] = (NOW - timedelta(minutes=1)).isoformat()
     data["previous_review"] = str(collection)
-    args = json.loads(json.dumps(QUERY))
-    if not premature:
-        args["parameters"]["severity"] = ["LOW"]
-    event_time = NOW - timedelta(minutes=90 if premature else 30)
-    log = tmp_path / "activity.jsonl"
-    log.write_text(
-        json.dumps(
-            {
-                "timestamp": event_time.isoformat(),
-                "type": "tool.execution_start",
-                "data": {"toolName": "wiz-execute", "arguments": args},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    data["activity_log"] = str(log)
-    data["evidence_sha256"].update({str(collection): digest(collection), str(log): digest(log)})
-    generation = save(tmp_path / "generation.json", data)
-    with pytest.raises(ValueError, match="before workflow QA|deviated"):
-        validate_review(generation, now=NOW)
+    log = activity(tmp_path)
+    flagged = save(tmp_path / "manifest.json", manifest(tmp_path, reused_sources=[]))
+    data["activity_log"], data["collection_manifest"] = str(log), str(flagged)
+    data["evidence_sha256"].update({str(p): digest(p) for p in (collection, log, flagged)})
+    path = save(tmp_path / "generation.json", data)
+    with pytest.raises(ValueError, match="Post-collection check flagged"):
+        validate_review(path, now=NOW)
 
 
 def test_qa_receipt_never_claims_release_approval(reviewed):
@@ -616,6 +358,7 @@ def test_complete_finding_review_checks_requested_html_without_forcing_email(tmp
         + "\n",
         encoding="utf-8",
     )
+    checked = save(tmp_path / "manifest.json", manifest(tmp_path))
     previous = None
     for phase, minutes in (("collection", 60), ("generation", 20), ("handoff", 1)):
         data = review_payload(tmp_path, phase, workflow="finding")
@@ -624,7 +367,8 @@ def test_complete_finding_review_checks_requested_html_without_forcing_email(tmp
         data["reviewed_at"] = (NOW - timedelta(minutes=minutes)).isoformat()
         if previous:
             data["previous_review"], data["activity_log"] = str(previous), str(log)
-            data["evidence_sha256"].update({str(previous): digest(previous), str(log): digest(log)})
+            data["collection_manifest"] = str(checked)
+            data["evidence_sha256"].update({str(f): digest(f) for f in (previous, log, checked)})
         if phase == "handoff":
             data["artifacts"] = [item]
             data["evidence_sha256"].update(evidence)
