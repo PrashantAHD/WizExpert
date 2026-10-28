@@ -42,10 +42,14 @@ are named; the log shows an unbounded historical `list_issues` query with no
 `full_refresh_reason`; a Wiz call has unreadable arguments; the log has no events
 in the interval; or any count is missing or does not reconcile. A flagged check
 blocks generation, not collection. Generation reviews must carry hash-bound
-`activity_log` and `collection_manifest`, and `validate_review` re-runs the check. A manifest may
-add a `campaign_collection` block (one staging directory, complete, no reused
-previous inventory, authentication confirmed); a partial or stitched campaign
-pack flags the report. Collection has no fixed time limit: only a stalled or
+`activity_log` and `collection_manifest`, and `validate_review` re-runs the check.
+A campaign review must carry a `campaign_collection` block in that manifest. It is
+not a self-reported claim: it names the assemble manifest written by
+`wizexpert campaign assemble` (`assemble_manifest`, absolute path, and its
+`assemble_manifest_sha256`), and the check re-derives from that manifest and the
+retained staging evidence that the run is single, complete, not aborted,
+unchanged, and not stitched or built from old data. Anything else flags the
+report. Collection has no fixed time limit: only a stalled or
 repeatedly failing run is abandoned (see [campaigns](CAMPAIGNS.md)).
 
 ## Whole-workflow coverage
@@ -322,7 +326,7 @@ clipping and responsiveness. Factual accuracy and whether recommendations fit
 the environment also need evidence-backed review. Keyword checks cannot prove
 every paraphrase compliant. Ticket-pending drafts never imply outreach readiness.
 
-Campaign update emails (kind `progress`, or `"campaign": true`) are also checked
+Campaign update and closure emails (`"campaign": true` in the contract) are also checked
 for wording: any mention of Rejected findings is flagged; "Resolved" must be
 qualified as the Wiz lifecycle status (not verified patching); and reconstructed
 or partial-day values (or `partial_day`/`reconstructed` set in the contract) must

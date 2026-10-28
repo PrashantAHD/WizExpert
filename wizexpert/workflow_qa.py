@@ -155,6 +155,7 @@ def rule_hashes(workflow: str) -> dict:
         "wizexpert/email_qa.py",
         "wizexpert/artifact_qa.py",
         "wizexpert/office_qa.py",
+        "wizexpert/campaign.py",
     )
     if workflow == "governance":
         paths += tuple(
@@ -164,7 +165,6 @@ def rule_hashes(workflow: str) -> dict:
     else:
         paths += (
             "wizexpert/workflow.py",
-            "wizexpert/campaign.py",
             "wizexpert/csv_report.py",
             "wizexpert/execution_update.py",
         )
@@ -451,7 +451,7 @@ def audit_activity(path: Path, review: dict, previous: dict) -> None:
     """Post-collection check from the recorded activity log; it blocks the report only."""
     manifest_path = Path(review["collection_manifest"])
     require(str(manifest_path) in review["evidence_sha256"], "Manifest must be hash-bound.")
-    result = collection_check(path, load(manifest_path))
+    result = collection_check(path, load(manifest_path), review["workflow"])
     require(
         result["status"] == "pass", "Post-collection check flagged: " + "; ".join(result["flags"])
     )
@@ -486,11 +486,13 @@ def receipt(path: Path, phase: str | None = None) -> dict:
     }
 
 
-def collection_check(log_path: Path, manifest: dict) -> dict:
+def collection_check(log_path: Path, manifest: dict, workflow: str | None = None) -> dict:
     """Post-collection check from the activity log; it flags a report, never blocks a tool call.
 
     Confirms reuse-first (prior sources named; any full-history Wiz query justified) and
-    that every manifest count reconciles. Returns {"status": "pass"|"flagged", "flags": [...]}.
+    that every manifest count reconciles. A campaign review must also carry a
+    `campaign_collection` block bound to the hash-linked assemble manifest.
+    Returns {"status": "pass"|"flagged", "flags": [...]}.
     """
     flags: list[str] = []
     try:
@@ -526,10 +528,10 @@ def collection_check(log_path: Path, manifest: dict) -> dict:
     if not seen:
         flags.append("Activity log has no events in the collection interval.")
     counts = manifest.get("counts")
-    if "campaign_collection" in manifest:
+    if "campaign_collection" in manifest or workflow == "campaign":
         from wizexpert.campaign import campaign_collection_flags
 
-        flags.extend(campaign_collection_flags(manifest["campaign_collection"]))
+        flags.extend(campaign_collection_flags(manifest.get("campaign_collection")))
     if not (isinstance(counts, list) and counts):
         flags.append("Count reconciliation: no counts supplied.")
         counts = []
@@ -586,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
     post = commands.add_parser("collection-check")
     post.add_argument("--activity-log", type=Path, required=True)
     post.add_argument("--manifest", type=Path, required=True)
+    post.add_argument("--workflow", choices=SPECIFIC)
     args = parser.parse_args(argv)
     try:
         if args.command == "requirements":
@@ -603,7 +606,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "check":
             result = receipt(args.review, args.phase)
         elif args.command == "collection-check":
-            result = collection_check(args.activity_log, load(args.manifest))
+            result = collection_check(args.activity_log, load(args.manifest), args.workflow)
             if result["status"] != "pass":
                 print(json.dumps(result, indent=2))
                 return 1

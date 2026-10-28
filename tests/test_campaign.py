@@ -1,6 +1,10 @@
+import hashlib
 import json
+import os
 import re
+import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -11,7 +15,6 @@ from wizexpert.__main__ import main
 from wizexpert.artifact_qa import check_workbook
 from wizexpert.campaign import (
     CampaignConfig,
-    campaign_collection_flags,
     campaign_wording_errors,
     check_campaign_workbook,
     classify_failure,
@@ -22,7 +25,7 @@ from wizexpert.campaign import (
     write_json,
 )
 from wizexpert.email_qa import validate_email
-from wizexpert.workflow_qa import collection_check, required_checks
+from wizexpert.workflow_qa import collection_check, required_checks, rule_hashes
 
 T0 = datetime(2026, 1, 5, 8, 0, tzinfo=UTC)
 IDS = ("TEST-VULN-A", "TEST-VULN-B")
@@ -376,10 +379,6 @@ def test_auth_challenge_stops_and_repeated_failures_abort(tmp_path):
     cfg = config()
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
     params = {"external_id": IDS[0]}
-    assert (
-        record_failure(directory, "get_vulnerability_catalog", params, status=401)["action"]
-        == "stop_reconnect"
-    )
     for expected in (1, 2):
         result = record_failure(directory, "get_vulnerability_catalog", params, status=500)
         assert result["action"] == "retry" and result["attempts"] == expected
@@ -388,6 +387,8 @@ def test_auth_challenge_stops_and_repeated_failures_abort(tmp_path):
     assert (
         campaign.next_call(cfg, directory, now=at(seconds=1))["action"] == "abort_unable_to_fetch"
     )
+    with pytest.raises(ValueError, match="unable to fetch"):
+        save_catalogs(cfg, directory, at(seconds=2))
 
 
 def test_successful_save_clears_earlier_failures(tmp_path):
@@ -552,16 +553,18 @@ def test_campaign_wording_accepts_qualified_text():
     assert campaign_wording_errors("x at 09:05:00Z", partial_day=True) == []
 
 
-def progress_email(email, body):  # noqa: F811
+def progress_email(email, body, kind="progress", campaign=True):  # noqa: F811
     target, contract = email
     payload = json.loads(contract.read_text())
     payload.update(
-        kind="progress",
+        kind=kind,
         approved_subject="Reviewed update",
         approved_body=body,
         issue_mappings=[],
         attachments={},
     )
+    if campaign:
+        payload["campaign"] = True
     contract.write_text(json.dumps(payload), encoding="utf-8")
     content = target.read_text().replace(
         "Review requested: Synthetic finding | SNOW: INC123", "Reviewed update"
@@ -591,36 +594,21 @@ def test_progress_email_flags_rejected_unqualified_resolved_and_missing_cutoff(e
     assert validate_email(*progress_email(email, cutoff))["errors"] == []
 
 
-def test_non_campaign_email_kinds_are_not_subject_to_campaign_wording(email):  # noqa: F811
+def test_wording_applies_to_campaign_closure_but_not_non_campaign_progress(email):  # noqa: F811
     body = "Hi Team, Rejected items are resolved. Best Regards, Example Security Team"
-    target, contract = progress_email(email, body)
-    payload = json.loads(contract.read_text())
-    payload["kind"] = "reply"
-    contract.write_text(json.dumps(payload), encoding="utf-8")
-    assert validate_email(target, contract)["errors"] == []
-    payload["campaign"] = True
-    contract.write_text(json.dumps(payload), encoding="utf-8")
-    assert validate_email(target, contract)["errors"]
+    # Non-campaign progress email: not subject to campaign wording.
+    plain = progress_email(email, body, kind="progress", campaign=False)
+    assert validate_email(*plain)["errors"] == []
+    # Campaign closure draft: checked.
+    closure = progress_email(email, body, kind="closure", campaign=True)
+    errors = validate_email(*closure)["errors"]
+    assert any("Rejected" in e for e in errors)
+    # Campaign flag on a progress email: checked.
+    flagged = progress_email(email, body, kind="progress", campaign=True)
+    assert validate_email(*flagged)["errors"]
 
 
-def test_collection_check_flags_partial_stitched_or_reused_campaign_packs(tmp_path):
-    good = {
-        "staging_dirs": ["run-1"],
-        "complete": True,
-        "reused_previous_inventory": False,
-        "auth_ok": True,
-    }
-    assert campaign_collection_flags(good) == []
-    bad = {
-        **good,
-        "staging_dirs": ["a", "b"],
-        "complete": False,
-        "reused_previous_inventory": True,
-        "auth_ok": False,
-    }
-    assert len(campaign_collection_flags(bad)) == 4
-    assert campaign_collection_flags(None)
-
+def write_log(tmp_path):
     log = tmp_path / "activity.jsonl"
     log.write_text(
         json.dumps(
@@ -633,18 +621,85 @@ def test_collection_check_flags_partial_stitched_or_reused_campaign_packs(tmp_pa
         + "\n",
         encoding="utf-8",
     )
-    manifest = {
+    return log
+
+
+def qa_manifest(block=None, **extra):
+    data = {
         "started_at": (T0 - timedelta(hours=1)).isoformat(),
-        "ended_at": T0.isoformat(),
+        "ended_at": (T0 + timedelta(hours=3)).isoformat(),
         "reused_sources": ["prior"],
         "counts": [{"name": "n", "expected": 1, "collected": 1}],
-        "campaign_collection": good,
+        **extra,
     }
-    assert collection_check(log, manifest)["status"] == "pass"
-    manifest["campaign_collection"] = bad
-    flagged = collection_check(log, manifest)
-    assert flagged["status"] == "flagged"
-    assert any("Partial pack" in f for f in flagged["flags"])
+    if block is not None:
+        data["campaign_collection"] = block
+    return data
+
+
+def bound_block(tmp_path, cfg, directory):
+    out = tmp_path / "assembled" / "manifest.json"
+    campaign.assemble(cfg, directory, out)
+    return {
+        "assemble_manifest": str(out),
+        "assemble_manifest_sha256": hashlib.sha256(out.read_bytes()).hexdigest(),
+    }
+
+
+def flags_for(tmp_path, block, workflow="campaign"):
+    log = write_log(tmp_path)
+    return collection_check(log, qa_manifest(block), workflow)
+
+
+def test_campaign_review_requires_block_bound_to_assemble_manifest(tmp_path):
+    cfg, directory, _, _ = complete_run(tmp_path / "run", timedelta(seconds=1))
+    block = bound_block(tmp_path, cfg, directory)
+    assert flags_for(tmp_path, block)["status"] == "pass"
+    missing = flags_for(tmp_path, None)
+    assert missing["status"] == "flagged" and any("missing" in f for f in missing["flags"])
+    # Self-reported claims are not accepted.
+    claims = {"staging_dirs": ["x"], "complete": True, "auth_ok": True}
+    assert flags_for(tmp_path, claims)["status"] == "flagged"
+    # Non-campaign workflows only check the block when one is supplied.
+    assert collection_check(write_log(tmp_path), qa_manifest(), "finding")["status"] == "pass"
+    wrong_hash = {**block, "assemble_manifest_sha256": "0" * 64}
+    assert flags_for(tmp_path, wrong_hash)["status"] == "flagged"
+
+
+def test_bound_block_detects_changed_extra_aborted_and_stale_evidence(tmp_path):
+    cfg, directory, _, _ = complete_run(tmp_path / "run", timedelta(seconds=1))
+    block = bound_block(tmp_path, cfg, directory)
+    staging = Path(directory)
+    catalog_file = staging / "catalog-TEST-VULN-A.json"
+    original = catalog_file.read_bytes()
+    catalog_file.write_bytes(original.replace(b"TEST-VULN-A", b"TEST-VULN-A", 1) + b" ")
+    assert any("changed" in f for f in flags_for(tmp_path, block)["flags"])
+    catalog_file.write_bytes(original)
+    (staging / "findings-0009.json").write_bytes(b"{}")
+    assert any("differs" in f for f in flags_for(tmp_path, block)["flags"])
+    (staging / "findings-0009.json").unlink()
+    (staging / "aborted.json").write_text("{}", encoding="utf-8")
+    assert any("aborted" in f for f in flags_for(tmp_path, block)["flags"])
+
+
+def test_bound_block_detects_evidence_that_predates_the_run(tmp_path):
+    cfg, directory, _, _ = complete_run(tmp_path / "run", timedelta(seconds=1))
+    stale_file = Path(directory) / "catalog-TEST-VULN-A.json"
+    record = read_json(stale_file)
+    record["observed_at"] = campaign.iso(at(hours=-1))  # older than the run's start
+    write_json(stale_file, record)
+    block = bound_block(tmp_path, cfg, directory)
+    assert any("predates" in f for f in flags_for(tmp_path, block)["flags"])
+
+
+def test_collection_check_cli_workflow_option(tmp_path, capsys):
+    log = write_log(tmp_path)
+    path = tmp_path / "m.json"
+    write_json(path, qa_manifest())
+    base = ["workflow-qa", "collection-check", "--activity-log", str(log), "--manifest", str(path)]
+    assert main(base) == 0
+    capsys.readouterr()
+    assert main([*base, "--workflow", "campaign"]) == 1
 
 
 def test_campaign_checks_have_no_fixed_window_and_cover_auth_and_partial_packs():
@@ -653,3 +708,197 @@ def test_campaign_checks_have_no_fixed_window_and_cover_auth_and_partial_packs()
     assert "snapshot-inventory-window-and-identity" not in collection
     assert "wiz-auth-and-model-availability" in collection
     assert "no-partial-pack-and-qualified-wording" in required_checks("campaign", "handoff")
+
+
+def test_campaign_module_is_in_every_rule_hash():
+    for workflow in ("governance", "campaign", "finding"):
+        assert "wizexpert/campaign.py" in rule_hashes(workflow)
+
+
+def test_stall_threshold_is_fixed_at_start_and_overrides_are_ignored(tmp_path):
+    directory = campaign.start(config(stall_seconds=60), tmp_path, now=T0)["dir"]
+    assert read_json(f"{directory}/meta.json")["stall_seconds"] == 60
+    lax = config(stall_seconds=10**6)
+    result = campaign.next_call(lax, directory, now=at(seconds=61))
+    assert result["action"] == "abort_stalled" and result["stall_threshold_seconds"] == 60
+
+
+def test_abort_is_sticky_for_next_save_and_assemble(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    assert campaign.next_call(cfg, directory, now=at(seconds=901))["action"] == "abort_stalled"
+    assert (Path(directory) / "aborted.json").is_file()
+    # Even with a "fresh" clock, the run never resumes.
+    again = campaign.next_call(cfg, directory, now=T0)
+    assert again["action"] == "abort_stalled" and again["aborted"] is True
+    with pytest.raises(ValueError, match="stuck"):
+        save_catalogs(cfg, directory, T0)
+    with pytest.raises(ValueError, match="stuck"):
+        campaign.assemble(cfg, directory, tmp_path / "m.json")
+
+
+def test_auth_challenge_marker_blocks_planning_until_new_start(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path / "a", now=T0)["dir"]
+    assert (
+        record_failure(directory, "get_vulnerability_catalog", {}, status=401)["action"]
+        == "stop_reconnect"
+    )
+    nxt = campaign.next_call(cfg, directory, now=at(seconds=1))
+    assert nxt["action"] == "stop_reconnect" and "calls" not in nxt
+    with pytest.raises(ValueError, match="reconnect"):
+        save_catalogs(cfg, directory, at(seconds=2))
+    fresh = campaign.start(cfg, tmp_path / "b", now=at(minutes=5))
+    assert fresh["next"]["action"] == "wiz-execute-batch"
+
+
+def test_more_than_one_hundred_finding_pages_complete_in_numeric_order(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    save_catalogs(cfg, directory, at(seconds=1))
+    pages = 105
+    save_grouped(
+        cfg,
+        directory,
+        at(seconds=2),
+        {"all": pages, "remaining": pages, "resolved": 0, "rejected": 0},
+    )
+    nxt = None
+    for number in range(pages):
+        params = finding_params(**({"after": f"c{number - 1}"} if number else {}))
+        page = finding_page([(f"a{number:03d}", "OPEN")], number < pages - 1, f"c{number}")
+        nxt = campaign.save(
+            cfg, directory, "list_vulnerability_findings", params, page, now=at(seconds=3 + number)
+        )["next"]
+    names = sorted(p.name for p in Path(directory).glob("findings-*.json"))
+    assert len(names) == pages and names[100] == "findings-0100.json"
+    assert nxt["action"] == "wiz-execute-batch"
+    assert [len(c["parameters"]["resource_id"]) for c in nxt["calls"]] == [40, 40, 25]
+    first = nxt["calls"][0]["parameters"]["resource_id"]
+    assert first == [f"a{i:03d}" for i in range(40)]
+
+
+def test_repeated_or_empty_cursors_and_empty_pages_are_refused(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    for cursor in (None, ""):
+        page = finding_page([("a1", "OPEN")], True, cursor)
+        with pytest.raises(ValueError, match="endCursor"):
+            campaign.save(
+                cfg,
+                directory,
+                "list_vulnerability_findings",
+                finding_params(),
+                page,
+                now=at(seconds=1),
+            )
+    empty = finding_page([], True, "c1")
+    with pytest.raises(ValueError, match="Empty finding page"):
+        campaign.save(
+            cfg,
+            directory,
+            "list_vulnerability_findings",
+            finding_params(),
+            empty,
+            now=at(seconds=1),
+        )
+    first = finding_page([("a1", "OPEN")], True, "c1")
+    campaign.save(
+        cfg, directory, "list_vulnerability_findings", finding_params(), first, now=at(seconds=2)
+    )
+    repeated = finding_page([("a2", "OPEN")], True, "c1")
+    with pytest.raises(ValueError, match="repeated a cursor"):
+        campaign.save(
+            cfg,
+            directory,
+            "list_vulnerability_findings",
+            finding_params(after="c1"),
+            repeated,
+            now=at(seconds=3),
+        )
+
+
+def test_assemble_refuses_duplicate_finding_ids(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    save_catalogs(cfg, directory, at(seconds=1))
+    save_grouped(
+        cfg, directory, at(seconds=2), {"all": 2, "remaining": 2, "resolved": 0, "rejected": 0}
+    )
+    same = [("a1", "OPEN")]
+    campaign.save(
+        cfg,
+        directory,
+        "list_vulnerability_findings",
+        finding_params(),
+        finding_page(same, True, "c1"),
+        now=at(seconds=3),
+    )
+    campaign.save(
+        cfg,
+        directory,
+        "list_vulnerability_findings",
+        finding_params(after="c1"),
+        finding_page(same, False, "c2"),
+        now=at(seconds=4),
+    )
+    campaign.save(
+        cfg,
+        directory,
+        "list_cloud_resources",
+        {"resource_id": ["a1"], "include_deleted": True, "first": 40},
+        resources(["a1"]),
+        now=at(seconds=5),
+    )
+    with pytest.raises(ValueError, match="Duplicate finding IDs"):
+        campaign.assemble(cfg, directory, tmp_path / "m.json")
+
+
+def test_cli_refuses_replayed_helper_responses(tmp_path, capsys):
+    ids = ["--vuln-id", IDS[0], "--vuln-id", IDS[1]]
+    assert main(["campaign", "start", *ids, "--base", str(tmp_path / "runs")]) == 0
+    directory = json.loads(capsys.readouterr().out)["dir"]
+    params = tmp_path / "params.json"
+    response = tmp_path / "response.json"
+    write_json(params, {"external_id": IDS[0]})
+    write_json(response, catalog(IDS[0]))
+    old = time.time() - 3600
+    os.utime(response, (old, old))
+    args = ["campaign", "save", *ids, "--dir", directory, "--tool", "get_vulnerability_catalog"]
+    assert main([*args, "--params-file", str(params), "--response-file", str(response)]) == 1
+    assert "replay" in capsys.readouterr().err
+    os.utime(response, None)
+    assert main([*args, "--params-file", str(params), "--response-file", str(response)]) == 0
+
+
+@pytest.mark.parametrize("bad", ["", "a b", "../x", "x/y", "x;y", "a\\b", "caf\u00e9"])
+def test_vulnerability_ids_are_validated(bad):
+    with pytest.raises(ValueError, match="A-Za-z0-9"):
+        CampaignConfig(("OK-1", bad))
+    assert CampaignConfig(("A.b_c-1",)).vulnerability_ids == ("A.b_c-1",)
+
+
+def test_assemble_output_is_never_overwritten(tmp_path):
+    cfg, directory, _, _ = complete_run(tmp_path / "run", timedelta(seconds=1))
+    out = tmp_path / "out.json"
+    campaign.assemble(cfg, directory, out)
+    first = out.read_bytes()
+    with pytest.raises(ValueError, match="overwrite"):
+        campaign.assemble(cfg, directory, out)
+    assert out.read_bytes() == first
+
+
+def test_save_uses_and_releases_an_exclusive_lock(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    lock = Path(directory) / "save.lock"
+    lock.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="Another save is in progress"):
+        save_catalogs(cfg, directory, at(seconds=1))
+    lock.unlink()
+    save_catalogs(cfg, directory, at(seconds=1))
+    assert not lock.exists()
+    # The lock is also released when a save is refused.
+    with pytest.raises(ValueError):
+        campaign.save(cfg, directory, "unknown_tool", {}, {}, now=at(seconds=2))
+    assert not lock.exists()
