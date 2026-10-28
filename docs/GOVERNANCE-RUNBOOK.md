@@ -16,8 +16,9 @@ Follow [workflow QA](WORKFLOW-QA.md) at collection, generation and handoff.
 An independent evidence-backed review checks whether the process and documented
 reasoning were followed. A mathematically correct report does not excuse a
 skipped reuse decision, unauthorized template change or misleading progress
-statement. The bulk-query hook can enforce the reviewed query plan when loaded
-by the host. Do not claim it is active merely because its file exists.
+statement. Collection is reuse-first and not pre-approved; the post-collection
+check (`wizexpert workflow-qa collection-check`) confirms reuse-first and count
+reconciliation from the activity log before generation.
 
 ## 1. Fix the reporting contract before collection
 
@@ -47,7 +48,7 @@ already carries forward prior closed details and preserves approved snapshot
 columns. Collection is performed through approved chat tools, not by the CLI:
 the collector must use this capability deliberately.
 
-Before any bulk pagination, retain a private collection plan containing:
+Before bulk pagination, record a short private collection plan (no approval needed) containing:
 
 - The approved prior workbook/decks, raw issue archive and decision records,
   their hashes, scope and actual collection timestamps.
