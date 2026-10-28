@@ -208,7 +208,12 @@ def read_workbook(path: Path, allow_preliminary: bool = False) -> WorkbookData:
     accepted = True
     wb = load_workbook(path, data_only=False)
     try:
-        flags = [str(ws["A2"].value or "").startswith("PRELIMINARY |") for ws in wb]
+        flags = [
+            str(ws["A2"].value or "").startswith(
+                ("EARLY OBSERVATION |", "PRELIMINARY |")
+            )
+            for ws in wb
+        ]
         preliminary = any(flags)
         require(
             not preliminary or allow_preliminary,

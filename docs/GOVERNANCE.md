@@ -266,14 +266,16 @@ Safeguards:
 
 For an early, workbook-only review, the Python helper
 `build_monthly_workbook(..., collected_at=<UTC datetime>)` labels every tab
-PRELIMINARY with the collection time and scheduled cutoff, and
-`build_deck(..., allow_preliminary=True)` creates a matching `_PRELIMINARY`
-dashboard. A preliminary dashboard cannot be the next month's template.
+EARLY OBSERVATION with the collection time and scheduled cutoff, and
+`build_deck(..., allow_preliminary=True)` creates a matching
+`_EARLY_OBSERVATION` dashboard. An early-observation dashboard cannot be the
+next month's template.
 Collection must be strictly after the previous scheduled cutoff and before the
 current cutoff, not necessarily in the report's calendar month. For example, an
 October 27 collection can preview a November 15 period: retain the approved
 October 15 trend point, add October 27 as the actual observation, and label the
-dashboard November PRELIMINARY. Never relabel that observation as November 15.
+dashboard as an early observation. Never relabel that observation as November
+15.
 
 ## Executive dashboard
 
@@ -338,7 +340,7 @@ and approval checks.
 - `--import-edits <deck> --editor <name>` records team wording edits from a
   generated deck into the snapshot before regeneration.
 - Nothing after the period end (snapshot day, 23:59:59 UTC) is counted; early
-  collections are marked PRELIMINARY on every slide.
+  collections are marked EARLY OBSERVATION - NOT FINAL on every slide.
 - Without reviewed `team_resolved` evidence, resolved slides show tenant closure
   statistics labelled **Attribution Pending**, not credited team work. With that
   evidence, highlights use only the supported team subset, including separately

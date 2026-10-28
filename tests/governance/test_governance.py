@@ -473,7 +473,7 @@ class GovernanceTests(unittest.TestCase):
             texts = [s.text for s in slide.shapes if s.has_text_frame]
             self.assertFalse(
                 any(
-                    "PRELIMINARY" in t or "Scheduled period end" in t or "Oct 16" in t
+                    "EARLY OBSERVATION" in t or "Scheduled period end" in t or "Oct 16" in t
                     for t in texts
                 )
             )
@@ -819,7 +819,7 @@ class GovernanceTests(unittest.TestCase):
             self.assertFalse(any("Stale" in shape(slide, sid).text for sid in dynamic_ids))
             self.assertNotIn("Stale extra table", texts)
             self.assertIn("snapshot_sha256", slide.notes_slide.notes_text_frame.text)
-        self.assertIn("PRELIMINARY", shape(deck.slides[0], 7).text)
+        self.assertIn("EARLY OBSERVATION | NOT FINAL", shape(deck.slides[0], 7).text)
         self.assertIn("1 fewer", shape(deck.slides[2], 20).text)
         self.assertIn("1 more", shape(deck.slides[3], 26).text)
         trend = shape(deck.slides[3], 25).text
