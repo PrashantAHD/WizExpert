@@ -167,8 +167,8 @@ cutoff invalidate that audit.
 
 - Use UTC cutoffs exactly. Counts stop at the configured snapshot day, 23:59:59.
   Later events belong to the following reporting period.
-- Use actual coverage timestamps for early collections and label drafts
-  PRELIMINARY. A prior `final_approval` is a period-specific exception, not proof
+- Use actual coverage timestamps for early collections and label them
+  EARLY OBSERVATION - NOT FINAL. A prior `final_approval` is a period-specific exception, not proof
   that a collection covers later hours. Never inherit it. Any new approved early
   final must disclose actual coverage and retain its approval separately.
 - Reconcile `open`, `in_progress`, `resolved` and `accepted` against the reviewed

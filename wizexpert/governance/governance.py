@@ -485,7 +485,7 @@ def render_deck(data: GovernanceData, template: Path, destination: Path, source_
 
     as_of = data.backlog_as_of.strftime("%b %d, %Y")
     label = (
-        f"PRELIMINARY | Data collected through {as_of}"
+        f"EARLY OBSERVATION | NOT FINAL | Data collected through {as_of}"
         if data.preliminary
         else f"Data as of {as_of} EOD"
     )
