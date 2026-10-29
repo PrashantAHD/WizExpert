@@ -12,8 +12,8 @@ private storage, never in this repository.
 1. **There is no elapsed-time limit on a collection.** A run is abandoned only
    when it has an explicit fetch or authentication failure:
    - *Unable to fetch:* the same call failed three times (`wizexpert campaign fail`
-     and refused saves count them; a completely empty resource batch is the one
-     exception, see step 3.4). `next` returns `abort_unable_to_fetch`.
+     and refused saves count them; a completely empty resource batch uses its own
+     separate counter and never aborts, see step 3.4). `next` returns `abort_unable_to_fetch`.
    - *Authentication:* HTTP 401 or an OAuth challenge means stop and ask the
      operator to reconnect Wiz. Do this before collection starts; do not begin
      or continue until a catalog call succeeds.
@@ -36,25 +36,29 @@ private storage, never in this repository.
       from returned-resource counts, and label them `Not returned by Wiz /
       requires reconciliation`. Never treat an unreturned resource as resolved
       or closed.
-      A completely empty batch for a non-empty ID set is refused and counted as
-      a failed attempt (as is any other refused response). After two refusals the
-      third identical empty batch is retained, never aborting the run, and every
-      asset in it is labelled unreturned / `requires_reconciliation`. The assembled manifest reports
+      A completely empty batch for a non-empty ID set is refused and counted on
+      a separate empty-batch counter (`empty-attempts.json`), not the fetch-failure
+      counter. After two refusals the third identical empty batch is retained,
+      never aborting the run, and every asset in it is labelled unreturned /
+      `requires_reconciliation`. Any other refused response counts as a failed
+      fetch attempt; an authentication error (401 / OAuth challenge) in a saved
+      response stops the run for reconnection. The assembled manifest reports
       `returned_resource_count`, `unreturned_resource_count`,
       `unreturned_resource_ids` and `collection_qa.status`, which is
       `requires_reconciliation` whenever any resource is unreturned; collection QA
       re-derives this from the retained evidence and flags the pack.
-      `start` and `assemble` refuse output inside the public repository
+      `start`, `save`, `fail` and `assemble` refuse a directory or output inside the
+      public repository
       (`WIZEXPERT_ALLOW_REPO_OUTPUT=1` only for synthetic fixtures). A save is
       refused once a call has used all its attempts, even before the abort marker
-      is written. `fail` shares the save lock and refuses a directory inside the
-      public repository. Collection QA flags malformed or unreadable resource
-      evidence instead of passing it. `stall_seconds` / `--stall-seconds` is a
+      is written. `fail` shares the save lock. Collection QA flags malformed,
+      unreadable or pathologically nested resource evidence instead of passing it. `stall_seconds` / `--stall-seconds` is a
       legacy setting that is accepted and ignored; it never limits a collection.
 4. **Reconciliation stays.** Grouped totals must equal the finding stream per
-   status group, every finding asset must have its resource record, finding IDs
-   must be unique, and the scope must not change. A mismatch means recollect in
-   a new directory. A finding stream must advance: an empty or repeated cursor
+   status group, finding IDs must be unique, and the scope must not change. A
+   mismatch means recollect in a new directory. A finding asset with no returned
+   resource record is not a mismatch: it is retained and labelled unreturned /
+   `requires_reconciliation` (step 3.4), never treated as resolved. A finding stream must advance: an empty or repeated cursor
    is refused.
 5. **Helper JSON** (params and responses) is written UTF-8 *without* a BOM,
    outside the staging directory; readers tolerate a BOM. Use `write_json`.

@@ -1062,3 +1062,77 @@ def test_output_inside_public_repo_is_refused(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="outside the public WizExpert repository"):
         campaign.start(config(), repo / "tests" / "never-created", now=T0)
     campaign.start(config(), tmp_path, now=T0)
+
+
+def test_empty_batch_counter_is_separate_from_fetch_failures(tmp_path):
+    cfg, directory = _to_resource_stage(tmp_path)
+    params = {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40}
+    assert record_failure(directory, "list_cloud_resources", params)["attempts"] == 1
+    for attempt in (1, 2):
+        with pytest.raises(ValueError, match=f"refused attempt {attempt} of 3"):
+            campaign.save(
+                cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=4)
+            )
+    key = campaign._call_key("list_cloud_resources", params)
+    assert read_json(Path(directory) / "attempts.json") == {key: 1}
+    assert read_json(Path(directory) / campaign.EMPTY_ATTEMPTS) == {key: 2}
+    saved = campaign.save(
+        cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=6)
+    )
+    assert saved["next"]["action"] == "assemble"
+    assert not (Path(directory) / "aborted.json").exists()
+    assert read_json(Path(directory) / campaign.EMPTY_ATTEMPTS) == {}
+
+
+def test_save_refuses_staging_inside_public_repo(tmp_path, monkeypatch):
+    monkeypatch.delenv("WIZEXPERT_ALLOW_REPO_OUTPUT", raising=False)
+    repo = Path(campaign.__file__).resolve().parents[1]
+    if not (repo / "pyproject.toml").is_file():
+        pytest.skip("not a source checkout")
+    with pytest.raises(ValueError, match="outside the public WizExpert repository"):
+        campaign.save(
+            config(), repo / "tests", "get_vulnerability_catalog", {"external_id": IDS[0]}, {}
+        )
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    campaign.save(
+        cfg,
+        directory,
+        "get_vulnerability_catalog",
+        {"external_id": IDS[0]},
+        catalog(IDS[0]),
+        now=at(seconds=1),
+    )
+
+
+def test_collection_qa_flags_deeply_nested_evidence(tmp_path):
+    cfg, directory = _to_resource_stage(tmp_path)
+    params = {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40}
+    campaign.save(
+        cfg, directory, "list_cloud_resources", params, resources(["a1", "a2"]), now=at(seconds=4)
+    )
+    campaign.assemble(cfg, directory, tmp_path / "m.json")
+    info = {
+        "assemble_manifest": str((tmp_path / "m.json").resolve()),
+        "assemble_manifest_sha256": hashlib.sha256((tmp_path / "m.json").read_bytes()).hexdigest(),
+    }
+    target = next(Path(directory).glob("resources-*.json"))
+    target.write_text("[" * 200000 + "]" * 200000, encoding="utf-8")
+    flags = campaign.campaign_collection_flags(info)
+    assert any("unreadable" in f or "malformed" in f for f in flags)
+
+
+def test_auth_error_passed_through_save_stops_for_reconnect(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    with pytest.raises(ValueError, match="reconnect"):
+        campaign.save(
+            cfg,
+            directory,
+            "get_vulnerability_catalog",
+            {"external_id": IDS[0]},
+            {"error": "HTTP 401 Unauthorized", "www-authenticate": "Bearer"},
+            now=at(seconds=1),
+        )
+    assert read_json(Path(directory) / "aborted.json")["action"] == "stop_reconnect"
+    assert campaign.next_call(cfg, directory, now=at(seconds=2))["action"] == "stop_reconnect"
