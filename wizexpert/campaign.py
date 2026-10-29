@@ -40,6 +40,7 @@ UNRETURNED_RESOURCE_LABEL = "Not returned by Wiz / requires reconciliation"
 ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 ABORT_MARKER = "aborted.json"
 LOCK_NAME = "save.lock"
+EMPTY_ATTEMPTS = "empty-attempts.json"  # empty-batch retries; never aborts a run
 EVIDENCE_PREFIXES = ("catalog-", "grouped-", "findings-", "resources-")
 RESPONSE_KEYS = {
     "list_vulnerability_findings_grouped": "vulnerabilityFindingsGroupedByValues",
@@ -489,6 +490,7 @@ def save(
     now: datetime | None = None,
 ) -> dict:
     directory = Path(directory)
+    refuse_public_repo_path(directory)
     require(directory.is_dir(), "Collection directory does not exist.")
     with _lock(directory):
         directory, meta, files = load_staging(config, directory)
@@ -588,9 +590,12 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
         _validate_response(tool, params, body)
         if tool == "list_vulnerability_findings":
             _check_cursor_progress(_pages(files, "findings-"), params, body)
-    except (ValueError, KeyError, TypeError, AttributeError) as error:
-        if not _accept_empty_after_retries(directory, tool, params, error):
-            _refuse_counted(directory, tool, params, error)
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
+        if _is_empty_batch(tool, error):
+            if not _accept_empty_after_retries(directory, tool, params):
+                _refuse_empty_counted(directory, tool, params, error)
+        else:
+            _refuse_counted(directory, tool, params, error, response)
     record = {
         "run_id": meta["run_id"],
         "observed_at": iso(now or utc_now()),
@@ -599,28 +604,66 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
     }
     write_json(directory / name, record)
     _clear_failure(directory, tool, params)
+    _clear_empty(directory, tool, params)
     return {"saved": name, "next": next_call(config, directory, now=now)}
 
 
-def _refuse_counted(directory: Path, tool: str, params: dict, error: Exception) -> None:
-    """A refused response is a failed attempt: count it (lock already held), then refuse."""
-    outcome = _record_failure_locked(directory, tool, params)
-    if outcome["action"] == "abort_unable_to_fetch":
+def _auth_text(error: Exception, response) -> str:
+    """Text to classify a refused save: the error plus any error-shaped response fields."""
+    parts = [str(error)]
+    if isinstance(response, dict):
+        for key in ("status", "statusCode", "status_code", "error", "errors", "message", "detail"):
+            if key in response:
+                parts.append(str(response[key])[:500])
+    return " ".join(parts)
+
+
+def _refuse_counted(
+    directory: Path, tool: str, params: dict, error: Exception, response=None
+) -> None:
+    """A refused response is a failed attempt: count it (lock already held), then refuse.
+    An authentication error (401 / OAuth challenge) stops the run for reconnection instead."""
+    outcome = _record_failure_locked(directory, tool, params, message=_auth_text(error, response))
+    if outcome["action"] in {"stop_reconnect", "abort_unable_to_fetch"}:
         raise ValueError(f"{error} {outcome['reason']}") from None
     raise ValueError(
         f"{error} (refused attempt {outcome['attempts']} of {outcome['max_attempts']})"
     ) from None
 
 
-def _accept_empty_after_retries(directory: Path, tool: str, params: dict, error) -> bool:
-    """A completely empty resource batch is refused and counted; on the attempt that would
-    abort the run it is retained instead, so every asset stays 'not returned / requires
-    reconciliation' rather than looping forever or blocking the run. Only that exact case."""
-    if tool != "list_cloud_resources" or "Empty resource batch" not in str(error):
-        return False
-    path = directory / "attempts.json"
-    seen = read_json(path).get(_call_key(tool, params), 0) if path.is_file() else 0
-    return seen + 1 >= MAX_CALL_ATTEMPTS
+def _is_empty_batch(tool: str, error: Exception) -> bool:
+    return tool == "list_cloud_resources" and "Empty resource batch" in str(error)
+
+
+def _empty_count(directory: Path, tool: str, params: dict) -> int:
+    path = directory / EMPTY_ATTEMPTS
+    return read_json(path).get(_call_key(tool, params), 0) if path.is_file() else 0
+
+
+def _refuse_empty_counted(directory: Path, tool: str, params: dict, error: Exception) -> None:
+    """Empty resource batches have their own counter, separate from fetch failures, and never
+    abort the run: the third identical empty batch is retained as unreturned."""
+    path = directory / EMPTY_ATTEMPTS
+    counts = read_json(path) if path.is_file() else {}
+    key = _call_key(tool, params)
+    counts[key] = counts.get(key, 0) + 1
+    write_json(path, counts)
+    raise ValueError(f"{error} (refused attempt {counts[key]} of {MAX_CALL_ATTEMPTS})") from None
+
+
+def _clear_empty(directory: Path, tool: str, params: dict) -> None:
+    path = directory / EMPTY_ATTEMPTS
+    if path.is_file():
+        counts = read_json(path)
+        if counts.pop(_call_key(tool, params), None) is not None:
+            write_json(path, counts)
+
+
+def _accept_empty_after_retries(directory: Path, tool: str, params: dict) -> bool:
+    """A completely empty resource batch is refused and counted (own counter); the third
+    identical attempt is retained, so every asset stays 'not returned / requires
+    reconciliation' rather than looping forever or blocking the run."""
+    return _empty_count(directory, tool, params) + 1 >= MAX_CALL_ATTEMPTS
 
 
 def _check_cursor_progress(pages: list, params: dict, body: dict) -> None:
@@ -882,7 +925,7 @@ def campaign_collection_flags(info: object) -> list[str]:
         created = parse_utc(meta["created_at"])
         listed = manifest["files"]
         on_disk = {p.name for p in staging.glob("*.json") if p.name.startswith(EVIDENCE_PREFIXES)}
-    except (KeyError, TypeError, ValueError, OSError):
+    except (KeyError, TypeError, ValueError, OSError, RecursionError):
         return [
             "Campaign pack is not bound to a valid, hash-linked assemble manifest "
             "(assemble_manifest + assemble_manifest_sha256)."
@@ -898,7 +941,7 @@ def campaign_collection_flags(info: object) -> list[str]:
             record = read_json(file)
             foreign = record["run_id"] != manifest["run_id"]
             stale = parse_utc(record["observed_at"]) < created
-        except (KeyError, TypeError, ValueError, OSError):
+        except (KeyError, TypeError, ValueError, OSError, RecursionError):
             flags.append(f"Evidence record unreadable or missing: {name}")
             continue
         if changed:
@@ -915,7 +958,7 @@ def campaign_collection_flags(info: object) -> list[str]:
             for n in r["response"]["cloudResourcesV2"]["nodes"]
         }
         missing = set(found) - got
-    except (KeyError, TypeError, ValueError, OSError, AttributeError):
+    except (KeyError, TypeError, ValueError, OSError, AttributeError, RecursionError):
         flags.append("Resource evidence is malformed or unreadable: reconcile before use.")
         missing = set()
     if missing:
