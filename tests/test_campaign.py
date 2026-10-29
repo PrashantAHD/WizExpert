@@ -800,6 +800,8 @@ def test_repeated_or_empty_cursors_and_empty_pages_are_refused(tmp_path):
                 page,
                 now=at(seconds=1),
             )
+    # Refused saves count toward the retry policy, so use a fresh run for the next refusal.
+    directory = campaign.start(cfg, tmp_path, now=at(minutes=1))["dir"]
     empty = finding_page([], True, "c1")
     with pytest.raises(ValueError, match="Empty finding page"):
         campaign.save(
@@ -959,15 +961,83 @@ def _to_resource_stage(tmp_path):
     return cfg, directory
 
 
-def test_empty_resource_batch_is_rejected_not_accepted_as_complete(tmp_path):
+def test_empty_resource_batch_is_counted_then_retained_as_unreturned(tmp_path):
     cfg, directory = _to_resource_stage(tmp_path)
     params = {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40}
-    with pytest.raises(ValueError, match="Empty resource batch"):
-        campaign.save(
-            cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=4)
+    for attempt in (1, 2):
+        with pytest.raises(ValueError, match=f"refused attempt {attempt} of 3"):
+            campaign.save(
+                cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=4)
+            )
+        assert not list(Path(directory).glob("resources-*.json"))
+        assert campaign.next_call(cfg, directory, now=at(seconds=5))["action"] == (
+            "wiz-execute-batch"
         )
-    assert not list(Path(directory).glob("resources-*.json"))
-    assert campaign.next_call(cfg, directory, now=at(seconds=5))["action"] == "wiz-execute-batch"
+    saved = campaign.save(
+        cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=6)
+    )
+    assert saved["next"]["action"] == "assemble"
+    assert not (Path(directory) / "aborted.json").exists()
+    manifest = campaign.assemble(cfg, directory, tmp_path / "m.json")
+    assert manifest["unreturned_resource_ids"] == ["a1", "a2"]
+    assert manifest["collection_qa"]["status"] == "requires_reconciliation"
+
+
+def test_refused_save_counts_and_exhaustion_aborts(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    params = {"external_id": IDS[0]}
+    bad = catalog("OTHER")
+    for _ in range(2):
+        with pytest.raises(ValueError, match="refused attempt"):
+            campaign.save(
+                cfg, directory, "get_vulnerability_catalog", params, bad, now=at(seconds=1)
+            )
+    with pytest.raises(ValueError, match="unable to fetch"):
+        campaign.save(cfg, directory, "get_vulnerability_catalog", params, bad, now=at(seconds=2))
+    assert (Path(directory) / "aborted.json").is_file()
+
+
+def test_fail_uses_save_lock_and_public_path_guard(tmp_path, monkeypatch):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    (Path(directory) / campaign.LOCK_NAME).write_text("")
+    with pytest.raises(ValueError, match="Another save is in progress"):
+        record_failure(directory, "get_vulnerability_catalog", {"external_id": IDS[0]})
+    (Path(directory) / campaign.LOCK_NAME).unlink()
+    assert record_failure(directory, "get_vulnerability_catalog", {"x": 1})["action"] == "retry"
+    assert not (Path(directory) / campaign.LOCK_NAME).exists()
+    monkeypatch.delenv("WIZEXPERT_ALLOW_REPO_OUTPUT", raising=False)
+    repo = Path(campaign.__file__).resolve().parents[1]
+    if (repo / "pyproject.toml").is_file():
+        with pytest.raises(ValueError, match="outside the public WizExpert repository"):
+            record_failure(repo / "tests", "get_vulnerability_catalog", {"x": 1})
+
+
+def test_collection_qa_flags_malformed_resource_evidence(tmp_path):
+    cfg, directory = _to_resource_stage(tmp_path)
+    params = {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40}
+    campaign.save(
+        cfg, directory, "list_cloud_resources", params, resources(["a1", "a2"]), now=at(seconds=4)
+    )
+    campaign.assemble(cfg, directory, tmp_path / "m.json")
+    info = {
+        "assemble_manifest": str((tmp_path / "m.json").resolve()),
+        "assemble_manifest_sha256": hashlib.sha256((tmp_path / "m.json").read_bytes()).hexdigest(),
+    }
+    assert campaign.campaign_collection_flags(info) == []
+    target = next(Path(directory).glob("resources-*.json"))
+    record = read_json(target)
+    record["response"]["cloudResourcesV2"]["nodes"] = [{"name": "no-id"}]
+    write_json(target, record)
+    flags = campaign.campaign_collection_flags(info)
+    assert any("malformed or unreadable" in f for f in flags)
+
+
+def test_plan_and_cli_mark_stall_seconds_legacy(capsys):
+    assert main(["campaign", "plan"]) == 0
+    assert "Legacy and ignored" in capsys.readouterr().out
+    assert config(stall_seconds=60).stall_seconds == 60
 
 
 def test_exhausted_attempts_block_save_before_marker_exists(tmp_path):

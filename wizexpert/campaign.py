@@ -77,7 +77,7 @@ class CampaignConfig:
         )
         require(
             type(self.stall_seconds) is int and self.stall_seconds > 0,
-            "Stall threshold must be a positive integer number of seconds.",
+            "Legacy stall_seconds (ignored, never limits collection) must be a positive integer.",
         )
         require(
             bool(self.group_by) and all(isinstance(g, str) and g for g in self.group_by),
@@ -202,8 +202,27 @@ def record_failure(
     status: int | str | None = None,
     message: str = "",
 ) -> dict:
-    """Count a failed call. 401/OAuth stops; the same call failing 3 times aborts the run."""
+    """Count a failed call. 401/OAuth stops; the same call failing 3 times aborts the run.
+
+    Uses the save lock so failure counts and save attempts never interleave, and refuses a
+    directory inside the public checkout like every other campaign write.
+    """
     directory = Path(directory)
+    refuse_public_repo_path(directory)
+    require(directory.is_dir(), "Collection directory does not exist.")
+    with _lock(directory):
+        return _record_failure_locked(directory, tool, params, status=status, message=message)
+
+
+def _record_failure_locked(
+    directory: Path,
+    tool: str,
+    params: dict,
+    *,
+    status: int | str | None = None,
+    message: str = "",
+) -> dict:
+    """Caller must hold the directory lock."""
     if classify_failure(status, message) == "stop_reconnect":
         _write_marker(directory, "stop_reconnect", RECONNECT_REASON)
         return {"action": "stop_reconnect", "reason": RECONNECT_REASON}
@@ -346,7 +365,7 @@ def seconds_since_last_save(meta: dict, files: dict, now: datetime | None = None
 
 def next_call(config: CampaignConfig, directory: Path | str, now: datetime | None = None) -> dict:
     """Return the next read-only call to make. Order: catalogs, grouped, one finding stream,
-    then exact-ID resource batches. A run is aborted only when stuck or failing."""
+    then exact-ID resource batches. A run is aborted only on an explicit fetch or auth failure."""
     directory, meta, files = load_staging(config, directory)
     marker = directory / ABORT_MARKER
     if marker.is_file():
@@ -563,10 +582,15 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
     else:
         raise ValueError("Unsupported evidence tool: " + tool)
     require(name not in files, f"Already saved: {name}")
-    body = _response_body(response, tool)
-    _validate_response(tool, params, body)
-    if tool == "list_vulnerability_findings":
-        _check_cursor_progress(_pages(files, "findings-"), params, body)
+    body = None
+    try:
+        body = _response_body(response, tool)
+        _validate_response(tool, params, body)
+        if tool == "list_vulnerability_findings":
+            _check_cursor_progress(_pages(files, "findings-"), params, body)
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        if not _accept_empty_after_retries(directory, tool, params, error):
+            _refuse_counted(directory, tool, params, error)
     record = {
         "run_id": meta["run_id"],
         "observed_at": iso(now or utc_now()),
@@ -576,6 +600,27 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
     write_json(directory / name, record)
     _clear_failure(directory, tool, params)
     return {"saved": name, "next": next_call(config, directory, now=now)}
+
+
+def _refuse_counted(directory: Path, tool: str, params: dict, error: Exception) -> None:
+    """A refused response is a failed attempt: count it (lock already held), then refuse."""
+    outcome = _record_failure_locked(directory, tool, params)
+    if outcome["action"] == "abort_unable_to_fetch":
+        raise ValueError(f"{error} {outcome['reason']}") from None
+    raise ValueError(
+        f"{error} (refused attempt {outcome['attempts']} of {outcome['max_attempts']})"
+    ) from None
+
+
+def _accept_empty_after_retries(directory: Path, tool: str, params: dict, error) -> bool:
+    """A completely empty resource batch is refused and counted; on the attempt that would
+    abort the run it is retained instead, so every asset stays 'not returned / requires
+    reconciliation' rather than looping forever or blocking the run. Only that exact case."""
+    if tool != "list_cloud_resources" or "Empty resource batch" not in str(error):
+        return False
+    path = directory / "attempts.json"
+    seen = read_json(path).get(_call_key(tool, params), 0) if path.is_file() else 0
+    return seen + 1 >= MAX_CALL_ATTEMPTS
 
 
 def _check_cursor_progress(pages: list, params: dict, body: dict) -> None:
@@ -621,8 +666,8 @@ def _validate_response(tool: str, params: dict, body: dict) -> None:
         )
         require(
             bool(returned) or not params["resource_id"],
-            "Empty resource batch for a non-empty ID set: treat as a failed call, retry, and "
-            "never accept it as complete.",
+            "Empty resource batch for a non-empty ID set: refused and counted as a failed "
+            "call; after the retry policy it is retained as unreturned (requires reconciliation).",
         )
     else:
         require(data["totalCount"] == len(data["nodes"]), "Incomplete grouped pagination.")
@@ -870,7 +915,8 @@ def campaign_collection_flags(info: object) -> list[str]:
             for n in r["response"]["cloudResourcesV2"]["nodes"]
         }
         missing = set(found) - got
-    except (KeyError, TypeError, ValueError, OSError):
+    except (KeyError, TypeError, ValueError, OSError, AttributeError):
+        flags.append("Resource evidence is malformed or unreadable: reconcile before use.")
         missing = set()
     if missing:
         flags.append(
@@ -915,7 +961,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         command = sub.add_parser(name)
         command.add_argument("--config", type=Path)
         command.add_argument("--vuln-id", action="append", default=[], dest="vuln_ids")
-        command.add_argument("--stall-seconds", type=int)
+        command.add_argument(
+            "--stall-seconds", type=int, help="Legacy; accepted and ignored (no time limit)."
+        )
         if with_dir:
             command.add_argument("--dir", type=Path, required=True)
         return command
@@ -939,7 +987,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
-            result = {"order": PLAN_ORDER, "stall_seconds_default": DEFAULT_STALL_SECONDS}
+            result = {
+                "order": PLAN_ORDER,
+                "stall_seconds_default": DEFAULT_STALL_SECONDS,
+                "stall_seconds_note": "Legacy and ignored: collection has no elapsed-time limit.",
+            }
         elif args.command == "lifecycle":
             result = lifecycle(read_json(args.state), args.mode)
         else:
