@@ -18,7 +18,9 @@ reasoning were followed. A mathematically correct report does not excuse a
 skipped reuse decision, unauthorized template change or misleading progress
 statement. Collection is reuse-first and not pre-approved; the post-collection
 check (`wizexpert workflow-qa collection-check`) confirms reuse-first and count
-reconciliation from the activity log before generation.
+reconciliation from the activity log before generation. Owner-requested
+additions are approved scope changes; see
+[owner-requested scope changes](WORKFLOW-QA.md#owner-requested-scope-changes).
 
 ## 1. Fix the reporting contract before collection
 

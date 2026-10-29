@@ -42,7 +42,11 @@ See [workflow QA](docs/WORKFLOW-QA.md) for collection/generation/handoff reviews
 the requested-output manifest, HTML/PDF/Office/email checks, the optional
 host-loaded bulk-query guard, and `wizexpert email-qa`. PDF QA uses the optional
 `.[qa]` extra. These checks do not authenticate approvals, replace native/semantic
-review or guarantee error-free reasoning.
+review or guarantee error-free reasoning. Repeated fixed-scope campaigns use
+`wizexpert campaign` (see [campaigns](docs/CAMPAIGNS.md)): no fixed collection time
+limit, stall-based abort, one finding stream, draft-only scheduled runs.
+Owner-requested additions to a campaign report are approved scope changes
+(see [owner-requested scope changes](docs/WORKFLOW-QA.md#owner-requested-scope-changes)).
 
 ## How it works
 
@@ -198,6 +202,7 @@ public issue. Release checks: [publication guide](docs/PUBLICATION.md).
 | [Setup](docs/SETUP.md) | Wiz MCP connection, installation, migration from older versions |
 | [Workflow](docs/WORKFLOW.md) | Evidence, analysis, communication and approval gates |
 | [Execution follow-up](docs/EXECUTION.md) | Local-account evidence imports and blocker tracking |
+| [Campaigns](docs/CAMPAIGNS.md) | Repeated fixed-scope collection: stall-based abort, collection order, lifecycle, count notes and update wording |
 | [Governance reporting](docs/GOVERNANCE.md) | Client profiles, workbook, dashboard and governance deck |
 | [Governance snapshot](docs/GOVERNANCE-SNAPSHOT.md) | Read-only collection and schema for the governance deck |
 | [Development and publication](docs/PUBLICATION.md) | Verification, dependencies and pre-push checks |

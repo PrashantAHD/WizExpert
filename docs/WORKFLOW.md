@@ -579,6 +579,12 @@ Apply the same line to HTML footers and every PDF page (for example print CSS
 
 ## Report maintenance
 
+Repeated campaigns (a fixed set of vulnerability IDs refreshed daily until fully
+patched) follow [Campaigns](CAMPAIGNS.md): no total collection time limit while data
+keeps arriving, stall-based abort in a new directory, one all-status finding
+stream, draft-only scheduled runs, exact workbook count notes, no per-group
+sheets, and no Rejected mention in update emails.
+
 Place detailed, numbered remediation options and material prerequisites on the
 Cover. Keep inventory and pending-status row actions concise and relevant to
 each resource; expanding the Cover does not authorize repeating all options in

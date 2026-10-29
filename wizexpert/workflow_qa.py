@@ -44,7 +44,11 @@ SPECIFIC = {
         ),
     },
     "campaign": {
-        "collection": ("campaign-active-and-fixed-scope", "snapshot-inventory-window-and-identity"),
+        "collection": (
+            "campaign-active-and-fixed-scope",
+            "snapshot-inventory-stall-and-identity",
+            "wiz-auth-and-model-availability",
+        ),
         "generation": (
             "finding-versus-asset-metrics",
             "new-detection-versus-count-delta",
@@ -54,6 +58,7 @@ SPECIFIC = {
             "campaign-layout-and-removed-columns",
             "scanner-status-versus-patching",
             "campaign-closure-criteria",
+            "no-partial-pack-and-qualified-wording",
         ),
     },
     "remediation": {
@@ -150,6 +155,7 @@ def rule_hashes(workflow: str) -> dict:
         "wizexpert/email_qa.py",
         "wizexpert/artifact_qa.py",
         "wizexpert/office_qa.py",
+        "wizexpert/campaign.py",
     )
     if workflow == "governance":
         paths += tuple(
@@ -342,6 +348,94 @@ def is_full_history(query: dict) -> bool:
     )
 
 
+OWNER_CHANGE_KINDS = ("addition", "rule_update")
+
+
+def owner_changes_of(review: dict) -> list:
+    """Owner-requested scope changes; a missing field means none."""
+    changes = review.get("owner_changes", [])
+    require(isinstance(changes, list), "owner_changes must be a list.")
+    return changes
+
+
+def validate_owner_changes(review: dict, evidence: dict) -> None:
+    """Fail closed on malformed owner-requested scope changes.
+
+    Owner requests are approved scope changes, not review failures, but each one must be
+    hash-bound to the retained request and must show the earlier logic was still verified.
+    A rule update never bypasses rule_sha256 binding: changed rules need a fresh review.
+    """
+    requested = {r["id"] for r in review["requested_deliverables"]}
+    seen: set[str] = set()
+    for entry in owner_changes_of(review):
+        require(isinstance(entry, dict), "Each owner change must be an object.")
+        change_id = entry.get("id")
+        require(text(change_id), "Owner change ID must be a nonempty string.")
+        require(change_id not in seen, f"Duplicate owner change ID: {change_id}")
+        seen.add(change_id)
+        require(
+            entry.get("kind") in OWNER_CHANGE_KINDS,
+            f"Owner change {change_id} kind must be addition or rule_update.",
+        )
+        request = entry.get("request")
+        require(
+            isinstance(request, str) and Path(request).is_absolute() and request in evidence,
+            f"Owner change {change_id} request must be an absolute hash-bound evidence path.",
+        )
+        require(text(entry.get("summary")), f"Owner change {change_id} needs a summary.")
+        require(
+            entry.get("prior_logic_verified") is True,
+            f"Owner change {change_id} must verify the previously applicable logic was followed.",
+        )
+        deliverables = entry.get("deliverables", [])
+        require(
+            isinstance(deliverables, list)
+            and all(isinstance(d, str) and d in requested for d in deliverables)
+            and len(set(deliverables)) == len(deliverables),
+            f"Owner change {change_id} deliverables must be unique requested deliverable IDs.",
+        )
+        persisted = entry.get("persisted_in", [])
+        require(
+            isinstance(persisted, list)
+            and all(
+                isinstance(p, str) and Path(p).is_absolute() and p in evidence for p in persisted
+            ),
+            f"Owner change {change_id} persisted_in must be absolute hash-bound evidence paths.",
+        )
+        if entry["kind"] == "rule_update":
+            require(
+                bool(persisted),
+                f"Owner change {change_id} rule_update must record where it was persisted.",
+            )
+
+
+def validate_scope_continuity(previous: dict, review: dict) -> None:
+    """Later phases may only add owner-approved deliverables and never drop owner changes."""
+    before = {r["id"]: r for r in previous["requested_deliverables"]}
+    after = {r["id"]: r for r in review["requested_deliverables"]}
+    require(
+        all(after.get(name) == row for name, row in before.items()),
+        "Previous QA review belongs to another run or scope; deliverables cannot disappear.",
+    )
+    approved = {
+        d
+        for entry in owner_changes_of(review)
+        if entry["kind"] == "addition"
+        for d in entry.get("deliverables", [])
+    }
+    added = set(after) - set(before)
+    require(
+        added <= approved,
+        "Added deliverables need an owner-requested addition entry: " + ", ".join(sorted(added)),
+    )
+    current = {entry["id"]: entry for entry in owner_changes_of(review)}
+    for entry in owner_changes_of(previous):
+        require(
+            current.get(entry["id"]) == entry,
+            f"Owner change {entry['id']} cannot disappear or change in a later phase.",
+        )
+
+
 def validate_review(path: Path, phase: str | None = None, *, now: datetime | None = None) -> dict:
     review = load(path)
     now = now or datetime.now(UTC)
@@ -395,6 +489,7 @@ def validate_review(path: Path, phase: str | None = None, *, now: datetime | Non
     from wizexpert.artifact_qa import validate_deliverables
 
     validate_deliverables(review, evidence)
+    validate_owner_changes(review, evidence)
     validate_remediation(review, evidence)
     checks = review.get("checks", {})
     require(isinstance(checks, dict), "QA checks must be an object.")
@@ -425,13 +520,13 @@ def validate_review(path: Path, phase: str | None = None, *, now: datetime | Non
             and previous["workflow"] == workflow
             and previous["scope"] == review["scope"]
             and previous["started_at"] == review["started_at"]
-            and previous["requested_deliverables"] == review["requested_deliverables"]
             and previous["request_evidence"] == review["request_evidence"]
             and previous["private_rule_sources"] == review["private_rule_sources"]
             and previous["parity_groups"] == review["parity_groups"]
             and previous.get("target_stage") == review.get("target_stage"),
             "Previous QA review belongs to another run or scope; deliverables cannot disappear.",
         )
+        validate_scope_continuity(previous, review)
         require(timestamp(previous["reviewed_at"]) <= reviewed, "QA phases are out of sequence.")
         log_path = Path(review["activity_log"])
         require(str(log_path) in evidence, "Actual activity log must be hash-bound.")
@@ -445,7 +540,7 @@ def audit_activity(path: Path, review: dict, previous: dict) -> None:
     """Post-collection check from the recorded activity log; it blocks the report only."""
     manifest_path = Path(review["collection_manifest"])
     require(str(manifest_path) in review["evidence_sha256"], "Manifest must be hash-bound.")
-    result = collection_check(path, load(manifest_path))
+    result = collection_check(path, load(manifest_path), review["workflow"])
     require(
         result["status"] == "pass", "Post-collection check flagged: " + "; ".join(result["flags"])
     )
@@ -471,6 +566,15 @@ def receipt(path: Path, phase: str | None = None) -> dict:
             if check["verdict"] == "out_of_scope"
         ],
         "requested_deliverables": review["requested_deliverables"],
+        "owner_changes": [
+            {
+                "id": entry["id"],
+                "kind": entry["kind"],
+                "summary": entry["summary"],
+                "deliverables": entry.get("deliverables", []),
+            }
+            for entry in owner_changes_of(review)
+        ],
         "checked_artifacts": review.get("artifacts", []) if review["phase"] == "handoff" else [],
         "limitations": [
             "Semantic checks are reviewer attestations, not proof of hidden reasoning.",
@@ -480,11 +584,13 @@ def receipt(path: Path, phase: str | None = None) -> dict:
     }
 
 
-def collection_check(log_path: Path, manifest: dict) -> dict:
+def collection_check(log_path: Path, manifest: dict, workflow: str | None = None) -> dict:
     """Post-collection check from the activity log; it flags a report, never blocks a tool call.
 
     Confirms reuse-first (prior sources named; any full-history Wiz query justified) and
-    that every manifest count reconciles. Returns {"status": "pass"|"flagged", "flags": [...]}.
+    that every manifest count reconciles. A campaign review must also carry a
+    `campaign_collection` block bound to the hash-linked assemble manifest.
+    Returns {"status": "pass"|"flagged", "flags": [...]}.
     """
     flags: list[str] = []
     try:
@@ -520,6 +626,10 @@ def collection_check(log_path: Path, manifest: dict) -> dict:
     if not seen:
         flags.append("Activity log has no events in the collection interval.")
     counts = manifest.get("counts")
+    if "campaign_collection" in manifest or workflow == "campaign":
+        from wizexpert.campaign import campaign_collection_flags
+
+        flags.extend(campaign_collection_flags(manifest.get("campaign_collection")))
     if not (isinstance(counts, list) and counts):
         flags.append("Count reconciliation: no counts supplied.")
         counts = []
@@ -576,6 +686,7 @@ def main(argv: list[str] | None = None) -> int:
     post = commands.add_parser("collection-check")
     post.add_argument("--activity-log", type=Path, required=True)
     post.add_argument("--manifest", type=Path, required=True)
+    post.add_argument("--workflow", choices=SPECIFIC)
     args = parser.parse_args(argv)
     try:
         if args.command == "requirements":
@@ -584,6 +695,19 @@ def main(argv: list[str] | None = None) -> int:
                 "workflow": args.workflow,
                 "phase": args.phase,
                 "required_checks": required_checks(args.workflow, args.phase),
+                "optional_fields": {
+                    "owner_changes": [
+                        {
+                            "id": "unique nonempty string",
+                            "kind": "addition | rule_update",
+                            "request": "absolute path that is a key in evidence_sha256",
+                            "summary": "nonempty string",
+                            "prior_logic_verified": True,
+                            "deliverables": ["requested deliverable IDs added (addition)"],
+                            "persisted_in": ["absolute evidence paths (required: rule_update)"],
+                        }
+                    ]
+                },
                 "rule_sha256": rule_hashes(args.workflow),
                 "private_rule_sources": {str(p.resolve()): digest(p) for p in args.private_rules},
                 "rule_sections": rule_inventory(
@@ -593,7 +717,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "check":
             result = receipt(args.review, args.phase)
         elif args.command == "collection-check":
-            result = collection_check(args.activity_log, load(args.manifest))
+            result = collection_check(args.activity_log, load(args.manifest), args.workflow)
             if result["status"] != "pass":
                 print(json.dumps(result, indent=2))
                 return 1
