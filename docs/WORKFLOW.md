@@ -581,7 +581,7 @@ Apply the same line to HTML footers and every PDF page (for example print CSS
 
 Repeated campaigns (a fixed set of vulnerability IDs refreshed daily until fully
 patched) follow [Campaigns](CAMPAIGNS.md): no total collection time limit while data
-keeps arriving, stall-based abort in a new directory, one all-status finding
+keeps arriving, abort on authentication or repeated fetch failure in a new directory, one all-status finding
 stream, draft-only scheduled runs, exact workbook count notes, no per-group
 sheets, and no Rejected mention in update emails.
 

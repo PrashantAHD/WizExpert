@@ -1,4 +1,4 @@
-"""Generic campaign rules: collection planner, stall detection, lifecycle and wording checks.
+"""Generic campaign rules: collection planner, failure handling, lifecycle and wording checks.
 
 Never calls Wiz and never sends or changes anything. A campaign is a repeated, fixed-scope
 collection of vulnerability findings for a configurable set of vulnerability IDs. Nothing
@@ -31,6 +31,8 @@ GROUPED_PAGE_SIZE = 20
 RESOURCE_BATCH_SIZE = 40
 # Collection has no elapsed-time limit. Explicit authentication and fetch failures
 # still abort the run; an operator may pause between valid responses.
+# DEFAULT_STALL_SECONDS is a legacy, accepted-but-ignored setting kept only so old configs
+# and staging metadata still load. It never aborts or limits a collection.
 DEFAULT_STALL_SECONDS = 15 * 60
 MAX_CALL_ATTEMPTS = 3
 # Findings whose asset a resource lookup did not return are kept, never treated as closed.
@@ -136,6 +138,24 @@ def write_json(
         path.write_bytes(data)
 
 
+def refuse_public_repo_path(path: Path | str) -> None:
+    """Refuse campaign output inside this public checkout (accidental client-data commit).
+
+    Set WIZEXPERT_ALLOW_REPO_OUTPUT=1 only for synthetic fixtures.
+    """
+    if os.environ.get("WIZEXPERT_ALLOW_REPO_OUTPUT") == "1":
+        return
+    root = Path(__file__).resolve().parents[1]
+    if not (root / "pyproject.toml").is_file():
+        return  # installed (non-editable) package: no checkout to protect
+    target = Path(path).resolve()
+    require(
+        root != target and root not in target.parents,
+        "Campaign output must be outside the public WizExpert repository; use a private "
+        "location (or set WIZEXPERT_ALLOW_REPO_OUTPUT=1 for synthetic fixtures only).",
+    )
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
@@ -230,6 +250,7 @@ def _clear_failure(directory: Path, tool: str, params: dict) -> None:
 def start(config: CampaignConfig, base: Path | str, now: datetime | None = None) -> dict:
     """Begin a new run in a fresh directory. Each run has its own directory; never reuse one."""
     now = now or utc_now()
+    refuse_public_repo_path(base)
     stamp = now.strftime("%Y-%m-%dT%H-%M-%SZ")
     directory = Path(base) / f"staging-{stamp}"
     directory.mkdir(parents=True, exist_ok=False)
@@ -476,10 +497,15 @@ def _lock(directory: Path):
 
 
 def _save_locked(config, directory, meta, files, tool, params, response, now):
-    if (directory / ABORT_MARKER).is_file():
+    # Refuse any save into a closed run, including one whose attempts are exhausted but whose
+    # marker was not yet written (next_call writes it).
+    exhausted = (directory / "attempts.json").is_file() and any(
+        count >= MAX_CALL_ATTEMPTS for count in read_json(directory / "attempts.json").values()
+    )
+    if (directory / ABORT_MARKER).is_file() or exhausted:
         current = next_call(config, directory, now=now)
         require(
-            current["action"] not in {"abort_stalled", "abort_unable_to_fetch", "stop_reconnect"},
+            current["action"] not in {"abort_unable_to_fetch", "stop_reconnect"},
             current.get("reason", ""),
         )
     ids = list(config.vulnerability_ids)
@@ -589,7 +615,15 @@ def _validate_response(tool: str, params: dict, body: dict) -> None:
             len(returned) == len(set(returned)) == data["totalCount"],
             "Resource response contains duplicate or inconsistent IDs.",
         )
-        require(set(returned) <= set(params["resource_id"]), "Resource response contains an unrequested ID.")
+        require(
+            set(returned) <= set(params["resource_id"]),
+            "Resource response contains an unrequested ID.",
+        )
+        require(
+            bool(returned) or not params["resource_id"],
+            "Empty resource batch for a non-empty ID set: treat as a failed call, retry, and "
+            "never accept it as complete.",
+        )
     else:
         require(data["totalCount"] == len(data["nodes"]), "Incomplete grouped pagination.")
 
@@ -637,15 +671,20 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
         "reporting_timezone": "UTC",
         "finding_count": len(findings),
         "asset_count": len(asset_ids),
-        "active_resource_count": len(returned & set(asset_ids)),
+        "returned_resource_count": len(returned & set(asset_ids)),
         "unreturned_resource_count": len(unreturned),
         "unreturned_resource_ids": unreturned,
         "unreturned_resource_label": UNRETURNED_RESOURCE_LABEL,
+        "collection_qa": {
+            "status": "requires_reconciliation" if unreturned else "complete",
+            "unreturned_resource_count": len(unreturned),
+        },
         "files": {
             name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
             for name in sorted(files)
         },
     }
+    refuse_public_repo_path(out)
     write_json(out, manifest, staging=directory, exclusive=True)
     return manifest
 
@@ -823,7 +862,27 @@ def campaign_collection_flags(info: object) -> list[str]:
             flags.append(f"Evidence record belongs to another run (stitched): {name}")
         if stale:
             flags.append(f"Evidence predates this run (reused old data): {name}")
+    try:
+        found = _asset_ids(_staged_pages(staging, listed, "findings-"))
+        got = {
+            n["id"]
+            for _, r in _staged_pages(staging, listed, "resources-")
+            for n in r["response"]["cloudResourcesV2"]["nodes"]
+        }
+        missing = set(found) - got
+    except (KeyError, TypeError, ValueError, OSError):
+        missing = set()
+    if missing:
+        flags.append(
+            f"{len(missing)} resource(s) {UNRETURNED_RESOURCE_LABEL}: findings are retained, "
+            "never treat them as resolved or closed."
+        )
     return sorted(set(flags))
+
+
+def _staged_pages(staging: Path, listed: dict, prefix: str) -> list:
+    names = sorted((n for n in listed if n.startswith(prefix)), key=_page_number)
+    return [(n, read_json(staging / n)) for n in names]
 
 
 def check_helper_fresh(directory: Path, *helpers: Path) -> None:
