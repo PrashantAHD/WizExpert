@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">How WizExpert works</title>
+  <desc id="desc">A looping diagram: collect Wiz evidence, draft a report, wait for a person to approve, then remediate and verify. Nothing is sent or changed without approval.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="420" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0B2447"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="960" height="420" rx="28" fill="url(#bg)"/>
+  <text x="48" y="46" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">WizExpert in 12 seconds</text>
+  <text x="48" y="72" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="14">Evidence first. Approval before send. Verification before close.</text>
+
+  <!-- you ask -->
+  <g>
+    <rect x="48" y="108" width="210" height="86" rx="16" fill="#1E293B" stroke="#334155"/>
+    <text x="153" y="142" text-anchor="middle" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="12">YOU ASK</text>
+    <text x="153" y="168" text-anchor="middle" fill="#F8FAFC" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700">investigate finding</text>
+  </g>
+
+  <path d="M270 151 H348" stroke="#334155" stroke-width="3" fill="none"/>
+  <circle r="9" fill="#38BDF8" filter="url(#glow)">
+    <animate attributeName="cx" values="270;410;640;800;270" keyTimes="0;0.22;0.48;0.78;1" dur="12s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="151;151;151;151;151" dur="12s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- collect -->
+  <g transform="translate(360,108)">
+    <rect width="140" height="86" rx="16" fill="#1D4ED8"/>
+    <text x="70" y="34" text-anchor="middle" fill="#BFDBFE" font-family="Segoe UI, Arial, sans-serif" font-size="12">COLLECT</text>
+    <text x="70" y="60" text-anchor="middle" fill="#F8FAFC" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">Wiz evidence</text>
+  </g>
+
+  <!-- report gate -->
+  <g transform="translate(520,108)">
+    <rect width="160" height="86" rx="16" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+    <text x="80" y="34" text-anchor="middle" fill="#FDE68A" font-family="Segoe UI, Arial, sans-serif" font-size="12">HUMAN GATE</text>
+    <text x="80" y="60" text-anchor="middle" fill="#F8FAFC" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" opacity="1">draft report
+      <animate attributeName="opacity" values="1;1;0;0;0;0;1" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+    </text>
+    <text x="80" y="60" text-anchor="middle" fill="#FBBF24" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" opacity="0">you send email
+      <animate attributeName="opacity" values="0;0;1;1;0;0;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+    </text>
+    <text x="80" y="60" text-anchor="middle" fill="#86EFAC" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700" opacity="0">change authorised
+      <animate attributeName="opacity" values="0;0;0;0;1;1;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+    </text>
+  </g>
+
+  <!-- verify -->
+  <g transform="translate(700,108)">
+    <rect width="212" height="86" rx="16" fill="#0F766E"/>
+    <text x="106" y="34" text-anchor="middle" fill="#99F6E4" font-family="Segoe UI, Arial, sans-serif" font-size="12">VERIFY</text>
+    <text x="106" y="60" text-anchor="middle" fill="#F0FDFA" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">fresh Wiz check</text>
+  </g>
+
+  <text x="480" y="248" text-anchor="middle" fill="#93C5FD" font-family="Segoe UI, Arial, sans-serif" font-size="15">
+    1. Read-only MCP tools gather evidence. Nothing is changed yet.
+    <animate attributeName="opacity" values="1;1;0;0;0;0;1" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+  </text>
+  <text x="480" y="248" text-anchor="middle" fill="#FDE68A" font-family="Segoe UI, Arial, sans-serif" font-size="15" opacity="0">2. WizExpert drafts Excel and email. A person approves and sends.
+    <animate attributeName="opacity" values="0;0;1;1;0;0;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+  </text>
+  <text x="480" y="248" text-anchor="middle" fill="#86EFAC" font-family="Segoe UI, Arial, sans-serif" font-size="15" opacity="0">3. After change auth, remediate — close only if fresh evidence matches.
+    <animate attributeName="opacity" values="0;0;0;0;1;1;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
+  </text>
+
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(48,292)">
+      <rect width="280" height="92" rx="14" fill="url(#card)" stroke="#3B82F6" stroke-width="1.5"/>
+      <text x="20" y="36" fill="#93C5FD" font-size="12">ANALYZE</text>
+      <text x="20" y="64" fill="#F8FAFC" font-size="16" font-weight="700">evidence before claims</text>
+    </g>
+    <g transform="translate(340,292)">
+      <rect width="280" height="92" rx="14" fill="url(#card)" stroke="#F59E0B" stroke-width="1.5"/>
+      <text x="20" y="36" fill="#FDE68A" font-size="12">COORDINATE</text>
+      <text x="20" y="64" fill="#F8FAFC" font-size="16" font-weight="700">you send, not the tool</text>
+    </g>
+    <g transform="translate(632,292)">
+      <rect width="280" height="92" rx="14" fill="url(#card)" stroke="#14B8A6" stroke-width="1.5"/>
+      <text x="20" y="36" fill="#99F6E4" font-size="12">REMEDIATE</text>
+      <text x="20" y="64" fill="#F8FAFC" font-size="16" font-weight="700">verify, then close</text>
+    </g>
+  </g>
+</svg>
