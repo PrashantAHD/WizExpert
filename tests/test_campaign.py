@@ -290,24 +290,20 @@ def test_assemble_blocks_when_group_totals_do_not_reconcile(tmp_path):
         campaign.assemble(cfg, directory, tmp_path / "m.json")
 
 
-def test_stall_aborts_incomplete_run_and_save_refuses(tmp_path):
+def test_collection_has_no_elapsed_time_limit(tmp_path):
     cfg = config()
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
     save_catalogs(cfg, directory, at(seconds=10))
-    just_ok = campaign.next_call(cfg, directory, now=at(seconds=10 + 900))
-    assert just_ok["action"] == "wiz-execute-batch"
-    stalled = campaign.next_call(cfg, directory, now=at(seconds=10 + 901))
-    assert stalled["action"] == "abort_stalled"
-    assert "new staging directory" in stalled["reason"] and "stitch" in stalled["reason"]
-    with pytest.raises(ValueError, match="stuck"):
-        save_grouped(cfg, directory, at(seconds=10 + 901))
+    result = campaign.next_call(cfg, directory, now=at(seconds=10 + 30 * 24 * 3600))
+    assert result["action"] == "wiz-execute-batch"
+    assert not (Path(directory) / "aborted.json").exists()
 
 
-def test_stall_threshold_is_configurable_and_start_clock_counts(tmp_path):
+def test_legacy_stall_config_does_not_limit_collection(tmp_path):
     cfg = config(stall_seconds=60)
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
     assert campaign.next_call(cfg, directory, now=at(seconds=60))["action"] == "wiz-execute-batch"
-    assert campaign.next_call(cfg, directory, now=at(seconds=61))["action"] == "abort_stalled"
+    assert campaign.next_call(cfg, directory, now=at(seconds=61 + 30 * 24 * 3600))["action"] == "wiz-execute-batch"
 
 
 def test_complete_run_is_never_stalled(tmp_path):
@@ -715,25 +711,29 @@ def test_campaign_module_is_in_every_rule_hash():
         assert "wizexpert/campaign.py" in rule_hashes(workflow)
 
 
-def test_stall_threshold_is_fixed_at_start_and_overrides_are_ignored(tmp_path):
+def test_legacy_stall_metadata_does_not_limit_collection(tmp_path):
     directory = campaign.start(config(stall_seconds=60), tmp_path, now=T0)["dir"]
     assert read_json(f"{directory}/meta.json")["stall_seconds"] == 60
     lax = config(stall_seconds=10**6)
     result = campaign.next_call(lax, directory, now=at(seconds=61))
-    assert result["action"] == "abort_stalled" and result["stall_threshold_seconds"] == 60
+    assert result["action"] == "wiz-execute-batch"
 
 
 def test_abort_is_sticky_for_next_save_and_assemble(tmp_path):
     cfg = config()
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
-    assert campaign.next_call(cfg, directory, now=at(seconds=901))["action"] == "abort_stalled"
+    write_json(Path(directory) / "aborted.json", {
+        "action": "abort_unable_to_fetch",
+        "reason": "A fetch failed three times.",
+    })
+    assert campaign.next_call(cfg, directory, now=at(seconds=901))["action"] == "abort_unable_to_fetch"
     assert (Path(directory) / "aborted.json").is_file()
     # Even with a "fresh" clock, the run never resumes.
     again = campaign.next_call(cfg, directory, now=T0)
-    assert again["action"] == "abort_stalled" and again["aborted"] is True
-    with pytest.raises(ValueError, match="stuck"):
+    assert again["action"] == "abort_unable_to_fetch" and again["aborted"] is True
+    with pytest.raises(ValueError, match="closed"):
         save_catalogs(cfg, directory, T0)
-    with pytest.raises(ValueError, match="stuck"):
+    with pytest.raises(ValueError, match="closed"):
         campaign.assemble(cfg, directory, tmp_path / "m.json")
 
 
@@ -902,3 +902,28 @@ def test_save_uses_and_releases_an_exclusive_lock(tmp_path):
     with pytest.raises(ValueError):
         campaign.save(cfg, directory, "unknown_tool", {}, {}, now=at(seconds=2))
     assert not lock.exists()
+
+
+def test_assemble_reports_unreturned_resources_without_closing_them(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    save_catalogs(cfg, directory, at(seconds=1))
+    save_grouped(cfg, directory, at(seconds=2))
+    page = finding_page([("a1", "OPEN"), ("a2", "RESOLVED")], False, "c")
+    campaign.save(
+        cfg, directory, "list_vulnerability_findings", finding_params(), page, now=at(seconds=3)
+    )
+    campaign.save(
+        cfg,
+        directory,
+        "list_cloud_resources",
+        {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40},
+        resources(["a1"]),
+        now=at(seconds=4),
+    )
+    manifest = campaign.assemble(cfg, directory, tmp_path / "m.json")
+    assert manifest["finding_count"] == 2 and manifest["asset_count"] == 2
+    assert manifest["active_resource_count"] == 1
+    assert manifest["unreturned_resource_ids"] == ["a2"]
+    assert manifest["unreturned_resource_count"] == 1
+    assert "requires reconciliation" in manifest["unreturned_resource_label"]

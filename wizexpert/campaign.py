@@ -29,9 +29,12 @@ GROUPED_KINDS = {
 FINDING_PAGE_SIZE = 20  # Wiz maximum; never raise.
 GROUPED_PAGE_SIZE = 20
 RESOURCE_BATCH_SIZE = 40
-# No total time limit while data keeps arriving. A run is abandoned only when it is stuck.
+# Collection has no elapsed-time limit. Explicit authentication and fetch failures
+# still abort the run; an operator may pause between valid responses.
 DEFAULT_STALL_SECONDS = 15 * 60
 MAX_CALL_ATTEMPTS = 3
+# Findings whose asset a resource lookup did not return are kept, never treated as closed.
+UNRETURNED_RESOURCE_LABEL = "Not returned by Wiz / requires reconciliation"
 ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 ABORT_MARKER = "aborted.json"
 LOCK_NAME = "save.lock"
@@ -341,26 +344,12 @@ def next_call(config: CampaignConfig, directory: Path | str, now: datetime | Non
                 return next_call(config, directory, now=now)
     idle = seconds_since_last_save(meta, files, now)
     result = _plan(config, directory, files, idle)
-    if result["action"] != "assemble" and idle > config.stall_seconds:
-        reason = (
-            f"No evidence saved for {idle} seconds (limit {config.stall_seconds}) and the "
-            "collection is incomplete: fetching is stuck. Abandon this directory, start a "
-            "new staging directory, do not stitch pages from this run and do not reuse a "
-            "previous day's inventory."
-        )
-        _write_marker(directory, "abort_stalled", reason)
-        return {
-            "action": "abort_stalled",
-            "seconds_since_last_save": idle,
-            "stall_threshold_seconds": config.stall_seconds,
-            "reason": reason,
-        }
     return result
 
 
 def _plan(config: CampaignConfig, directory: Path, files: dict, idle: int) -> dict:
     ids = list(config.vulnerability_ids)
-    common = {"seconds_since_last_save": idle, "stall_threshold_seconds": config.stall_seconds}
+    common = {"seconds_since_last_save": idle}
 
     def call(tool: str, params: dict) -> dict:
         return {"tool_name": tool, "parameters": params}
@@ -487,11 +476,12 @@ def _lock(directory: Path):
 
 
 def _save_locked(config, directory, meta, files, tool, params, response, now):
-    current = next_call(config, directory, now=now)
-    require(
-        current["action"] not in {"abort_stalled", "abort_unable_to_fetch", "stop_reconnect"},
-        current.get("reason", ""),
-    )
+    if (directory / ABORT_MARKER).is_file():
+        current = next_call(config, directory, now=now)
+        require(
+            current["action"] not in {"abort_stalled", "abort_unable_to_fetch", "stop_reconnect"},
+            current.get("reason", ""),
+        )
     ids = list(config.vulnerability_ids)
     if tool == "get_vulnerability_catalog":
         require(
@@ -594,10 +584,12 @@ def _validate_response(tool: str, params: dict, body: dict) -> None:
         return
     require(not data["pageInfo"]["hasNextPage"], "Incomplete pagination.")
     if tool == "list_cloud_resources":
+        returned = [n["id"] for n in data["nodes"]]
         require(
-            {n["id"] for n in data["nodes"]} == set(params["resource_id"]),
-            "Resource lookup incomplete.",
+            len(returned) == len(set(returned)) == data["totalCount"],
+            "Resource response contains duplicate or inconsistent IDs.",
         )
+        require(set(returned) <= set(params["resource_id"]), "Resource response contains an unrequested ID.")
     else:
         require(data["totalCount"] == len(data["nodes"]), "Incomplete grouped pagination.")
 
@@ -627,6 +619,13 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
             expected == collected,
             f"{kind}: finding totals changed between queries; recollect in a new directory.",
         )
+    asset_ids = _asset_ids(_pages(files, "findings-"))
+    returned = {
+        n["id"]
+        for _, r in _pages(files, "resources-")
+        for n in r["response"]["cloudResourcesV2"]["nodes"]
+    }
+    unreturned = sorted(set(asset_ids) - returned)
     times = [parse_utc(r["observed_at"]) for r in files.values()]
     manifest = {
         "schema_version": 1,
@@ -637,7 +636,11 @@ def assemble(config: CampaignConfig, directory: Path | str, out: Path | str) -> 
         "observed_to": iso(max(times)),
         "reporting_timezone": "UTC",
         "finding_count": len(findings),
-        "asset_count": len(_asset_ids(_pages(files, "findings-"))),
+        "asset_count": len(asset_ids),
+        "active_resource_count": len(returned & set(asset_ids)),
+        "unreturned_resource_count": len(unreturned),
+        "unreturned_resource_ids": unreturned,
+        "unreturned_resource_label": UNRETURNED_RESOURCE_LABEL,
         "files": {
             name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
             for name in sorted(files)

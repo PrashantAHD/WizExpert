@@ -9,13 +9,8 @@ private storage, never in this repository.
 
 ## Collection rules
 
-1. **No total time limit while Wiz keeps returning data.** A run is abandoned only
-   when it is stuck or failing:
-   - *Stalled:* the collection is incomplete and the gap since the last saved
-     evidence record exceeds the stall threshold (default 15 minutes,
-     `--stall-seconds` or `stall_seconds` in the config at `start`; the value is
-     stored in `meta.json` and later overrides are ignored). `next` returns
-     `abort_stalled` and `save` refuses.
+1. **There is no elapsed-time limit on a collection.** A run is abandoned only
+   when it has an explicit fetch or authentication failure:
    - *Unable to fetch:* the same call failed three times (`wizexpert campaign fail`
      counts them). `next` returns `abort_unable_to_fetch`.
    - *Authentication:* HTTP 401 or an OAuth challenge means stop and ask the
@@ -35,7 +30,13 @@ private storage, never in this repository.
    3. ONE finding stream over OPEN, IN_PROGRESS, RESOLVED and REJECTED at page
       size 20 (the Wiz maximum). Never split remaining and resolved streams;
    4. exact-ID resource lookups in parallel batches of 40 with
-      `include_deleted=true`.
+      `include_deleted=true`. A resource response may contain a strict subset
+      of the requested IDs: preserve those findings, exclude unreturned assets
+      from active-resource counts, and label them `Not returned by Wiz /
+      requires reconciliation`. Never treat an unreturned resource as resolved
+      or closed.
+      The assembled manifest reports `active_resource_count`,
+      `unreturned_resource_count` and `unreturned_resource_ids`.
 4. **Reconciliation stays.** Grouped totals must equal the finding stream per
    status group, every finding asset must have its resource record, finding IDs
    must be unique, and the scope must not change. A mismatch means recollect in
@@ -60,8 +61,8 @@ wizexpert campaign fail  --config C:\Private\campaign.json --dir <staging> --too
 wizexpert campaign assemble --config C:\Private\campaign.json --dir <staging> --out C:\Private\manifest.json
 ```
 
-`campaign.json` holds `vulnerability_ids`, optionally `stall_seconds` and
-`group_by` (default `CLOUD_PLATFORM`). `--vuln-id` may be repeated instead.
+`campaign.json` holds `vulnerability_ids` and optionally `group_by` (default
+`CLOUD_PLATFORM`). `--vuln-id` may be repeated instead.
 
 ## Lifecycle and scheduling
 
