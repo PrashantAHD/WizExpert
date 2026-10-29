@@ -303,7 +303,10 @@ def test_legacy_stall_config_does_not_limit_collection(tmp_path):
     cfg = config(stall_seconds=60)
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
     assert campaign.next_call(cfg, directory, now=at(seconds=60))["action"] == "wiz-execute-batch"
-    assert campaign.next_call(cfg, directory, now=at(seconds=61 + 30 * 24 * 3600))["action"] == "wiz-execute-batch"
+    assert (
+        campaign.next_call(cfg, directory, now=at(seconds=61 + 30 * 24 * 3600))["action"]
+        == "wiz-execute-batch"
+    )
 
 
 def test_complete_run_is_never_stalled(tmp_path):
@@ -722,11 +725,16 @@ def test_legacy_stall_metadata_does_not_limit_collection(tmp_path):
 def test_abort_is_sticky_for_next_save_and_assemble(tmp_path):
     cfg = config()
     directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
-    write_json(Path(directory) / "aborted.json", {
-        "action": "abort_unable_to_fetch",
-        "reason": "A fetch failed three times.",
-    })
-    assert campaign.next_call(cfg, directory, now=at(seconds=901))["action"] == "abort_unable_to_fetch"
+    write_json(
+        Path(directory) / "aborted.json",
+        {
+            "action": "abort_unable_to_fetch",
+            "reason": "A fetch failed three times.",
+        },
+    )
+    assert (
+        campaign.next_call(cfg, directory, now=at(seconds=901))["action"] == "abort_unable_to_fetch"
+    )
     assert (Path(directory) / "aborted.json").is_file()
     # Even with a "fresh" clock, the run never resumes.
     again = campaign.next_call(cfg, directory, now=T0)
@@ -923,7 +931,64 @@ def test_assemble_reports_unreturned_resources_without_closing_them(tmp_path):
     )
     manifest = campaign.assemble(cfg, directory, tmp_path / "m.json")
     assert manifest["finding_count"] == 2 and manifest["asset_count"] == 2
-    assert manifest["active_resource_count"] == 1
+    assert manifest["returned_resource_count"] == 1
+    assert manifest["collection_qa"]["status"] == "requires_reconciliation"
+    flags = campaign.campaign_collection_flags(
+        {
+            "assemble_manifest": str((tmp_path / "m.json").resolve()),
+            "assemble_manifest_sha256": hashlib.sha256(
+                (tmp_path / "m.json").read_bytes()
+            ).hexdigest(),
+        }
+    )
+    assert any("requires reconciliation" in f for f in flags)
     assert manifest["unreturned_resource_ids"] == ["a2"]
     assert manifest["unreturned_resource_count"] == 1
     assert "requires reconciliation" in manifest["unreturned_resource_label"]
+
+
+def _to_resource_stage(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    save_catalogs(cfg, directory, at(seconds=1))
+    save_grouped(cfg, directory, at(seconds=2))
+    page = finding_page([("a1", "OPEN"), ("a2", "RESOLVED")], False, "c")
+    campaign.save(
+        cfg, directory, "list_vulnerability_findings", finding_params(), page, now=at(seconds=3)
+    )
+    return cfg, directory
+
+
+def test_empty_resource_batch_is_rejected_not_accepted_as_complete(tmp_path):
+    cfg, directory = _to_resource_stage(tmp_path)
+    params = {"resource_id": ["a1", "a2"], "include_deleted": True, "first": 40}
+    with pytest.raises(ValueError, match="Empty resource batch"):
+        campaign.save(
+            cfg, directory, "list_cloud_resources", params, resources([]), now=at(seconds=4)
+        )
+    assert not list(Path(directory).glob("resources-*.json"))
+    assert campaign.next_call(cfg, directory, now=at(seconds=5))["action"] == "wiz-execute-batch"
+
+
+def test_exhausted_attempts_block_save_before_marker_exists(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    params = {"external_id": IDS[0]}
+    write_json(
+        Path(directory) / "attempts.json",
+        {campaign._call_key("get_vulnerability_catalog", params): 3},
+    )
+    with pytest.raises(ValueError, match="unable to fetch"):
+        campaign.save(
+            cfg, directory, "get_vulnerability_catalog", params, catalog(IDS[0]), now=at(seconds=1)
+        )
+
+
+def test_output_inside_public_repo_is_refused(tmp_path, monkeypatch):
+    monkeypatch.delenv("WIZEXPERT_ALLOW_REPO_OUTPUT", raising=False)
+    repo = Path(campaign.__file__).resolve().parents[1]
+    if not (repo / "pyproject.toml").is_file():
+        pytest.skip("not a source checkout")
+    with pytest.raises(ValueError, match="outside the public WizExpert repository"):
+        campaign.start(config(), repo / "tests" / "never-created", now=T0)
+    campaign.start(config(), tmp_path, now=T0)

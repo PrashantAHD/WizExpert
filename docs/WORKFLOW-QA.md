@@ -97,8 +97,8 @@ not a self-reported claim: it names the assemble manifest written by
 `assemble_manifest_sha256`), and the check re-derives from that manifest and the
 retained staging evidence that the run is single, complete, not aborted,
 unchanged, and not stitched or built from old data. Anything else flags the
-report. Collection has no fixed time limit: only a stalled or
-repeatedly failing run is abandoned (see [campaigns](CAMPAIGNS.md)).
+report. Collection has no fixed time limit: only an authentication stop or
+repeatedly failing call abandons a run (see [campaigns](CAMPAIGNS.md)).
 
 ## Whole-workflow coverage
 
@@ -107,7 +107,7 @@ repeatedly failing run is abandoned (see [campaigns](CAMPAIGNS.md)).
 | `setup` | Approved tenant/access/storage, installation reuse, credentials, actual read-only readiness and honest capability claims |
 | `finding` | Rule/configuration and representative issues, complete inventory, identity joins, plain-language risk, practical remediation, requested reports and communications |
 | `governance` | Historical reuse and cost, reopened/changed findings, cutoffs, approved prior sources, exceptions, attribution, workbook/deck contracts and current observations |
-| `campaign` | Private campaign rules/state, stall-based collection (no fixed time limit), auth/availability, findings versus assets, new detections, ownership, daily history, qualified wording and verified closure criteria; see [campaigns](CAMPAIGNS.md) |
+| `campaign` | Private campaign rules/state, failure-based abort (no collection time limit), auth/availability, findings versus assets, new detections, ownership, daily history, qualified wording and verified closure criteria; see [campaigns](CAMPAIGNS.md) |
 | `remediation` | Exact approval scope, dependencies, recovery, execution evidence, partial outcomes, technical/owner/Wiz validation and closure |
 | `publication` | Public-only scope, privacy/history/untracked review, tests/lint/security/dependency gates and exact approved outgoing refs |
 

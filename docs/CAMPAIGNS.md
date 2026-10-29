@@ -32,11 +32,20 @@ private storage, never in this repository.
    4. exact-ID resource lookups in parallel batches of 40 with
       `include_deleted=true`. A resource response may contain a strict subset
       of the requested IDs: preserve those findings, exclude unreturned assets
-      from active-resource counts, and label them `Not returned by Wiz /
+      from returned-resource counts, and label them `Not returned by Wiz /
       requires reconciliation`. Never treat an unreturned resource as resolved
       or closed.
-      The assembled manifest reports `active_resource_count`,
-      `unreturned_resource_count` and `unreturned_resource_ids`.
+      An empty batch for a non-empty ID set is refused as a failed call (retry;
+      three failures abort the run). The assembled manifest reports
+      `returned_resource_count`, `unreturned_resource_count`,
+      `unreturned_resource_ids` and `collection_qa.status`, which is
+      `requires_reconciliation` whenever any resource is unreturned; collection QA
+      re-derives this from the retained evidence and flags the pack.
+      `start` and `assemble` refuse output inside the public repository
+      (`WIZEXPERT_ALLOW_REPO_OUTPUT=1` only for synthetic fixtures). A save is
+      refused once a call has used all its attempts, even before the abort marker
+      is written. `stall_seconds` is a legacy setting that is accepted and
+      ignored.
 4. **Reconciliation stays.** Grouped totals must equal the finding stream per
    status group, every finding asset must have its resource record, finding IDs
    must be unique, and the scope must not change. A mismatch means recollect in
