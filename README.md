@@ -45,6 +45,8 @@ host-loaded bulk-query guard, and `wizexpert email-qa`. PDF QA uses the optional
 review or guarantee error-free reasoning. Repeated fixed-scope campaigns use
 `wizexpert campaign` (see [campaigns](docs/CAMPAIGNS.md)): no fixed collection time
 limit, stall-based abort, one finding stream, draft-only scheduled runs.
+Owner-requested additions to a campaign report are approved scope changes
+(see [owner-requested scope changes](docs/WORKFLOW-QA.md#owner-requested-scope-changes)).
 
 ## How it works
 

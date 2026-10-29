@@ -386,3 +386,219 @@ def test_deliverables_cannot_be_removed_between_phases(tmp_path):
     path = save(tmp_path / "generation.json", generation)
     with pytest.raises(ValueError, match="deliverables cannot disappear"):
         validate_review(path, now=NOW)
+
+
+HTML = {"id": "html", "kind": "html"}
+SUMMARY = {"id": "summary", "kind": "xlsx"}
+
+
+def owner_request(tmp_path):
+    request = tmp_path / "owner-request.txt"
+    request.write_text("Synthetic owner request.", encoding="utf-8")
+    return request
+
+
+def owner_change(request_path, **override):
+    entry = {
+        "id": "change-1",
+        "kind": "addition",
+        "request": str(request_path),
+        "summary": "Synthetic owner-requested summary workbook.",
+        "prior_logic_verified": True,
+        "deliverables": ["summary"],
+    }
+    entry.update(override)
+    return entry
+
+
+def chain(tmp_path, first, second, first_changes=None, second_changes=None):
+    """Save a collection review and a generation review; return the generation path."""
+    request = owner_request(tmp_path)
+    log = activity(tmp_path)
+    checked = save(tmp_path / "manifest.json", manifest(tmp_path))
+    collection = review_payload(tmp_path, workflow="finding")
+    collection["requested_deliverables"] = first
+    if first_changes is not None:
+        collection["owner_changes"] = first_changes
+    collection["evidence_sha256"][str(request)] = digest(request)
+    collection_path = save(tmp_path / "collection.json", collection)
+    generation = review_payload(tmp_path, "generation", workflow="finding")
+    generation["requested_deliverables"] = second
+    if second_changes is not None:
+        generation["owner_changes"] = second_changes
+    generation["reviewed_at"] = (NOW - timedelta(minutes=20)).isoformat()
+    generation["previous_review"], generation["activity_log"] = str(collection_path), str(log)
+    generation["collection_manifest"] = str(checked)
+    generation["evidence_sha256"].update(
+        {str(f): digest(f) for f in (request, collection_path, log, checked)}
+    )
+    return save(tmp_path / "generation.json", generation), request
+
+
+def test_owner_added_deliverable_is_accepted_as_scope_change(tmp_path):
+    request = owner_request(tmp_path)
+    path, request = chain(tmp_path, [HTML], [HTML, SUMMARY], second_changes=[owner_change(request)])
+    assert validate_review(path, now=NOW)["phase"] == "generation"
+
+
+def test_owner_added_deliverable_without_owner_change_is_rejected(tmp_path):
+    path, _ = chain(tmp_path, [HTML], [HTML, SUMMARY])
+    with pytest.raises(ValueError, match="owner-requested addition"):
+        validate_review(path, now=NOW)
+
+
+def test_owner_added_deliverable_needs_matching_addition_entry(tmp_path):
+    request = owner_request(tmp_path)
+    changes = [owner_change(request, deliverables=["html"])]
+    path, _ = chain(tmp_path, [HTML], [HTML, SUMMARY], second_changes=changes)
+    with pytest.raises(ValueError, match="owner-requested addition"):
+        validate_review(path, now=NOW)
+    changes = [owner_change(request, kind="rule_update", persisted_in=[str(request)])]
+    path, _ = chain(tmp_path, [HTML], [HTML, SUMMARY], second_changes=changes)
+    with pytest.raises(ValueError, match="owner-requested addition"):
+        validate_review(path, now=NOW)
+
+
+def test_owner_change_cannot_remove_or_alter_existing_deliverable(tmp_path):
+    request = owner_request(tmp_path)
+    changes = [owner_change(request, deliverables=[])]
+    path, _ = chain(tmp_path, [HTML, SUMMARY], [HTML], second_changes=changes)
+    with pytest.raises(ValueError, match="deliverables cannot disappear"):
+        validate_review(path, now=NOW)
+    altered = [{"id": "html", "kind": "pdf"}, SUMMARY]
+    path, _ = chain(tmp_path, [HTML], altered, second_changes=changes)
+    with pytest.raises(ValueError, match="deliverables cannot disappear"):
+        validate_review(path, now=NOW)
+
+
+@pytest.mark.parametrize(
+    "override,message",
+    [
+        ({"kind": "other"}, "kind must be"),
+        ({"kind": None}, "kind must be"),
+        ({"id": ""}, "ID must be"),
+        ({"id": 5}, "ID must be"),
+        ({"request": "relative-request.txt"}, "hash-bound"),
+        ({"request": "C:\\Unbound\\request.txt"}, "hash-bound"),
+        ({"request": None}, "hash-bound"),
+        ({"summary": " "}, "needs a summary"),
+        ({"prior_logic_verified": False}, "previously applicable logic"),
+        ({"prior_logic_verified": "true"}, "previously applicable logic"),
+        ({"prior_logic_verified": 1}, "previously applicable logic"),
+        ({"deliverables": "summary"}, "deliverables must be"),
+        ({"deliverables": ["unknown"]}, "deliverables must be"),
+        ({"deliverables": ["summary", "summary"]}, "deliverables must be"),
+        ({"persisted_in": ["C:\\Unbound\\rules.md"]}, "persisted_in must be"),
+        ({"persisted_in": "rules.md"}, "persisted_in must be"),
+        ({"kind": "rule_update"}, "must record where it was persisted"),
+        ({"kind": "rule_update", "persisted_in": []}, "must record where it was persisted"),
+    ],
+)
+def test_malformed_owner_changes_fail_closed(tmp_path, override, message):
+    request = owner_request(tmp_path)
+    path, _ = chain(
+        tmp_path,
+        [HTML],
+        [HTML, SUMMARY],
+        second_changes=[owner_change(request, **override)],
+    )
+    with pytest.raises(ValueError, match=message):
+        validate_review(path, now=NOW)
+
+
+def test_malformed_owner_change_containers_fail_closed(tmp_path):
+    request = owner_request(tmp_path)
+    for bad, message in (
+        ("change-1", "must be a list"),
+        (["change-1"], "must be an object"),
+        ([owner_change(request), owner_change(request)], "Duplicate owner change ID"),
+    ):
+        path, _ = chain(tmp_path, [HTML], [HTML, SUMMARY], second_changes=bad)
+        with pytest.raises(ValueError, match=message):
+            validate_review(path, now=NOW)
+
+
+def test_rule_update_with_persisted_evidence_is_accepted(tmp_path):
+    request = owner_request(tmp_path)
+    changes = [
+        owner_change(request, kind="rule_update", deliverables=[], persisted_in=[str(request)])
+    ]
+    path, _ = chain(tmp_path, [HTML], [HTML], second_changes=changes)
+    assert validate_review(path, now=NOW)["owner_changes"] == changes
+
+
+def test_rule_update_does_not_bypass_rule_hash_binding(tmp_path):
+    request = owner_request(tmp_path)
+    changes = [
+        owner_change(request, kind="rule_update", deliverables=[], persisted_in=[str(request)])
+    ]
+    path, _ = chain(tmp_path, [HTML], [HTML], second_changes=changes)
+    data = json.loads(path.read_text())
+    data["rule_sha256"][next(iter(data["rule_sha256"]))] = "0" * 64
+    save(path, data)
+    with pytest.raises(ValueError, match="rules changed"):
+        validate_review(path, now=NOW)
+
+
+def test_owner_change_from_previous_phase_cannot_disappear_or_change(tmp_path):
+    request = owner_request(tmp_path)
+    change = owner_change(request)
+    for later in (
+        [],
+        None,
+        [owner_change(request, summary="Different summary.")],
+        [owner_change(request, id="change-2")],
+    ):
+        path, _ = chain(
+            tmp_path,
+            [HTML, SUMMARY],
+            [HTML, SUMMARY],
+            first_changes=[change],
+            second_changes=later,
+        )
+        with pytest.raises(ValueError, match="cannot disappear or change"):
+            validate_review(path, now=NOW)
+
+
+def test_owner_change_kept_across_phases_is_accepted(tmp_path):
+    request = owner_request(tmp_path)
+    change = owner_change(request)
+    path, _ = chain(
+        tmp_path, [HTML, SUMMARY], [HTML, SUMMARY], first_changes=[change], second_changes=[change]
+    )
+    assert validate_review(path, now=NOW)["owner_changes"] == [change]
+
+
+def test_receipt_reports_owner_changes(tmp_path):
+    request = owner_request(tmp_path)
+    change = owner_change(request)
+    path, _ = chain(tmp_path, [HTML], [HTML, SUMMARY], second_changes=[change])
+    with patch("wizexpert.workflow_qa.datetime") as clock:
+        clock.now.return_value = NOW
+        clock.fromisoformat = datetime.fromisoformat
+        result = receipt(path, "generation")
+    assert result["owner_changes"] == [
+        {
+            "id": "change-1",
+            "kind": "addition",
+            "summary": change["summary"],
+            "deliverables": ["summary"],
+        }
+    ]
+    assert [r["id"] for r in result["requested_deliverables"]] == ["html", "summary"]
+
+
+def test_missing_owner_changes_behaves_as_before(tmp_path, reviewed):
+    path, _ = chain(tmp_path, [HTML], [HTML])
+    assert "owner_changes" not in validate_review(path, now=NOW)
+    with patch("wizexpert.workflow_qa.datetime") as clock:
+        clock.now.return_value = NOW
+        clock.fromisoformat = datetime.fromisoformat
+        assert receipt(reviewed, "collection")["owner_changes"] == []
+
+
+def test_requirements_cli_describes_owner_changes(capsys):
+    assert (
+        main(["workflow-qa", "requirements", "--workflow", "finding", "--phase", "collection"]) == 0
+    )
+    assert "owner_changes" in capsys.readouterr().out
