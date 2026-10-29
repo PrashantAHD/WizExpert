@@ -23,6 +23,54 @@ Unknown, missing, failed and unsupported checks block; there is no blanket
 collection needs none. Different names alone do not authenticate an independent
 review.
 
+## Owner-requested scope changes
+
+An owner-requested addition to a report or workflow is an approved scope
+decision, not a process failure. Reviewers must verify that the previously
+applicable rules were followed and that the addition is accurate and safe; they
+must not block it solely because it was absent from the earlier plan. An
+explicit owner request to update, add or replace logic must be recorded in the
+applicable persistent instructions, skill, template or QA contract for later
+runs. This does not waive evidence integrity, privacy, approval, no-send or
+no-mutate controls, or a concrete Critical/High security finding. Conflicts with
+those gates are surfaced with the smallest safe alternative, never silently
+dropped.
+
+Record each such request in the optional top-level review field `owner_changes`
+(missing means none). Values below are illustrative only:
+
+```json
+"owner_changes": [
+  {
+    "id": "change-1",
+    "kind": "addition",
+    "request": "C:\\PrivateEvidence\\owner-request.txt",
+    "summary": "Owner asked for an extra summary workbook.",
+    "prior_logic_verified": true,
+    "deliverables": ["summary-workbook"],
+    "persisted_in": []
+  }
+]
+```
+
+- `id` is a unique nonempty string; `kind` is `addition` or `rule_update`.
+- `request` and every `persisted_in` path must be absolute keys in
+  `evidence_sha256`, so the owner request is hash-bound.
+- `prior_logic_verified` must be literally `true`: the reviewer confirmed the
+  previously applicable logic was still followed.
+- `deliverables` (optional for an addition) lists requested deliverable IDs;
+  `persisted_in` is required and nonempty for `rule_update` and names the
+  instruction, skill, template or QA contract that now carries the logic.
+- Superset rule: a later phase may request more deliverables than the previous
+  phase only if every added deliverable ID appears in an `addition` entry's
+  `deliverables`. Removing or altering an existing requested deliverable is
+  still rejected. Owner changes recorded in an earlier phase must remain,
+  unchanged, in later phases. An added deliverable must then be produced and
+  checked like any other (the handoff artifacts must equal the requested IDs).
+- A `rule_update` never bypasses `rule_sha256` binding: when the persisted rules
+  change, the new rules apply to the next run and need a fresh review.
+- Malformed entries fail closed.
+
 ## Post-collection check (one gate before generation)
 
 Reuse-first stays the default: start from retained evidence and collect only
@@ -43,6 +91,14 @@ are named; the log shows an unbounded historical `list_issues` query with no
 in the interval; or any count is missing or does not reconcile. A flagged check
 blocks generation, not collection. Generation reviews must carry hash-bound
 `activity_log` and `collection_manifest`, and `validate_review` re-runs the check.
+A campaign review must carry a `campaign_collection` block in that manifest. It is
+not a self-reported claim: it names the assemble manifest written by
+`wizexpert campaign assemble` (`assemble_manifest`, absolute path, and its
+`assemble_manifest_sha256`), and the check re-derives from that manifest and the
+retained staging evidence that the run is single, complete, not aborted,
+unchanged, and not stitched or built from old data. Anything else flags the
+report. Collection has no fixed time limit: only a stalled or
+repeatedly failing run is abandoned (see [campaigns](CAMPAIGNS.md)).
 
 ## Whole-workflow coverage
 
@@ -51,7 +107,7 @@ blocks generation, not collection. Generation reviews must carry hash-bound
 | `setup` | Approved tenant/access/storage, installation reuse, credentials, actual read-only readiness and honest capability claims |
 | `finding` | Rule/configuration and representative issues, complete inventory, identity joins, plain-language risk, practical remediation, requested reports and communications |
 | `governance` | Historical reuse and cost, reopened/changed findings, cutoffs, approved prior sources, exceptions, attribution, workbook/deck contracts and current observations |
-| `campaign` | Private campaign rules/state, observation windows, findings versus assets, new detections, ownership, daily history and verified closure criteria |
+| `campaign` | Private campaign rules/state, stall-based collection (no fixed time limit), auth/availability, findings versus assets, new detections, ownership, daily history, qualified wording and verified closure criteria; see [campaigns](CAMPAIGNS.md) |
 | `remediation` | Exact approval scope, dependencies, recovery, execution evidence, partial outcomes, technical/owner/Wiz validation and closure |
 | `publication` | Public-only scope, privacy/history/untracked review, tests/lint/security/dependency gates and exact approved outgoing refs |
 
@@ -317,6 +373,12 @@ Browser/native review remains necessary for actual colors, layout, visibility,
 clipping and responsiveness. Factual accuracy and whether recommendations fit
 the environment also need evidence-backed review. Keyword checks cannot prove
 every paraphrase compliant. Ticket-pending drafts never imply outreach readiness.
+
+Campaign update and closure emails (`"campaign": true` in the contract) are also checked
+for wording: any mention of Rejected findings is flagged; "Resolved" must be
+qualified as the Wiz lifecycle status (not verified patching); and reconstructed
+or partial-day values (or `partial_day`/`reconstructed` set in the contract) must
+name the UTC cutoff time. See [campaigns](CAMPAIGNS.md).
 
 ## Trust boundary
 

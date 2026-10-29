@@ -55,6 +55,10 @@ def check_workbook(path: Path, contract: dict) -> None:
     try:
         require(not book._external_links, "External workbook links are not allowed.")
         require(book.sheetnames == contract["sheet_names"], "Workbook sheet names/order differ.")
+        if "campaign_workbook" in contract:
+            from wizexpert.campaign import check_campaign_workbook
+
+            check_campaign_workbook(book, contract["campaign_workbook"], path)
         for sheet in book:
             require(sheet.sheet_state == "visible", "Hidden worksheets are not allowed.")
             for row in sheet:
