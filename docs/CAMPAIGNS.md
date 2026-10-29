@@ -91,6 +91,8 @@ Declare these in the workbook artifact contract with `campaign_workbook`:
 
 ## Update emails and reports
 
+- Owner-requested additions to campaign reports are approved scope changes; see
+  [owner-requested scope changes](WORKFLOW-QA.md#owner-requested-scope-changes).
 - Campaign update and closure emails (`"campaign": true` in the email contract,
   any kind) must not mention Rejected findings at all. Non-campaign progress
   emails are not subject to these wording checks.

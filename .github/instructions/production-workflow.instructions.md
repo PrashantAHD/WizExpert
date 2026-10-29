@@ -108,6 +108,21 @@ Use synthetic fixtures and approved external locations such as
   a necessary handoff; do not imply work continues in the background unless an
   actual task is running. These are assistant guidance, not runtime enforcement.
 
+## Owner-requested changes
+
+- The owner is the person who owns or runs the workflow. An owner-requested
+  addition (report field, section, format, deliverable or workflow step) is an
+  approved scope change, not a review failure.
+- Reviewers verify the previously applicable logic was still followed and help
+  incorporate the addition; they must not block it solely because it was absent
+  from the earlier plan.
+- Persist an explicit owner request to update, add or replace logic in the
+  applicable instructions, skill, template or QA contract so later runs follow
+  it. Record it in the review's `owner_changes` (see `docs/WORKFLOW-QA.md`).
+- Safety gates do not change: evidence integrity, privacy, approvals,
+  no-send/no-mutate and concrete Critical/High security findings. Surface a
+  conflict with the smallest safe alternative; never silently drop the request.
+
 ## Evidence contract
 
 - For each control, review its actual rule configuration when available and

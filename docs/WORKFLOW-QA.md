@@ -23,6 +23,54 @@ Unknown, missing, failed and unsupported checks block; there is no blanket
 collection needs none. Different names alone do not authenticate an independent
 review.
 
+## Owner-requested scope changes
+
+An owner-requested addition to a report or workflow is an approved scope
+decision, not a process failure. Reviewers must verify that the previously
+applicable rules were followed and that the addition is accurate and safe; they
+must not block it solely because it was absent from the earlier plan. An
+explicit owner request to update, add or replace logic must be recorded in the
+applicable persistent instructions, skill, template or QA contract for later
+runs. This does not waive evidence integrity, privacy, approval, no-send or
+no-mutate controls, or a concrete Critical/High security finding. Conflicts with
+those gates are surfaced with the smallest safe alternative, never silently
+dropped.
+
+Record each such request in the optional top-level review field `owner_changes`
+(missing means none). Values below are illustrative only:
+
+```json
+"owner_changes": [
+  {
+    "id": "change-1",
+    "kind": "addition",
+    "request": "C:\\PrivateEvidence\\owner-request.txt",
+    "summary": "Owner asked for an extra summary workbook.",
+    "prior_logic_verified": true,
+    "deliverables": ["summary-workbook"],
+    "persisted_in": []
+  }
+]
+```
+
+- `id` is a unique nonempty string; `kind` is `addition` or `rule_update`.
+- `request` and every `persisted_in` path must be absolute keys in
+  `evidence_sha256`, so the owner request is hash-bound.
+- `prior_logic_verified` must be literally `true`: the reviewer confirmed the
+  previously applicable logic was still followed.
+- `deliverables` (optional for an addition) lists requested deliverable IDs;
+  `persisted_in` is required and nonempty for `rule_update` and names the
+  instruction, skill, template or QA contract that now carries the logic.
+- Superset rule: a later phase may request more deliverables than the previous
+  phase only if every added deliverable ID appears in an `addition` entry's
+  `deliverables`. Removing or altering an existing requested deliverable is
+  still rejected. Owner changes recorded in an earlier phase must remain,
+  unchanged, in later phases. An added deliverable must then be produced and
+  checked like any other (the handoff artifacts must equal the requested IDs).
+- A `rule_update` never bypasses `rule_sha256` binding: when the persisted rules
+  change, the new rules apply to the next run and need a fresh review.
+- Malformed entries fail closed.
+
 ## Post-collection check (one gate before generation)
 
 Reuse-first stays the default: start from retained evidence and collect only
