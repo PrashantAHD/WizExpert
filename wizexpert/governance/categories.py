@@ -39,9 +39,12 @@ class Category:
     title: str
     slots: tuple[Slot, ...]
     gates: tuple[str, ...]
+    category_rules: tuple[str, ...] = ()
 
     def manifest(self) -> dict[str, Any]:
+        extra = {"category_rules": list(self.category_rules)} if self.category_rules else {}
         return {
+            **extra,
             "schema_version": SCHEMA_VERSION,
             "category_id": self.category_id,
             "version": self.version,
@@ -94,7 +97,44 @@ DAILY_PROGRESS = Category(
     ),
     ("collection", "generation", "handoff"),
 )
-CATEGORIES = {c.category_id: c for c in (RISK_ISSUES, DAILY_PROGRESS)}
+MONTHLY_GOVERNANCE = Category(
+    "monthly-governance-reporting",
+    2,
+    "Monthly Governance Reporting",
+    (
+        Slot("monthly-governance-workbook", "Monthly governance workbook", "workbook"),
+        Slot("monthly-governance-slide-deck", "Monthly governance slide deck", "deck"),
+        Slot("executive-dashboard", "Executive dashboard", "dashboard"),
+    ),
+    ("collection", "generation", "handoff"),
+    (
+        "Retain the prior snapshot period's data unchanged; amend only the "
+        "current snapshot period's data.",
+        "Preserve the previous snapshot period's report data as retained history "
+        "and input for the next month's snapshot-period reporting, so Wiz "
+        "offloading cannot cause historical data loss.",
+        "Each deliverable has its own approved comparison source; never reuse "
+        "one deliverable's comparison source for another.",
+        "Fix the baseline and snapshot cutoff before collection and apply them "
+        "consistently across all three deliverables.",
+        "The workbook and operational slide deck cover the four severities "
+        "(Critical, High, Medium and Low); the executive dashboard is intentionally "
+        "scoped to Critical and High.",
+        "The workbook has six approved tabs and the decks retain their approved "
+        "three-slide executive and ten-slide operational structures.",
+        "Use the approved previous workbook for workbook history, the reviewed "
+        "operational snapshot/deck for operational history, and the workbook "
+        "Critical/High figures plus the executive template/history for the dashboard.",
+        "Keep accepted-risk and attribution distinct; never merge or infer one "
+        "from the other.",
+        "Read-only and no-send: drafts only, never send email or change Wiz, "
+        "ticketing or cloud records.",
+        "Collection, generation and handoff gates must pass, with workflow-QA "
+        "and review evidence, before the run is complete.",
+        "Keep client names, evidence and identifiers out of this repository.",
+    ),
+)
+CATEGORIES = {c.category_id: c for c in (RISK_ISSUES, DAILY_PROGRESS, MONTHLY_GOVERNANCE)}
 
 
 def validate_binding(category_id: str, binding: dict[str, Any]) -> list[str]:
@@ -120,6 +160,4 @@ def validate_binding(category_id: str, binding: dict[str, Any]) -> list[str]:
         ):
             problems.append(f"slot {slot_id!r} needs a pinned lowercase SHA-256")
     return problems
-
-
 

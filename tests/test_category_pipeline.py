@@ -126,3 +126,21 @@ def test_template_file_must_match_pin(tmp_path):
     b[first] = SlotBinding("a" * 64, old.builder, old.validator, template)
     with pytest.raises(PipelineError, match="does not match"):
         run_category_pipeline(c.category_id, c.version, b, tmp_path, qa(c))
+
+
+def test_monthly_governance_fails_closed_without_private_bindings(tmp_path):
+    category = cat.CATEGORIES["monthly-governance-reporting"]
+    assert [s.slot_id for s in category.slots] == [
+        "monthly-governance-workbook", "monthly-governance-slide-deck", "executive-dashboard"]
+    calls: list[str] = []
+    bindings = make(category, calls)
+    bindings.pop("executive-dashboard")  # private template/builder unavailable
+    with pytest.raises(PipelineError, match="binding rejected"):
+        run_category_pipeline(
+            category.category_id, category.version, bindings, tmp_path, qa(category)
+        )
+    assert calls == []
+    with pytest.raises(PipelineError, match="QA and review evidence"):
+        run_category_pipeline(
+            category.category_id, category.version, make(category, []), tmp_path, None
+        )
