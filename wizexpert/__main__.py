@@ -1,10 +1,10 @@
-"""Command-line entry point: QA checks, PHP2Shell campaign and governance reporting."""
+﻿"""Command-line entry point: QA checks, PHP2Shell campaign and governance reporting."""
 
 import sys
 from collections.abc import Sequence
 
 USAGE = (
-    "usage: wizexpert {workflow-qa,email-qa,campaign,governance} [options]\n\n"
+    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance} [options]\n\n"
     "  workflow-qa  validate evidence-bound workflow QA reviews\n"
     "  email-qa     check an email draft against its reviewed contract\n"
     "  campaign     PHP2Shell campaign reporting\n"
@@ -75,6 +75,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from wizexpert.email_qa import main as email_qa_main
 
         return email_qa_main(arguments[1:])
+    if command == "follow-up-email":
+        from wizexpert.follow_up_email import main as follow_up_main
+
+        return follow_up_main(arguments[1:])
     if command == "governance":
         return governance_main(arguments[1:])
     if command == "campaign":
