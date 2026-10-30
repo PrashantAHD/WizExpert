@@ -21,11 +21,14 @@ ROOT_FILES = {
 }
 SOURCE_SUFFIXES = {
     "wizexpert": {".py", ".html", ".css", ".js"},
-    "remediation": {".py", ".html", ".css", ".js"},
     "tests": {".py"},
     "scripts": {".py", ".ps1"},
     "docs": {".md", ".svg"},
 }
+# Retired layouts that still exist in reachable Git history. They are tolerated only when
+# scanning history, never in the index or working tree, so they cannot be reintroduced.
+HISTORICAL_SOURCE_SUFFIXES = {"remediation": {".py", ".html", ".css", ".js"}}
+HISTORICAL_FILES = {".github/instructions/production-workflow.instructions.md"}
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SYNTHETIC_MERGE_SUBJECT = re.compile(
@@ -110,7 +113,7 @@ def content_issues(
     ]
 
 
-def path_issues(name: str) -> list[str]:
+def path_issues(name: str, *, historical: bool = False) -> list[str]:
     path = PurePosixPath(name)
     if (
         path.is_absolute()
@@ -121,9 +124,11 @@ def path_issues(name: str) -> list[str]:
         return ["unsafe file path"]
     issues = [label for label, pattern in PATTERNS if pattern.search(name)]
     allowed = name in ROOT_FILES or name == ".githooks/pre-push"
-    allowed |= name == ".github/instructions/production-workflow.instructions.md"
+    allowed |= historical and name in HISTORICAL_FILES
     if len(path.parts) >= 2:
-        suffixes = SOURCE_SUFFIXES.get(path.parts[0], set())
+        suffixes = set(SOURCE_SUFFIXES.get(path.parts[0], set()))
+        if historical:
+            suffixes |= HISTORICAL_SOURCE_SUFFIXES.get(path.parts[0], set())
         allowed |= path.suffix in suffixes and not any(
             part.startswith(".") for part in path.parts[1:]
         )
@@ -177,8 +182,10 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
         for issue in issues:
             problems.add(f"{source}: {issue}")
 
-    def inspect_blob(mode: str, oid: str, name: str, source: str) -> None:
-        report(source, path_issues(name))
+    def inspect_blob(
+        mode: str, oid: str, name: str, source: str, historical: bool = False
+    ) -> None:
+        report(source, path_issues(name, historical=historical))
         if mode not in {"100644", "100755"}:
             report(source, ["symlinks, submodules and non-regular files are not allowed"])
             return
@@ -236,7 +243,7 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
             key = (mode, oid, name)
             if key not in checked_entries:
                 checked_entries.add(key)
-                inspect_blob(mode, oid, name, f"history {revision[:12]} {name!r}")
+                inspect_blob(mode, oid, name, f"history {revision[:12]} {name!r}", historical=True)
     return sorted(problems)
 
 

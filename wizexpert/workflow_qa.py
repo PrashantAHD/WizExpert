@@ -34,15 +34,6 @@ SPECIFIC = {
         "generation": ("cutoffs-and-historical-preservation", "accepted-risk-and-team-attribution"),
         "handoff": ("six-three-ten-layout", "reviewed-wording-and-no-assignee-column"),
     },
-    "finding": {
-        "collection": ("issue-and-graph-coverage", "rule-and-representative-issue-review"),
-        "generation": ("configuration-aware-risk", "practical-remediation-and-approval-boundaries"),
-        "handoff": (
-            "email-template-and-identifiers",
-            "html-pdf-parity-and-no-txt",
-            "operator-versus-client-responsibilities",
-        ),
-    },
     "campaign": {
         "collection": (
             "campaign-active-and-fixed-scope",
@@ -59,19 +50,6 @@ SPECIFIC = {
             "scanner-status-versus-patching",
             "campaign-closure-criteria",
             "no-partial-pack-and-qualified-wording",
-        ),
-    },
-    "remediation": {
-        "collection": ("authorized-approver-and-exact-scope", "native-targets-and-dependencies"),
-        "generation": (
-            "change-authorization-not-approach-only",
-            "prechecks-recovery-and-stop-criteria",
-            "least-privilege-and-exclusions",
-        ),
-        "handoff": (
-            "execution-evidence-and-partial-outcomes",
-            "owner-technical-and-wiz-validation",
-            "acceptance-versus-remediation-versus-closure",
         ),
     },
     "publication": {
@@ -97,9 +75,7 @@ RULES = {
         "docs/GOVERNANCE.md",
         "docs/GOVERNANCE-SNAPSHOT.md",
     ),
-    "finding": ("docs/WORKFLOW.md",),
-    "campaign": ("docs/WORKFLOW.md",),
-    "remediation": ("docs/WORKFLOW.md", "docs/EXECUTION.md"),
+    "campaign": ("docs/CAMPAIGNS.md",),
     "publication": ("docs/PUBLICATION.md",),
     "setup": ("docs/SETUP.md",),
 }
@@ -150,7 +126,6 @@ def rule_hashes(workflow: str) -> dict:
     paths = (
         *RULES[workflow],
         "docs/WORKFLOW-QA.md",
-        ".github/instructions/production-workflow.instructions.md",
         "wizexpert/workflow_qa.py",
         "wizexpert/email_qa.py",
         "wizexpert/artifact_qa.py",
@@ -161,12 +136,6 @@ def rule_hashes(workflow: str) -> dict:
         paths += tuple(
             path.relative_to(ROOT).as_posix()
             for path in sorted((ROOT / "wizexpert" / "governance").glob("*.py"))
-        )
-    else:
-        paths += (
-            "wizexpert/workflow.py",
-            "wizexpert/csv_report.py",
-            "wizexpert/execution_update.py",
         )
     return {name: digest(ROOT.joinpath(*name.split("/"))) for name in paths}
 
@@ -186,7 +155,6 @@ def rule_inventory(workflow: str, private_sources: dict | None = None) -> dict:
         for name in (
             *RULES[workflow],
             "docs/WORKFLOW-QA.md",
-            ".github/instructions/production-workflow.instructions.md",
         )
     }
     sources.update({name: Path(name) for name in (private_sources or {})})
@@ -250,48 +218,6 @@ def validate_coverage(review: dict, evidence: dict) -> dict:
                 f"Excluding a rule requires a recorded scope decision: {name}",
             )
     return coverage
-
-
-def validate_remediation(review: dict, evidence: dict) -> None:
-    if review["workflow"] != "remediation":
-        return
-    stage = review.get("target_stage")
-    require(
-        type(stage) is int and 4 <= stage <= 8,
-        "Remediation QA must specify the intended workflow stage (4-8).",
-    )
-    if review["phase"] == "collection":
-        return
-    from wizexpert.workflow import load_tracker
-
-    path = review.get("tracker")
-    require(isinstance(path, str) and path in evidence, "Reviewed remediation tracker is required.")
-    tracker = load_tracker(path)
-    require(tracker.scope == review["scope"], "Remediation tracker has a different scope.")
-    prerequisite = stage if review["phase"] == "handoff" else stage - 1
-    require(
-        tracker.stage_status(prerequisite) == "complete",
-        "Remediation prerequisites/authorization/verification are incomplete.",
-    )
-    bindings = review.get("tracker_evidence_bindings", {})
-    require(isinstance(bindings, dict), "Tracker evidence bindings must be a mapping.")
-    for event in tracker.events:
-        for ref in event.evidence.values():
-            require(
-                bindings.get(ref, ref) in evidence,
-                "Tracker references need actual retained evidence, not reference text alone.",
-            )
-    for item in review.get("local_account_results", []):
-        from wizexpert.execution_update import parse_result
-
-        require(item["path"] in evidence, "Execution result must be hash-bound.")
-        parsed = parse_result(Path(item["path"]).read_text(encoding="utf-8-sig"))
-        require(
-            parsed.vm == item["vm"]
-            and parsed.outcome == item["outcome"]
-            and list(parsed.verified) == item["verified_accounts"],
-            "Local-account execution claim differs from parsed evidence.",
-        )
 
 
 def normalized_query(arguments: dict) -> dict:
@@ -490,7 +416,6 @@ def validate_review(path: Path, phase: str | None = None, *, now: datetime | Non
 
     validate_deliverables(review, evidence)
     validate_owner_changes(review, evidence)
-    validate_remediation(review, evidence)
     checks = review.get("checks", {})
     require(isinstance(checks, dict), "QA checks must be an object.")
     require(
@@ -522,8 +447,7 @@ def validate_review(path: Path, phase: str | None = None, *, now: datetime | Non
             and previous["started_at"] == review["started_at"]
             and previous["request_evidence"] == review["request_evidence"]
             and previous["private_rule_sources"] == review["private_rule_sources"]
-            and previous["parity_groups"] == review["parity_groups"]
-            and previous.get("target_stage") == review.get("target_stage"),
+            and previous["parity_groups"] == review["parity_groups"],
             "Previous QA review belongs to another run or scope; deliverables cannot disappear.",
         )
         validate_scope_continuity(previous, review)

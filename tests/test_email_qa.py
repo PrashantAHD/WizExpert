@@ -1,13 +1,17 @@
 import json
-import re
 
 import pytest
 
 from wizexpert.__main__ import main
-from wizexpert.email_qa import CLOSING, NOTICE, validate_email
+from wizexpert.email_qa import NOTICE, validate_email
 from wizexpert.workflow_qa import digest
 
 FOOTER = "Confidential - Example Org | Example Security | Source: Wiz | Reporting dates: UTC"
+SUBJECT = "Reviewed update"
+BODY = (
+    "Hi Team, Thank you for the update. Attached Assessment.pdf contains the details. "
+    "Best Regards, Example Security Team"
+)
 
 
 @pytest.fixture
@@ -18,17 +22,14 @@ def email(tmp_path):
     .header {{background:#16324f;color:white}} .gold {{background:#fff4d6}}
     </style></head><body>
     <header id="header" class="header">PRIVATE COMMUNICATION DRAFT
-    <h1>Synthetic finding</h1></header>
+    <h1>Synthetic update</h1></header>
     <p id="badge" class="gold">Draft - not sent | 2026-10-27</p>
     <p id="notice" class="gold">{NOTICE}</p>
     <p id="confidentiality" class="gold">{FOOTER}</p>
-    <p id="subject">Subject: Review requested: Synthetic finding | SNOW: INC123</p>
+    <p id="subject">Subject: {SUBJECT}</p>
     <section id="email-body"><p>Hi Team,</p>
-    <h3>Issue Description:</h3><p>Observed synthetic risk.</p>
-    <h3>Issue Details:</h3><p>SNOW: INC123</p>
-    <p>wc-id-example | issue-example</p><p>Attached Assessment.pdf contains the findings.</p>
-    <h3>Recommended Remediation Approaches:</h3><p>Review the scoped permissions.</p>
-    <p>{CLOSING}</p><p>Best Regards,<br>Example Security Team</p>
+    <p>Thank you for the update.</p><p>Attached Assessment.pdf contains the details.</p>
+    <p>Best Regards,<br>Example Security Team</p>
     </section></body></html>"""
     target = tmp_path / "email.html"
     template = tmp_path / "approved.html"
@@ -36,11 +37,12 @@ def email(tmp_path):
         path.write_text(html, encoding="utf-8")
     contract = {
         "schema_version": 1,
-        "kind": "initial",
+        "kind": "progress",
         "signature": "Example Security Team",
-        "title": "Synthetic finding",
+        "title": "Synthetic update",
         "draft_date": "2026-10-27",
-        "ticket": "INC123",
+        "approved_subject": SUBJECT,
+        "approved_body": BODY,
         "body_id": "email-body",
         "subject_id": "subject",
         "header_id": "header",
@@ -51,7 +53,6 @@ def email(tmp_path):
         "approved_template": str(template),
         "approved_template_sha256": digest(template),
         "attachments": {str(attachment): digest(attachment)},
-        "issue_mappings": [{"control_id": "wc-id-example", "issue_id": "issue-example"}],
     }
     contract_path = tmp_path / "contract.json"
     contract_path.write_text(json.dumps(contract), encoding="utf-8")
@@ -68,16 +69,13 @@ def test_actual_template_pass_remains_draft(email):
 @pytest.mark.parametrize(
     "old,new,expected",
     [
-        ("<h3>Issue Description:</h3>", "<h2>Issue Description:</h2>", "h3"),
-        ("Issue Details:", "Issue Details", "trailing colons"),
         ("Hi Team,", "Hello everyone,", "Greeting"),
-        (CLOSING, "Please fix this soon.", "closing"),
         ("Example Security Team", "Unapproved Sender", "signature"),
+        ("Thank you for the update.", "Everything is fixed.", "reviewed wording"),
+        (f"Subject: {SUBJECT}", "Subject: Something else", "subject"),
         ("PRIVATE COMMUNICATION DRAFT", "Customer email", "header"),
-        ("wc-id-example | issue-example", "wc-id-example", "identifier"),
         ("#16324f", "#ff0000", "CSS"),
-        ("Review the scoped permissions.", "Please close Wiz issues.", "Disallowed"),
-        ("Review the scoped permissions.", "Please provide the ServiceNow ticket.", "Disallowed"),
+        ("Thank you for the update.", "Please close Wiz issues.", "Disallowed"),
         ("Assessment.pdf contains", "Other.xlsx contains", "attachment"),
         ("Draft - not sent | 2026-10-27", "Sent successfully", "badge"),
         (f'<p id="confidentiality" class="gold">{FOOTER}</p>', "", "confidentiality"),
@@ -87,9 +85,11 @@ def test_actual_template_pass_remains_draft(email):
         ("<p>Hi Team,</p>", f"<p>Hi Team,</p><p>{FOOTER}</p>", "leaked"),
     ],
 )
-def test_style_and_workflow_drift_fail(email, old, new, expected):
+def test_style_and_wording_drift_fail(email, old, new, expected):
     target, contract = email
-    target.write_text(target.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    content = target.read_text(encoding="utf-8")
+    assert old in content
+    target.write_text(content.replace(old, new), encoding="utf-8")
     result = validate_email(target, contract)
     assert result["status"] == "blocked"
     assert any(expected.lower() in e.lower() for e in result["errors"])
@@ -108,58 +108,28 @@ def test_confidentiality_decision_must_be_recorded(email):
     assert validate_email(target, contract)["errors"] == []
 
 
-def test_pending_ticket_is_draft_only(email):
-    target, contract = email
-    payload = json.loads(contract.read_text())
-    payload["ticket"] = None
-    contract.write_text(json.dumps(payload), encoding="utf-8")
-    target.write_text(target.read_text().replace("INC123", "Pending"), encoding="utf-8")
-    result = validate_email(target, contract)
-    assert result["errors"] == []
-    assert any("outreach remains blocked" in e for e in result["manual_checks_required"])
-
-
 @pytest.mark.parametrize("kind", ["reply", "progress", "blocker", "closure"])
-def test_concise_message_kinds_preserve_approved_wording_without_initial_sections(email, kind):
+def test_message_kinds_preserve_approved_wording(email, kind):
     target, contract = email
     payload = json.loads(contract.read_text())
-    body = "Hi Team, Thank you for the update. Best Regards, Example Security Team"
-    payload.update(
-        kind=kind,
-        approved_subject="Reviewed update",
-        approved_body=body,
-        issue_mappings=[],
-        attachments={},
-    )
+    payload["kind"] = kind
     contract.write_text(json.dumps(payload), encoding="utf-8")
-    content = target.read_text().replace(
-        "Review requested: Synthetic finding | SNOW: INC123", "Reviewed update"
-    )
-    content = re.sub(
-        r'<section id="email-body">.*?</section>',
-        f'<section id="email-body"><p>{body}</p></section>',
-        content,
-        flags=re.S,
-    )
-    target.write_text(content, encoding="utf-8")
     assert validate_email(target, contract)["errors"] == []
-    target.write_text(
-        content.replace("Thank you for the update.", "Everything is fixed."), encoding="utf-8"
-    )
-    assert any("reviewed wording" in e for e in validate_email(target, contract)["errors"])
 
 
-def test_html_hidden_headings_do_not_count(email):
+def test_unsupported_message_kind_is_rejected(email):
     target, contract = email
-    target.write_text(target.read_text().replace("<h3>", "<h3 hidden>"), encoding="utf-8")
-    assert validate_email(target, contract)["errors"]
+    payload = json.loads(contract.read_text())
+    payload["kind"] = "initial"
+    contract.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unsupported email contract"):
+        validate_email(target, contract)
 
 
-def test_hidden_ancestor_cannot_supply_required_headings(email):
+def test_html_hidden_body_does_not_count(email):
     target, contract = email
     content = target.read_text().replace(
-        "<h3>Issue Description:</h3>",
-        "<div hidden><h3>Issue Description:</h3></div>",
+        '<section id="email-body">', '<section hidden id="email-body">'
     )
     target.write_text(content, encoding="utf-8")
     assert validate_email(target, contract)["errors"]
@@ -195,7 +165,7 @@ def test_workflow_handoff_cannot_pass_by_attesting_to_a_bad_email(email, tmp_pat
     )
     previous = None
     for phase, minutes in (("collection", 60), ("generation", 20), ("handoff", 1)):
-        payload = review_payload(tmp_path, phase, workflow="finding")
+        payload = review_payload(tmp_path, phase, workflow="setup")
         payload["requested_deliverables"] = [{"id": "email", "kind": "email"}]
         payload["reviewed_at"] = (NOW - timedelta(minutes=minutes)).isoformat()
         if previous:

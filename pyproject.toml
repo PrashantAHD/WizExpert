@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wizexpert"
 version = "0.1.0"
-description = "WizExpert: analyze, report, validate, coordinate and remediate"
+description = "WizExpert: analyze, report, validate and coordinate cloud security work"
 requires-python = ">=3.12"
 dependencies = [
     "openpyxl>=3.1.5,<4",
@@ -35,10 +35,9 @@ dev = [
 
 [project.scripts]
 wizexpert = "wizexpert.__main__:main"
-cloud-remediations = "wizexpert.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["wizexpert*", "remediation*"]
+include = ["wizexpert*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
