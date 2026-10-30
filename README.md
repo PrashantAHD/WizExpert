@@ -48,6 +48,26 @@ local tools turn that into reviewed reports.
 
 Campaigns (repeated fixed-scope work): [docs/CAMPAIGNS.md](docs/CAMPAIGNS.md). Workflow QA: [docs/WORKFLOW-QA.md](docs/WORKFLOW-QA.md).
 
+## Reusable reporting categories
+
+Every new run selects one category and follows its fixed deliverable slots,
+builders, validators and workflow-QA/review gates. Bespoke or legacy
+generation logic is not used.
+
+| Category | Fixed deliverables |
+|---|---|
+| **Risk Issues** | Internal Analysis; Client Assessment; Stakeholder Email; Detailed Report; Internal Follow-up Email; Updated Detailed Report |
+| **Daily Progress Reporting** | Daily Progress Report; Day-to-Day Movements; VM/CVE Details; Stakeholder Reply Email |
+| **Monthly Governance Reporting** | Monthly Governance Workbook; Monthly Governance Slide Deck; Executive Dashboard |
+
+The execution sequence is:
+**category selection → fixed deliverable slots → deliverable builder →
+deliverable validator → workflow QA/review**.
+
+Changes to a category or template require an owner-requested change record,
+version bump, template re-pinning and QA rerun. Client evidence and completed
+reports remain in private storage outside this repository.
+
 ## Setup
 
 1. Connect your approved assistant to **Wiz MCP** with read-only permissions — [setup guide](docs/SETUP.md).
