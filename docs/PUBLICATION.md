@@ -50,11 +50,6 @@ client that ignores hooks). They cannot provide server-side enforcement.
 Configure protected branches and require the `verify` CI check where available.
 CI only runs **after** source has reached GitHub, so it cannot undo a disclosure.
 
-CSV-report test cleanup retries Windows sharing/lock violations (codes 32/33)
-for at most five attempts, with 3.1 seconds of total delay. Persistent locks and
-all other cleanup errors still fail validation. This does not retry production
-workbook writes, ignore test failures or bypass any push checks.
-
 ## What is inspected
 
 `scripts/public_check.py` inspects the current contents of tracked files, every
@@ -66,13 +61,11 @@ refspecs. This conservative policy may reject unrelated local historical refs.
 Shallow repositories fail closed; fetch complete history before checking.
 
 Only the root project metadata files explicitly listed in the guard,
-application source under `wizexpert` and compatibility aliases under
-`remediation`, Python tests under `tests`, Python and
+application source under `wizexpert`, Python tests under `tests`, Python and
 PowerShell tools under `scripts`, Markdown and SVG images (text, scanned like
 any other file) under `docs`, workflow YAML directly
-under `.github/workflows`, the exact instruction file
-`.github/instructions/production-workflow.instructions.md`, and the pre-push
-hook are allowed. Other instruction paths are not implicitly allowed. File names and
+under `.github/workflows`, and the pre-push
+hook are allowed. Instruction paths are not implicitly allowed. File names and
 contents are checked independently. References to spreadsheet extensions in
 source are allowed; actual spreadsheet, CSV, JSON data, database, environment,
 archive, binary, and log files are not. Symlinks, submodules, non-UTF-8 text, and

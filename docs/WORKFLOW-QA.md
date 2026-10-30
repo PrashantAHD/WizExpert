@@ -13,8 +13,6 @@ reasoning. Zero mistakes cannot be guaranteed.
 | Generation | Building the reviewed report set | Collection coverage, conflicts, exceptions, dates, historical preservation and attribution |
 | Handoff | Claiming completion or readiness | Actual output checks, rendering, templates, wording, identifiers and truthful status |
 
-Finding reviews use their own rule/graph, risk, remediation, email and
-operator/client responsibility checks rather than the governance template.
 Run `wizexpert workflow-qa requirements --workflow governance --phase collection`
 to obtain mandatory check IDs, current rule hashes and the documented-section
 inventory. Later phases include all earlier requirements.
@@ -105,23 +103,21 @@ repeatedly failing call abandons a run (see [campaigns](CAMPAIGNS.md)).
 | Profile | Required subject matter, in addition to the common gates |
 |---|---|
 | `setup` | Approved tenant/access/storage, installation reuse, credentials, actual read-only readiness and honest capability claims |
-| `finding` | Rule/configuration and representative issues, complete inventory, identity joins, plain-language risk, practical remediation, requested reports and communications |
 | `governance` | Historical reuse and cost, reopened/changed findings, cutoffs, approved prior sources, exceptions, attribution, workbook/deck contracts and current observations |
 | `campaign` | Private campaign rules/state, failure-based abort (no collection time limit), auth/availability, findings versus assets, new detections, ownership, daily history, qualified wording and verified closure criteria; see [campaigns](CAMPAIGNS.md) |
-| `remediation` | Exact approval scope, dependencies, recovery, execution evidence, partial outcomes, technical/owner/Wiz validation and closure |
 | `publication` | Public-only scope, privacy/history/untracked review, tests/lint/security/dependency gates and exact approved outgoing refs |
 
 This is **not a claim that every rule is machine-provable**. Requirements have
 three complementary checks:
 
 1. **Documented-rule coverage:** every section of applicable public documents,
-   production instructions and declared private rules needs an evidence-backed
+   workspace instructions and declared private rules needs an evidence-backed
    disposition. Heading-only requirements are included; headings inside code
    examples are not treated as new sections. This is section coverage, not an
    automatic translation of every sentence into executable assertions.
 2. **Actual-file/action checks:** requested outputs, current hashes, recorded
    bulk queries, supported artifact adapters, cross-format parity and existing
-   tracker/validator checks. A reviewer saying "pass" cannot override a failure.
+   validator checks. A reviewer saying "pass" cannot override a failure.
 3. **Independent review:** environment-specific reasoning, approval authority,
    source completeness, attribution, visual/native behavior and the mapping
    from the original user request to the deliverable manifest.
@@ -209,9 +205,8 @@ Generation/handoff records also require:
 - Handoffs require `artifacts` with exactly the requested IDs and kinds.
   Each entry has `id`, `kind`, absolute `path` and absolute `contract`; rendered
   outputs also need `native_review`. All these files must be hash-bound.
-  Requested deliverables, parity groups, request reference, private rules and
-  remediation target stage cannot silently change between phases.
-  An email is checked when requested, not forced into every finding task.
+  Requested deliverables, parity groups, request reference and private rules
+  cannot silently change between phases. An email is checked only when requested.
   Scope changes need a new reviewed plan; missing formats/checkers block.
 
 ```powershell
@@ -308,25 +303,6 @@ application evidence. Its `checks` must explicitly pass `all_content_reviewed`,
 files `opened_without_repair`. A changed output invalidates that review.
 This is evidence-backed human review, **not an automated native Office test**.
 
-## Remediation and closure checks
-
-The `remediation` profile requires `target_stage` from 4 through 8, following
-the existing eight-stage tracker. Generation/handoff also bind an immutable
-`tracker` snapshot with exactly the reviewed scope. Generation requires the
-preceding stage complete; handoff requires the requested stage complete.
-References in all tracker events must resolve to hashed retained evidence,
-directly or through `tracker_evidence_bindings` (reference text to evidence path).
-This adds real evidence binding to the existing sequence/reference-presence
-validator, without treating a tracker as cloud-change authorization.
-
-For the supported local-account protocol, `local_account_results` entries
-(`path`, `vm`, `outcome`, `verified_accounts`) rerun the existing strict parser
-and compare the reported result. Other execution protocols need appropriate
-domain validation and evidence-backed review; they are not silently interpreted
-as this protocol. Partial outcomes, owner confirmation, technical validation,
-Wiz reassessment and genuine patching versus scanner disappearance still need
-the independent checks. Completing a report does not mean closing a finding.
-
 ## Real-time hook (retired)
 
 There is no real-time gate on Wiz calls. `python -m wizexpert.workflow_qa hook`
@@ -337,23 +313,25 @@ the post-collection check instead.
 ## Actual email template check
 
 `wizexpert email-qa --html C:\PrivateReports\email.html --contract C:\PrivateEvidence\email-contract.json`
-checks initial outreach against the established template, not an AI assertion:
+checks a drafted message against its reviewed contract, not an AI assertion:
 
-- `Review requested: ... | SNOW: ...`, greeting, exact ordered `<h3>` headings
-  with colons, review/assistance closing and approved signature.
-- Control-to-issue mappings, selected attachment names and file hashes.
+- Greeting, approved signature and the independently reviewed subject and body.
+- Selected attachment names and file hashes.
 - Separate private header, dated draft badge and exact preparation notice.
 - CSS and wrapper classes/inline styles against the hash-bound approved HTML.
-- Known disallowed stakeholder wording, scripts/external assets and hidden headings.
+- Known disallowed stakeholder wording, scripts/external assets and hidden regions.
 
-The private contract has `schema_version: 1`, `kind: "initial"`, `signature`, `title`,
-`ticket` (or null for an explicitly pending draft), `draft_date`, and IDs for
+The private contract has `schema_version: 1`, `kind` (`reply`, `progress`,
+`blocker` or `closure`), `signature`, `title`, `draft_date`, `approved_subject`,
+`approved_body` (the independently reviewed full wording) and IDs for
 `body_id`, `subject_id`, `header_id`, `badge_id`, `notice_id`. Also supply
-`approved_template`, `approved_template_sha256`, `attachments` (absolute file
-paths to SHA256), and `issue_mappings` (objects with `control_id`, `issue_id`).
-These element IDs identify existing regions; they do not prescribe a new visual
-template. The approved template must be an independently approved reference,
-not a copy of the new draft presented as its own approval.
+`approved_template`, `approved_template_sha256` and optional `attachments`
+(absolute file paths to SHA256). These element IDs identify existing regions; they
+do not prescribe a new visual template. The approved template must be an
+independently approved reference, not a copy of the new draft presented as its
+own approval. The checker compares actual subject/body to the approved values
+(normalizing body whitespace). Unsupported kinds block. An approved body string
+is a review record, not evidence that the facts or approval it describes are true.
 
 Every email contract also records `confidentiality`: the exact private-wrapper
 confidentiality line, or `null` when none is required. When set,
@@ -361,18 +339,9 @@ confidentiality line, or `null` when none is required. When set,
 copyable body, with that exact text and the approved template's styling. The
 line must not appear in the body that is sent. A missing decision blocks.
 
-For `kind` reply, progress, blocker or closure, supply `approved_subject` and
-`approved_body` containing the independently reviewed full wording. The checker
-compares actual subject/body to those values (normalizing body whitespace) and
-applies the same wrapper/style/signature safeguards. It does not force the
-initial email's three sections or attachment paragraph onto concise replies.
-Issue mappings and attachments are checked when declared. Unsupported kinds
-block. An approved body string is a review record, not evidence that the facts
-or approval it describes are true.
 Browser/native review remains necessary for actual colors, layout, visibility,
-clipping and responsiveness. Factual accuracy and whether recommendations fit
-the environment also need evidence-backed review. Keyword checks cannot prove
-every paraphrase compliant. Ticket-pending drafts never imply outreach readiness.
+clipping and responsiveness. Factual accuracy also needs evidence-backed review.
+Keyword checks cannot prove every paraphrase compliant.
 
 Campaign update and closure emails (`"campaign": true` in the contract) are also checked
 for wording: any mention of Rejected findings is flagged; "Resolved" must be

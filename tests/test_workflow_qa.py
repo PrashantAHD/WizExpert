@@ -231,22 +231,19 @@ def test_qa_receipt_never_claims_release_approval(reviewed):
 
 
 def test_requirements_cli_and_invalid_review_exit(capsys, tmp_path):
-    assert main(["workflow-qa", "requirements", "--workflow", "finding", "--phase", "handoff"]) == 0
+    argv = ["workflow-qa", "requirements", "--workflow", "campaign", "--phase", "handoff"]
+    assert main(argv) == 0
     assert (
-        "email-template-and-identifiers" in json.loads(capsys.readouterr().out)["required_checks"]
+        "campaign-closure-criteria" in json.loads(capsys.readouterr().out)["required_checks"]
     )
     with pytest.raises(SystemExit) as exc:
         main(["workflow-qa", "check", "--review", str(tmp_path / "missing.json")])
     assert exc.value.code == 1
 
 
-@pytest.mark.parametrize(
-    "workflow", ["governance", "finding", "setup", "publication", "remediation"]
-)
+@pytest.mark.parametrize("workflow", ["governance", "setup", "publication"])
 def test_broad_profiles_are_explicit_and_evidence_bound(tmp_path, workflow):
     data = review_payload(tmp_path, workflow=workflow)
-    if workflow == "remediation":
-        data["target_stage"] = 5
     path = save(tmp_path / "review.json", data)
     assert validate_review(path, now=NOW)["workflow"] == workflow
     data["rule_coverage"].pop(next(iter(data["rule_coverage"])))
@@ -320,28 +317,7 @@ def test_heading_only_rules_are_included_and_code_examples_are_not(tmp_path):
     assert not any(name.endswith(":Example") for name in inventory)
 
 
-def test_stage_tracker_cannot_certify_unapproved_remediation(tmp_path):
-    from wizexpert.workflow import create_tracker
-    from wizexpert.workflow_qa import validate_remediation
-
-    data = review_payload(tmp_path, phase="generation", workflow="remediation")
-    data["target_stage"] = 6
-    tracker = tmp_path / "tracker.json"
-    create_tracker(
-        tracker,
-        finding_id="synthetic",
-        control_id="rule",
-        scope=data["scope"],
-        summary="Starting",
-        next_action="Collect evidence",
-    )
-    data["tracker"] = str(tracker)
-    data["evidence_sha256"][str(tracker)] = digest(tracker)
-    with pytest.raises(ValueError, match="authorization/verification"):
-        validate_remediation(data, data["evidence_sha256"])
-
-
-def test_complete_finding_review_checks_requested_html_without_forcing_email(tmp_path):
+def test_complete_review_checks_requested_html_without_forcing_email(tmp_path):
     from test_artifact_qa import artifact, native_review
 
     item, evidence = artifact(tmp_path, "html")
@@ -361,7 +337,7 @@ def test_complete_finding_review_checks_requested_html_without_forcing_email(tmp
     checked = save(tmp_path / "manifest.json", manifest(tmp_path))
     previous = None
     for phase, minutes in (("collection", 60), ("generation", 20), ("handoff", 1)):
-        data = review_payload(tmp_path, phase, workflow="finding")
+        data = review_payload(tmp_path, phase, workflow="setup")
         data["reviewer"] = "reviewer"
         data["requested_deliverables"] = [{"id": "html", "kind": "html"}]
         data["reviewed_at"] = (NOW - timedelta(minutes=minutes)).isoformat()
@@ -416,13 +392,13 @@ def chain(tmp_path, first, second, first_changes=None, second_changes=None):
     request = owner_request(tmp_path)
     log = activity(tmp_path)
     checked = save(tmp_path / "manifest.json", manifest(tmp_path))
-    collection = review_payload(tmp_path, workflow="finding")
+    collection = review_payload(tmp_path, workflow="setup")
     collection["requested_deliverables"] = first
     if first_changes is not None:
         collection["owner_changes"] = first_changes
     collection["evidence_sha256"][str(request)] = digest(request)
     collection_path = save(tmp_path / "collection.json", collection)
-    generation = review_payload(tmp_path, "generation", workflow="finding")
+    generation = review_payload(tmp_path, "generation", workflow="setup")
     generation["requested_deliverables"] = second
     if second_changes is not None:
         generation["owner_changes"] = second_changes
@@ -599,6 +575,6 @@ def test_missing_owner_changes_behaves_as_before(tmp_path, reviewed):
 
 def test_requirements_cli_describes_owner_changes(capsys):
     assert (
-        main(["workflow-qa", "requirements", "--workflow", "finding", "--phase", "collection"]) == 0
+        main(["workflow-qa", "requirements", "--workflow", "setup", "--phase", "collection"]) == 0
     )
     assert "owner_changes" in capsys.readouterr().out

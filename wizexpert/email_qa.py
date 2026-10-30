@@ -9,15 +9,9 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 
-HEADINGS = ("Issue Description:", "Issue Details:", "Recommended Remediation Approaches:")
-CLOSING = (
-    "Please review the attached report and confirm the desired remediation approach. "
-    "Let us know if you need any assistance."
-)
 NOTICE = (
-    "Internal preparation note - do not copy into email: Confirm named recipients and the "
-    "Security-owned ServiceNow reference before outreach. Attachment identities must be "
-    "confirmed when sending."
+    "Internal preparation note - do not copy into email: Confirm named recipients before "
+    "outreach. Attachment identities must be confirmed when sending."
 )
 VOID = {
     "area",
@@ -133,14 +127,12 @@ def validate_email(html: Path, contract_path: Path) -> dict:
 
     contract = load(contract_path)
     if contract.get("schema_version") != 1 or contract.get("kind") not in {
-        "initial",
         "reply",
         "progress",
         "blocker",
         "closure",
     }:
         raise ValueError("Unsupported email contract version or message kind.")
-    initial = contract["kind"] == "initial"
     document = Document(html.read_text(encoding="utf-8-sig"))
     errors = list(document.errors)
     regions = {
@@ -157,36 +149,17 @@ def validate_email(html: Path, contract_path: Path) -> dict:
         if any(node is regions[name] for node in body_nodes):
             errors.append(f"{name} must be outside the copyable email body.")
     actual = body.text()
-    headings = [e for e in body_nodes if re.fullmatch(r"h[1-6]", e.tag)]
-    if initial and [(e.tag, e.text()) for e in headings] != [("h3", h) for h in HEADINGS]:
-        errors.append(
-            "Required h3 headings, trailing colons or section order differ from template."
-        )
     if not actual.startswith("Hi Team, "):
         errors.append("Greeting must be Hi Team,.")
     signature = compact(contract["signature"])
     if not signature or not actual.endswith(f"Best Regards, {signature}"):
         errors.append("Approved closing signature is missing or changed.")
-    if initial and (actual.count(CLOSING) != 1 or actual.find(CLOSING) < actual.find(HEADINGS[-1])):
-        errors.append("Required review/assistance closing is missing, repeated or out of order.")
     subject = regions["subject"].text().removeprefix("Subject: ").strip()
-    ticket = contract.get("ticket")
-    expected_ticket = ticket if isinstance(ticket, str) and ticket.strip() else "Pending"
-    if initial and not re.fullmatch(
-        r"Review requested: .+ \| SNOW: " + re.escape(expected_ticket), subject
-    ):
-        errors.append("Subject must use Review requested: ... | SNOW: <reference or Pending>.")
-    if initial and f"SNOW: {expected_ticket}" not in actual:
-        errors.append("Ticket reference must also appear in Issue Details.")
-    if not initial:
-        if (
-            not compact(contract.get("approved_subject", ""))
-            or subject != contract["approved_subject"]
-        ):
-            errors.append("Reply/update subject differs from the reviewed wording.")
-        expected_body = compact(contract.get("approved_body", ""))
-        if not expected_body or actual != expected_body:
-            errors.append("Reply/update body differs from the reviewed wording.")
+    if not compact(contract.get("approved_subject", "")) or subject != contract["approved_subject"]:
+        errors.append("Reply/update subject differs from the reviewed wording.")
+    expected_body = compact(contract.get("approved_body", ""))
+    if not expected_body or actual != expected_body:
+        errors.append("Reply/update body differs from the reviewed wording.")
     if "PRIVATE COMMUNICATION DRAFT" not in regions["header"].text():
         errors.append("Private draft header is missing.")
     if not compact(contract.get("title", "")) or contract["title"] not in regions["header"].text():
@@ -227,34 +200,11 @@ def validate_email(html: Path, contract_path: Path) -> dict:
         )
     for forbidden in (
         r"###",
-        r"staged approach",
-        r"staged plan",
-        r"evidence qualifications and open questions",
-        r"wiz verify and track",
         r"(?:please|you must|you should)\s+(?:refresh|close|track)\s+wiz",
-        r"(?:please|you must|you should)\s+(?:create|provide|raise)\s+"
-        r"(?:a |the )?(?:snow|servicenow)",
     ):
         if re.search(forbidden, actual, re.I):
             errors.append(f"Disallowed stakeholder wording: {forbidden}")
-    mappings = contract.get("issue_mappings", [])
-    if initial and not mappings:
-        errors.append("Reviewed control-to-issue mappings are required.")
-    for mapping in mappings:
-        control, issue = mapping["control_id"], mapping["issue_id"]
-        if control == issue or control not in actual or issue not in actual:
-            errors.append("A reviewed control/issue identifier is missing or conflated.")
-        if not any(
-            control in e.text() and issue in e.text()
-            for e in body_nodes
-            if e.tag in {"tr", "li", "p"}
-        ):
-            errors.append(
-                "Control and issue IDs must be mapped in the same row, item or paragraph."
-            )
     attachments = contract.get("attachments", {})
-    if initial and not attachments:
-        errors.append("The selected report attachment is required for initial outreach.")
     for name, expected_hash in attachments.items():
         path = Path(name)
         if not path.is_absolute() or not path.is_file() or digest(path) != expected_hash:
@@ -325,12 +275,7 @@ def validate_email(html: Path, contract_path: Path) -> dict:
         "contract_sha256": digest(contract_path),
         "manual_checks_required": [
             "Render desktop/mobile and verify actual navy/gold styling, visibility and clipping.",
-            "Review accuracy, practical recommendations, recipients and approval boundaries.",
-            *(
-                ["Security-owned ticket is pending; outreach remains blocked."]
-                if not ticket
-                else []
-            ),
+            "Review accuracy, recipients and approval boundaries.",
         ],
     }
 
