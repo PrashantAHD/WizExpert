@@ -16,7 +16,7 @@ VS Code setup. Confirm that your organization's policies permit access to Wiz
 and local report generation.
 
 MCP (Model Context Protocol) lets the assistant call tools exposed by a connected
-server. It does not itself grant Wiz permissions or authorize remediation.
+server. It does not itself grant Wiz permissions or authorize cloud changes.
 
 ## 2. Connect the approved Wiz MCP server
 
@@ -117,19 +117,12 @@ only; it does not configure MCP or add report-format capabilities to the assista
 
 ### Existing installations
 
-The repository, Python distribution and canonical module are now **WizExpert**,
+The repository, Python distribution and canonical module are **WizExpert**,
 `wizexpert` and `python -m wizexpert`. The installed command is `wizexpert`.
-The old `cloud-remediations` command and `remediation` module imports remain
-compatibility aliases, including the workflow and execution-update entry points.
-Previously generated workbooks and private workflow records remain supported;
-the rename does not rewrite reports, evidence, approvals or Git history.
-New reports without an explicit output path go to
-`%LOCALAPPDATA%\WizExpert\reports`. Existing files under
-`%LOCALAPPDATA%\CloudSecurityRemediations\reports` stay untouched and can still
-be updated using their explicit paths.
+The legacy command and module aliases from before the rename were removed.
 
 For an existing editable installation, remove the old distribution before
-installing the renamed one so the packages do not compete for the legacy aliases:
+installing the current one so the packages do not compete:
 
 ```powershell
 git remote set-url origin https://github.com/PrashantAHD/WizExpert.git

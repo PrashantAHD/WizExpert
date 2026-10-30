@@ -78,7 +78,6 @@ def test_detects_sensitive_shapes(value, category):
         "report.xlsx",
         "tests/fixture.csv",
         "tests/fixture.json",
-        "remediation/private.db",
         "wizexpert/private.db",
         "logs/run.log",
         ".env",
@@ -90,8 +89,7 @@ def test_detects_sensitive_shapes(value, category):
         "docs/line\nbreak.md",
         ".github/workflows/nested/check.yml",
         ".github/instructions/other.instructions.md",
-        ".github/instructions/nested/production-workflow.instructions.md",
-        ".github/instructions/production-workflow.instructions.md.csv",
+        ".github/instructions/any.instructions.md",
         "data/customer.txt",
         "docs/assets/logo.png",
         "docs/assets/diagram.svgz",
@@ -108,15 +106,13 @@ def test_disallows_non_source_files(name):
         "LICENSE",
         "pyproject.toml",
         ".gitignore",
-        "remediation/app.py",
-        "wizexpert/csv_report.py",
-        "remediation/templates/index.html",
-        "remediation/static/app.js",
+        "wizexpert/app.py",
+        "wizexpert/templates/index.html",
+        "wizexpert/static/app.js",
         "tests/test_public_check.py",
         "scripts/verify.ps1",
         ".githooks/pre-push",
         ".github/workflows/checks.yml",
-        ".github/instructions/production-workflow.instructions.md",
         "docs/PUBLICATION.md",
         "docs/assets/logo.svg",
     ],
@@ -125,11 +121,22 @@ def test_allows_source_files(name):
     assert public_check.path_issues(name) == []
 
 
+def test_retired_layout_is_allowed_only_for_history():
+    retired = (
+        "remediation/workflow.py",
+        ".github/instructions/production-workflow.instructions.md",
+    )
+    for name in retired:
+        assert public_check.path_issues(name)
+        assert public_check.path_issues(name, historical=True) == []
+    assert public_check.path_issues("remediation/data.csv", historical=True)
+
+
 def test_checks_content_separately_from_extension_references():
     source = b'EXTENSIONS = {".xlsx", ".csv", ".db", ".env"}\n'
     assert public_check.content_issues(source) == []
-    assert public_check.path_issues("remediation/formats.py") == []
-    assert public_check.path_issues("remediation/formats.csv")
+    assert public_check.path_issues("wizexpert/formats.py") == []
+    assert public_check.path_issues("wizexpert/formats.csv")
 
 
 def test_rejects_binary_invalid_utf8_and_large_files():
