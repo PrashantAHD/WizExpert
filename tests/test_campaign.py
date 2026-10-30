@@ -559,15 +559,12 @@ def progress_email(email, body, kind="progress", campaign=True):  # noqa: F811
         kind=kind,
         approved_subject="Reviewed update",
         approved_body=body,
-        issue_mappings=[],
         attachments={},
     )
     if campaign:
         payload["campaign"] = True
     contract.write_text(json.dumps(payload), encoding="utf-8")
-    content = target.read_text().replace(
-        "Review requested: Synthetic finding | SNOW: INC123", "Reviewed update"
-    )
+    content = target.read_text()
     content = re.sub(
         r'<section id="email-body">.*?</section>',
         f'<section id="email-body"><p>{body}</p></section>',
@@ -660,7 +657,7 @@ def test_campaign_review_requires_block_bound_to_assemble_manifest(tmp_path):
     claims = {"staging_dirs": ["x"], "complete": True, "auth_ok": True}
     assert flags_for(tmp_path, claims)["status"] == "flagged"
     # Non-campaign workflows only check the block when one is supplied.
-    assert collection_check(write_log(tmp_path), qa_manifest(), "finding")["status"] == "pass"
+    assert collection_check(write_log(tmp_path), qa_manifest(), "setup")["status"] == "pass"
     wrong_hash = {**block, "assemble_manifest_sha256": "0" * 64}
     assert flags_for(tmp_path, wrong_hash)["status"] == "flagged"
 
@@ -710,7 +707,7 @@ def test_campaign_checks_have_no_fixed_window_and_cover_auth_and_partial_packs()
 
 
 def test_campaign_module_is_in_every_rule_hash():
-    for workflow in ("governance", "campaign", "finding"):
+    for workflow in ("governance", "campaign", "setup"):
         assert "wizexpert/campaign.py" in rule_hashes(workflow)
 
 

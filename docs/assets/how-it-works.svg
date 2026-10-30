@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
   <title id="title">How WizExpert works</title>
-  <desc id="desc">A looping diagram: collect Wiz evidence, draft a report, wait for a person to approve, then remediate and verify. Nothing is sent or changed without approval.</desc>
+  <desc id="desc">A looping diagram: collect Wiz evidence, draft a report, wait for a person to approve, then verify. Nothing is sent or changed without approval.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="960" y2="420" gradientUnits="userSpaceOnUse">
       <stop stop-color="#0B1220"/>
@@ -69,7 +69,7 @@
   <text x="480" y="248" text-anchor="middle" fill="#FDE68A" font-family="Segoe UI, Arial, sans-serif" font-size="15" opacity="0">2. WizExpert drafts Excel and email. A person approves and sends.
     <animate attributeName="opacity" values="0;0;1;1;0;0;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
   </text>
-  <text x="480" y="248" text-anchor="middle" fill="#86EFAC" font-family="Segoe UI, Arial, sans-serif" font-size="15" opacity="0">3. After change auth, remediate — close only if fresh evidence matches.
+  <text x="480" y="248" text-anchor="middle" fill="#86EFAC" font-family="Segoe UI, Arial, sans-serif" font-size="15" opacity="0">3. Verify — close only if fresh evidence matches.
     <animate attributeName="opacity" values="0;0;0;0;1;1;0" keyTimes="0;0.28;0.33;0.62;0.67;0.95;1" dur="12s" repeatCount="indefinite"/>
   </text>
 
@@ -86,7 +86,7 @@
     </g>
     <g transform="translate(632,292)">
       <rect width="280" height="92" rx="14" fill="url(#card)" stroke="#14B8A6" stroke-width="1.5"/>
-      <text x="20" y="36" fill="#99F6E4" font-size="12">REMEDIATE</text>
+      <text x="20" y="36" fill="#99F6E4" font-size="12">VERIFY</text>
       <text x="20" y="64" fill="#F8FAFC" font-size="16" font-weight="700">verify, then close</text>
     </g>
   </g>

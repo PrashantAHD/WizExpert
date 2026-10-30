@@ -405,7 +405,7 @@ def validate_deliverables(review: dict, evidence: dict) -> list:
         require(
             item["kind"] == expected[item["id"]], "Deliverable kind differs from approved scope."
         )
-    if review["workflow"] in {"governance", "finding", "campaign", "remediation"}:
+    if review["workflow"] in {"governance", "campaign"}:
         require(
             bool(artifacts), "This workflow cannot claim completion without actual deliverables."
         )

@@ -1,4 +1,4 @@
-"""WizExpert: local cloud security reporting and remediation support."""
+"""WizExpert: local cloud security reporting, QA and governance support."""
 
 import os
 

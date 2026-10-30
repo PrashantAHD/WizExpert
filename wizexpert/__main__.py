@@ -1,10 +1,16 @@
-"""Expose the CSV reporting command without a web server."""
+﻿"""Command-line entry point: QA checks, PHP2Shell campaign and governance reporting."""
 
 import sys
 from collections.abc import Sequence
 
-from wizexpert.csv_report import main as report_main
-
+USAGE = (
+    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance} [options]\n\n"
+    "  workflow-qa  validate evidence-bound workflow QA reviews\n"
+    "  email-qa     check an email draft against its reviewed contract\n"
+    "  campaign     PHP2Shell campaign reporting\n"
+    "  governance   monthly governance reporting (needs the governance extra)\n\n"
+    "The Risk Issues (wiz-issue-rule-id) workflow is being rebuilt.\n"
+)
 GOVERNANCE_COMMANDS = {
     "setup": "wizexpert.governance.profile",
     "workbook": "wizexpert.governance.wiz_report",
@@ -60,29 +66,28 @@ def governance_main(arguments: list[str]) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] == "workflow-qa":
+    command = arguments[0] if arguments else None
+    if command == "workflow-qa":
         from wizexpert.workflow_qa import main as qa_main
 
         return qa_main(arguments[1:])
-    if arguments and arguments[0] == "email-qa":
+    if command == "email-qa":
         from wizexpert.email_qa import main as email_qa_main
 
         return email_qa_main(arguments[1:])
-    if arguments and arguments[0] == "governance":
-        return governance_main(arguments[1:])
-    if arguments and arguments[0] == "workflow":
-        from wizexpert.workflow import main as workflow_main
+    if command == "follow-up-email":
+        from wizexpert.follow_up_email import main as follow_up_main
 
-        return workflow_main(arguments[1:])
-    if arguments and arguments[0] == "campaign":
+        return follow_up_main(arguments[1:])
+    if command == "governance":
+        return governance_main(arguments[1:])
+    if command == "campaign":
         from wizexpert.campaign import main as campaign_main
 
         return campaign_main(arguments[1:])
-    if arguments and arguments[0] == "update-remediation":
-        from wizexpert.execution_update import main as update_main
-
-        return update_main(arguments[1:])
-    return report_main(arguments)
+    known_help = command is None or command in {"-h", "--help"}
+    print(USAGE, file=sys.stdout if known_help else sys.stderr, end="")
+    return 0 if known_help else 2
 
 
 if __name__ == "__main__":

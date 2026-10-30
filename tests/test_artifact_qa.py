@@ -115,7 +115,7 @@ def native_review(tmp_path, item, evidence):
 
 def handoff(items):
     return {
-        "workflow": "finding",
+        "workflow": "governance",
         "phase": "handoff",
         "reviewer": "reviewer",
         "started_at": "2026-10-27T07:00:00Z",
