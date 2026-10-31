@@ -39,6 +39,9 @@ wizexpert = "wizexpert.__main__:main"
 [tool.setuptools.packages.find]
 include = ["wizexpert*"]
 
+[tool.setuptools.package-data]
+"wizexpert.console" = ["static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

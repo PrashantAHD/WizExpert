@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="__CSRF_TOKEN__">
+<title>WizExpert Workflow Console</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <h1>WizExpert Workflow Console</h1>
+  <div id="wiz-status" class="wiz"></div>
+</header>
+<main>
+  <p class="notice">Local only (127.0.0.1). Read-only Wiz access. Email is never sent and nothing in Wiz, ticketing or cloud is changed. Outputs are saved under your private deliverables folder and are complete only after a named reviewer approves.</p>
+  <section id="banner" class="banner" hidden></section>
+  <section id="picker"></section>
+  <section id="start" hidden></section>
+  <section id="run" hidden></section>
+  <section id="history"></section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
