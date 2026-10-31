@@ -63,9 +63,10 @@ The console is an MCP client for the remote Wiz MCP server (`--wiz-url`, default
   called; `execute` accepts only read-verb tools (`get_*`, `list_*`, `search_*`, plus
   `execute_graph_query` and `graph_search`), refuses any tool name containing a write verb
   and any argument containing a GraphQL `mutation`.
-- An adapter may set an observation window (the daily collection uses 30 minutes; override
-  with `--observation-window-minutes`, `0` disables). When it runs out, the run is blocked
-  and evidence from different runs is never stitched.
+- The console adds no rules of its own: it runs the enforced workflow. Collection has no
+  elapsed-time limit unless an adapter's enforced workflow defines one
+  (`--observation-window-minutes` overrides; `0` disables). If a window applies and runs
+  out, the run is blocked and evidence from different runs is never stitched.
 
 ## Safety properties
 
