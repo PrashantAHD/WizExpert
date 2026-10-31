@@ -4,7 +4,7 @@
 
 **Evidence-led Wiz investigation and client reporting.**
 
-Analyze. Report. Validate. Coordinate.
+Analyze. Communicate. Remediate. Validate. Update.
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![Wiz MCP](https://img.shields.io/badge/Wiz-MCP%20read--only-1D4ED8)
@@ -12,9 +12,9 @@ Analyze. Report. Validate. Coordinate.
 ![Tests](https://img.shields.io/badge/tests-pytest-2EA44F)
 ![License](https://img.shields.io/badge/license-MIT-yellow)
 
-<img src="docs/assets/how-it-works.svg" alt="Animated diagram: collect Wiz evidence, wait for a person to send the report, then verify" width="920">
+<img src="docs/assets/how-it-works.svg" alt="Risk Issues workflow: every stage goes out from WizExpert and back. After approval, remediate then validate then update, or risk acceptance skips to update." width="920">
 
-<sub>Open the SVG in a browser if GitHub shows a still frame. It loops: collect → human send → verify.</sub>
+<sub>Risk Issues. Open in a browser if GitHub shows a still frame. WizExpert is the hub — the ball returns after every stage. Pass A: remediate → validate → update. Pass B: risk acceptance → update.</sub>
 
 </div>
 
@@ -31,11 +31,17 @@ local tools turn that into reviewed reports.
 > [!NOTE]
 > The Risk Issues (wiz-issue-rule-id) workflow is being rebuilt.
 
-## The idea in three beats
+## Risk Issues, in beats
+
+Every stage goes out from **WizExpert** and back. The tool is the hub, not a one-way pipeline.
 
 1. **Collect.** Read-only MCP queries and gaps.
-2. **Draft.** Excel, email and progress notes — in a **private folder outside this repo**.
-3. **You send.** A person approves and sends the package outside the tool. Close only when **fresh Wiz evidence** meets the closure criteria.
+2. **Draft.** Analysis, spreadsheet and email — in a **private folder outside this repo**.
+3. **Communicate.** A person sends the package. The tool never sends.
+4. **Approval.** Receive the response. Then either remediate, or **risk acceptance** skips to update.
+5. **Remediate.** Coordinate the fix. The tool does not change cloud. Skipped on risk acceptance.
+6. **Validate.** Fresh Wiz evidence. Skipped on risk acceptance.
+7. **Update.** Refresh the reports / draft. This is always last.
 
 ## What you get
 
@@ -59,6 +65,16 @@ generation logic is not used.
 | **Risk Issues** | Internal Analysis; Client Assessment; Stakeholder Email; Detailed Report; Internal Follow-up Email; Updated Detailed Report |
 | **Daily Progress Reporting** | Daily Progress Report; Day-to-Day Movements; VM/CVE Details; Stakeholder Reply Email |
 | **Monthly Governance Reporting** | Monthly Governance Workbook; Monthly Governance Slide Deck; Executive Dashboard |
+
+Each category has its own loop. Open the SVG in a browser if GitHub shows a still frame.
+
+<img src="docs/assets/workflow-daily-progress.svg" alt="Daily Progress: WizExpert hub, collect draft communicate, still open next day or close and update" width="920">
+
+<sub>Daily Progress Reporting. Still open → collect again. Gate met → update and close.</sub>
+
+<img src="docs/assets/workflow-monthly-governance.svg" alt="Monthly Governance: WizExpert hub, cutoff, collect, draft, handoff, retain history" width="920">
+
+<sub>Monthly Governance Reporting. Cutoff → collect → draft → handoff → retain history → next month.</sub>
 
 The execution sequence is:
 **category selection → fixed deliverable slots → deliverable builder →
