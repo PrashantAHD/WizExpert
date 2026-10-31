@@ -4,11 +4,13 @@ import sys
 from collections.abc import Sequence
 
 USAGE = (
-    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance} [options]\n\n"
+    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance,console} "
+    "[options]\n\n"
     "  workflow-qa  validate evidence-bound workflow QA reviews\n"
     "  email-qa     check an email draft against its reviewed contract\n"
     "  campaign     PHP2Shell campaign reporting\n"
-    "  governance   monthly governance reporting (needs the governance extra)\n\n"
+    "  governance   monthly governance reporting (needs the governance extra)\n"
+    "  console      local click-driven workflow console (127.0.0.1; see docs/CONSOLE.md)\n\n"
     "The Risk Issues (wiz-issue-rule-id) workflow is being rebuilt.\n"
 )
 GOVERNANCE_COMMANDS = {
@@ -85,6 +87,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from wizexpert.campaign import main as campaign_main
 
         return campaign_main(arguments[1:])
+    if command == "console":
+        from wizexpert.console.server import main as console_main
+
+        return console_main(arguments[1:])
     known_help = command is None or command in {"-h", "--help"}
     print(USAGE, file=sys.stdout if known_help else sys.stderr, end="")
     return 0 if known_help else 2
