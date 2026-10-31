@@ -93,3 +93,27 @@ any builder runs and the run cannot complete. The public repository exposes
 the category contract and generic pipeline tests only; it holds no templates,
 private hashes or client data. Direct low-level governance commands remain
 separate from this private category orchestration layer.
+
+## Public structural templates
+
+`wizexpert/governance/monthly_templates.py` provides public, placeholder-only
+structural templates for the three Monthly Governance Reporting slots
+(`monthly-governance-workbook`, `monthly-governance-slide-deck`,
+`executive-dashboard`). The schema is generic: six placeholder workbook tabs of
+eight columns with `{{name}}` scalars, repeat rows (`{{.colN}}` plus a
+`<!-- repeat:tab_k_rows -->` marker) and empty-state messages; a ten-slide
+operational deck and a three-slide executive dashboard, each slide with title,
+two fields and a `{{footer_text}}` footer. `schema()` returns the contract,
+including severities (operational Critical/High/Medium/Low, executive
+Critical/High).
+
+`BUILDERS` / `build_all(out_dir)` generate the files on demand into a
+caller-chosen directory, and `VALIDATORS` / `validate_all(paths)` return a list
+of problems (empty means valid): exact structure, required placeholders, only
+placeholder text, no pictures, generic creator metadata, and privacy checks
+(account-like numbers, CVE ids, case ids, emails, private paths, URLs, restricted
+names). Generated `.xlsx`/`.pptx` outputs are gitignored and must never be kept
+in the repository tree.
+
+These builders are structure-only and are not the production binding. Private
+templates, the private binding layer and pinned hashes remain private.
