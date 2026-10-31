@@ -15,6 +15,25 @@ def test_slot_counts():
     assert len(cat.DAILY_PROGRESS.slots) == 4
 
 
+def test_monthly_governance_category():
+    c = cat.MONTHLY_GOVERNANCE
+    assert cat.CATEGORIES["monthly-governance-reporting"] is c
+    assert [s.slot_id for s in c.slots] == [
+        "monthly-governance-workbook", "monthly-governance-slide-deck", "executive-dashboard",
+    ]
+    assert c.version == 2
+    assert c.gates == ("collection", "generation", "handoff")
+    text = " ".join(c.manifest()["category_rules"]).lower()
+    for term in ("prior snapshot", "amend", "comparison source", "baseline", "cutoff",
+                 "four severities", "critical and high", "six approved tabs",
+                 "three-slide", "ten-slide", "accepted-risk", "attribution",
+                 "no-send", "read-only", "gates", "retained history",
+                 "offloading", "historical data loss"):
+        assert term in text, term
+    assert "category_rules" not in cat.RISK_ISSUES.manifest()
+    assert "category_rules" not in cat.DAILY_PROGRESS.manifest()
+
+
 def test_manifest_is_placeholder_only_and_stable():
     for category in cat.CATEGORIES.values():
         text = str(category.manifest())
