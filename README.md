@@ -126,6 +126,17 @@ wizexpert governance monthly --month 2026-10 --input <csv...> `
 
 Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated verification does not replace release review.
 
+## Workflow console (click-driven, local)
+
+```powershell
+wizexpert console --private-root <private workspace>   # opens http://127.0.0.1:8765/
+```
+
+Pick a category, enter the issue ID or reporting month, sign in to Wiz in your own
+browser, and the console runs the enforced category workflow (read-only collection,
+post-collection check, validation) and stops at **awaiting reviewer approval**. Private
+adapters supply the client-specific wiring. See [docs/CONSOLE.md](docs/CONSOLE.md).
+
 ## Guardrails worth knowing
 
 - Client names, evidence and reports **never live in this repository**.
@@ -142,6 +153,7 @@ Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated ver
 | [Workflow QA](docs/WORKFLOW-QA.md) | Evidence-bound QA reviews |
 | [Campaigns](docs/CAMPAIGNS.md) | Repeated fixed-scope collection |
 | [Governance](docs/GOVERNANCE.md) | Profiles, workbook, dashboard, deck |
+| [Workflow console](docs/CONSOLE.md) | Local click-driven runs, Wiz MCP sign-in, review gate |
 | [Publication](docs/PUBLICATION.md) | Verification and pre-push checks |
 
 ## License
