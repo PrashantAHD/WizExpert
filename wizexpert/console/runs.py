@@ -1,306 +1,231 @@
-"""Run orchestration: collect -> collection check -> narrative -> generate -> validate -> review.
+"""Runs: a start request becomes a new VS Code agent-mode chat; the page only watches it.
 
-A run is marked complete only after (1) the post-collection check passed from the real
-activity log, (2) every bound validator passed on the real files, and (3) a named human
-reviewer clicked Approve. The console never self-certifies review: the reviewer name and
-UTC time come from the Approve request and are written to the run's private record.
+The console owns no workflow rules. ``start`` types one validated prompt into a new chat of the
+configured agent (through the helper extension) and then follows the real session's event log.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import re
 import secrets
 import shutil
+import subprocess  # nosec B404
 import threading
-import traceback
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from wizexpert.governance.categories import CATEGORIES
-from wizexpert.governance.category_pipeline import PipelineError, run_category_pipeline
-from wizexpert.workflow_qa import collection_check
-
-from .adapters import AdapterError, CategoryAdapter, Field, coerce_fields
-from .context import (
-    ActivityLog,
-    CollectionAborted,
-    ReconnectRequired,
-    RunContext,
-    WindowExceeded,
-    iso,
-    utc_now,
+from . import categories
+from .bridge import Bridge
+from .categories import InputError
+from .config import ConsoleConfig
+from .sessions import (
+    SessionFinder,
+    SessionView,
+    collect_files,
+    confine,
+    is_denied,
+    short,
 )
-from .policy import ReadOnlyViolation
 
-RUNS_DIR = "_console-runs"
-TERMINAL = {"complete", "failed", "blocked", "cancelled", "rejected", "reconnect_required"}
-ACTIVE = {"collecting", "generating", "finalizing"}
-PLACEHOLDER_NAMES = {
-    "console", "system", "auto", "automatic", "wizexpert", "copilot", "ai", "bot", "admin",
-    "reviewer", "n/a", "na", "none", "unknown", "approved", "user",
-}  # fmt: skip
-NAME_PATTERN = re.compile(r"[^\W\d_][\w .,'\-]{1,78}")
-MAX_LOG_LINES = 5000
+ATTEMPT_SECONDS = 30.0
+FILES_REFRESH = 6.0
+MAX_RUNS = 50
 
 
 class RunError(Exception):
-    """A request the run manager refuses (bad state, bad input); message is safe to show."""
+    """A request the manager refuses (message is safe to show)."""
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def confine(path: Path, root: Path) -> Path:
-    """Resolve ``path`` and require it to stay inside ``root`` (no traversal, no escapes)."""
-    resolved = Path(path).resolve()
-    root = Path(root).resolve()
-    if resolved != root and root not in resolved.parents:
-        raise RunError("A path escaped the private deliverables root.")
-    return resolved
-
-
-def validate_reviewer(name: Any) -> str:
-    if not isinstance(name, str):
-        raise RunError("Enter the reviewer's name.")
-    cleaned = " ".join(name.split())
-    if not NAME_PATTERN.fullmatch(cleaned) or cleaned.lower() in PLACEHOLDER_NAMES:
-        raise RunError("Enter the name of the human reviewer (a real name, not a placeholder).")
-    return cleaned
-
-
+@dataclass
 class Run:
-    def __init__(
-        self,
-        run_id: str,
-        adapter: CategoryAdapter,
-        inputs: dict[str, Any],
-        dry_run: bool,
-        run_dir: Path,
-        output_dir: Path,
-        preparer: str,
-    ) -> None:
-        self.id = run_id
-        self.adapter = adapter
-        self.category_id = adapter.category_id
-        self.inputs = inputs
-        self.dry_run = dry_run
-        self.run_dir = run_dir
-        self.output_dir = output_dir
-        self.preparer = preparer
-        self.status = "created"
-        self.message = ""
-        self.created_at = iso(utc_now())
-        self.lock = threading.RLock()
-        self.cancel_event = threading.Event()
-        self.log: list[str] = []
-        self.timeline: list[dict[str, str]] = []
-        self.ctx: RunContext | None = None
-        self.form: dict[str, Any] | None = None
-        self.field_specs: list[Field] = []
-        self.field_values: dict[str, Any] = {}
-        self.collection: dict[str, Any] = {}
-        self.problems: list[str] = []
-        self.outputs: dict[str, Path] = {}
-        self.output_hashes: dict[str, str] = {}
-        self.validation: dict[str, Any] = {}
-        self.approval: dict[str, Any] | None = None
-        self.archived: list[str] = []
-        self.moved: list[tuple[Path, Path]] = []
-        self.pipeline: dict[str, Any] = {}
-
-    # -- recording ------------------------------------------------------------------------
-    def say(self, text: str) -> None:
-        with self.lock:
-            self.log.append(f"{iso(utc_now())} {text}")
-            if len(self.log) > MAX_LOG_LINES:
-                del self.log[: len(self.log) - MAX_LOG_LINES]
-        try:
-            with (self.run_dir / "run.log").open("a", encoding="utf-8") as stream:
-                stream.write(f"{iso(utc_now())} {text}\n")
-        except OSError:
-            pass
-
-    def set_status(self, status: str, message: str = "") -> None:
-        with self.lock:
-            self.status = status
-            self.message = message
-            self.timeline.append({"at": iso(utc_now()), "status": status, "message": message})
-        self.say(f"[{status}] {message}" if message else f"[{status}]")
-        self.persist()
-
-    def record(self) -> dict[str, Any]:
-        with self.lock:
-            return {
-                "schema_version": 1,
-                "run_id": self.id,
-                "category_id": self.category_id,
-                "category_version": CATEGORIES[self.category_id].version,
-                "dry_run": self.dry_run,
-                "inputs": self.inputs,
-                "preparer": self.preparer,
-                "status": self.status,
-                "message": self.message,
-                "created_at": self.created_at,
-                "output_dir": str(self.output_dir),
-                "timeline": list(self.timeline),
-                "collection": self.collection,
-                "evidence_sha256": dict(self.ctx.evidence_hashes) if self.ctx else {},
-                "field_values": self.field_values,
-                "problems": list(self.problems),
-                "archived_previous": list(self.archived),
-                "outputs": {
-                    slot: {"path": str(path), "sha256": self.output_hashes.get(slot, "")}
-                    for slot, path in self.outputs.items()
-                },
-                "validation": self.validation,
-                "approval": self.approval,
-                "pipeline": self.pipeline,
-                "notes": [
-                    "workflow_qa is derived only from the recorded collection-check result and "
-                    "the validators run on the actual files.",
-                    "The evidence-bound `workflow-qa check` handoff review is a separate gate "
-                    "this console does not perform or fabricate.",
-                    "No email was sent; no Wiz, ticketing or cloud change was made.",
-                ],
-            }
-
-    def persist(self) -> None:
-        target = self.run_dir / "run.json"
-        temp = self.run_dir / "run.json.tmp"
-        try:
-            temp.write_text(json.dumps(self.record(), indent=2, default=str), encoding="utf-8")
-            os.replace(temp, target)
-        except OSError:
-            pass
-
-    def view(self, since: int = 0) -> dict[str, Any]:
-        with self.lock:
-            data: dict[str, Any] = {
-                "id": self.id,
-                "category_id": self.category_id,
-                "title": self.adapter.title,
-                "status": self.status,
-                "message": self.message,
-                "dry_run": self.dry_run,
-                "created_at": self.created_at,
-                "inputs": self.inputs,
-                "output_dir": str(self.output_dir),
-                "log": self.log[since:],
-                "log_next": len(self.log),
-                "problems": list(self.problems),
-                "collection": self.collection,
-                "outputs": {
-                    slot: {"name": path.name, "sha256": self.output_hashes.get(slot, "")}
-                    for slot, path in self.outputs.items()
-                },
-                "approval": self.approval,
-                "validation": self.validation,
-                "archived_previous": list(self.archived),
-            }
-            if self.status == "awaiting_input" and self.form is not None:
-                data["form"] = self.form
-                data["field_values"] = self.field_values
-            return data
+    id: str
+    category_id: str
+    values: dict[str, str]
+    prompt: str
+    created: float
+    status: str = "starting"
+    message: str = ""
+    session_id: str = ""
+    ahp_id: str = ""
+    attempts: list[str] = field(default_factory=list)
+    view: SessionView | None = None
+    files: list[dict[str, Any]] = field(default_factory=list)
+    files_at: float = 0.0
+    files_n: int = -1
+    lock: threading.RLock = field(default_factory=threading.RLock)
 
 
 class RunManager:
-    """Owns runs, enforces the state machine and the review gate."""
-
     def __init__(
         self,
-        adapters: Mapping[str, CategoryAdapter],
-        deliverables_root: Path,
-        client: Any | None,
+        config: ConsoleConfig,
+        bridge: Bridge,
         *,
-        window_override_seconds: int | None = None,
-        retry_delay: float = 1.0,
+        finder: SessionFinder | None = None,
         run_async: bool = True,
-        connected: Callable[[], bool] | None = None,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+        cli: Callable[[list[str]], int] | None = None,
     ) -> None:
-        self.adapters = dict(adapters)
-        self.root = Path(deliverables_root).resolve()
-        self.client = client
-        self.window_override = window_override_seconds
-        self._retry_delay = retry_delay
-        self._run_async = run_async
-        self._connected = connected or (lambda: bool(getattr(client, "connected", False)))
+        self.config = config
+        self.bridge = bridge
+        self.finder = finder or SessionFinder(config)
+        self._async = run_async
+        self._clock = clock
+        self._sleep = sleep
+        self._cli = cli or _run_cli
         self._runs: dict[str, Run] = {}
         self._lock = threading.Lock()
+        self._load()
 
-    # -- creation ---------------------------------------------------------------------------
+    # -- persistence (prompt and ids only) ---
+    @property
+    def _index(self) -> Path:
+        return self.config.state_dir / "runs.json"
+
+    def _load(self) -> None:
+        try:
+            for item in json.loads(self._index.read_text(encoding="utf-8")):
+                run = Run(
+                    item["id"],
+                    item["category_id"],
+                    item.get("values", {}),
+                    item["prompt"],
+                    float(item["created"]),
+                    item.get("status", "running"),
+                    item.get("message", ""),
+                    item.get("session_id", ""),
+                    item.get("ahp_id", ""),
+                )
+                if run.status == "starting":
+                    run.status, run.message = (
+                        "not_started",
+                        "The console stopped before this run started.",
+                    )
+                self._runs[run.id] = run
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+    def _save(self) -> None:
+        items = sorted(self._runs.values(), key=lambda r: r.created)[-MAX_RUNS:]
+        data = [
+            {
+                "id": r.id,
+                "category_id": r.category_id,
+                "values": r.values,
+                "prompt": r.prompt,
+                "created": r.created,
+                "status": r.status,
+                "message": r.message,
+                "session_id": r.session_id,
+                "ahp_id": r.ahp_id,
+            }
+            for r in items
+        ]
+        try:
+            self.config.state_dir.mkdir(parents=True, exist_ok=True)
+            self._index.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
+
+    # -- start ---
     def categories(self) -> list[dict[str, Any]]:
-        out = []
-        for adapter in self.adapters.values():
-            category = CATEGORIES[adapter.category_id]
-            out.append(
-                {
-                    "id": adapter.category_id,
-                    "title": adapter.title,
-                    "description": adapter.description,
-                    "version": category.version,
-                    "slots": [{"id": s.slot_id, "title": s.title} for s in category.slots],
-                    "fields": [f.to_json() for f in adapter.start_fields()],
-                    "dry_run": adapter.supports_dry_run(),
-                }
-            )
-        return out
+        return [c.to_json() for c in categories.CATEGORIES.values()]
 
-    def create(
-        self,
-        category_id: str,
-        raw_inputs: Mapping[str, Any],
-        *,
-        dry_run: bool = False,
-        preparer: str = "",
-    ) -> Run:
-        adapter = self.adapters.get(category_id)
-        if adapter is None:
-            raise RunError("Unknown category.")
-        if dry_run and not adapter.supports_dry_run():
-            raise RunError("This category has no offline dry run.")
-        if not dry_run and not self._connected():
-            raise RunError("Connect Wiz first (reconnect Wiz).")
+    def helper_state(self) -> dict[str, Any]:
+        workspace = str(self.config.resolved_workspace())
+        return {
+            "connected": self.bridge.helper_connected(workspace),
+            "any": self.bridge.helper_connected(None),
+            "workspace": Path(workspace).name,
+            "agent": self.config.agent,
+        }
+
+    def start(self, category_id: str, raw: dict[str, Any]) -> Run:
+        try:
+            values = categories.validate(category_id, raw)
+            prompt = categories.build_prompt(category_id, values, self.config.prompts)
+        except InputError as error:
+            raise RunError(str(error)) from None
         with self._lock:
-            if any(
-                run.status in ACTIVE or run.status in {"awaiting_input", "awaiting_review"}
-                for run in self._runs.values()
+            if any(r.status == "starting" for r in self._runs.values()):
+                raise RunError("Another run is still starting; wait for it to appear first.")
+            if not self.bridge.helper_connected(str(self.config.resolved_workspace())) and (
+                not self.config.allow_cli_fallback
             ):
-                raise RunError("Finish or cancel the current run before starting another.")
-        try:
-            inputs = adapter.validate_inputs(coerce_fields(adapter.start_fields(), raw_inputs))
-        except AdapterError as error:
-            raise RunError(str(error)) from None
-        run_id = utc_now().strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
-        run_dir = confine(self.root / RUNS_DIR / run_id, self.root)
-        run_dir.mkdir(parents=True, exist_ok=False)
-        try:
-            output_dir = (
-                run_dir / "out" if dry_run else confine(adapter.output_dir(inputs), self.root)
+                raise RunError(
+                    "The VS Code helper is not connected for this workspace. Install it "
+                    "(wizexpert console install-helper), reload the VS Code window with the "
+                    "workspace open, and try again."
+                )
+            run_id = (
+                time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock()))
+                + "-"
+                + secrets.token_hex(3)
             )
-        except AdapterError as error:
-            raise RunError(str(error)) from None
-        run = Run(run_id, adapter, inputs, dry_run, run_dir, output_dir, preparer.strip()[:80])
-        with self._lock:
+            run = Run(run_id, category_id, values, prompt, self._clock())
             self._runs[run_id] = run
-        run.set_status("created", "Run created.")
-        self._start(self._collect, run)
+            self._save()
+        if self._async:
+            threading.Thread(target=self._launch, args=(run,), daemon=True).start()
+        else:
+            self._launch(run)
         return run
 
-    def _start(self, target: Callable[[Run], None], run: Run) -> None:
-        if self._run_async:
-            threading.Thread(target=target, args=(run,), daemon=True).start()
-        else:
-            target(run)
+    def _claimed(self) -> set[str]:
+        return {r.session_id for r in self._runs.values() if r.session_id}
 
+    def _launch(self, run: Run) -> None:
+        workspace = str(self.config.resolved_workspace())
+        job = {
+            "kind": "start_chat",
+            "workspace": workspace,
+            "agent": self.config.agent,
+            "prompt": run.prompt,
+            "newChatWait": self.config.new_chat_wait_ms,
+        }
+        try:
+            if self.bridge.helper_connected(workspace):
+                # One helper attempt only: a second "start" could create a duplicate chat (and run).
+                result = self.bridge.wait_result(self.bridge.post_job(job), 40.0)
+                run.attempts.append("helper: " + _result_text(result))
+                if self._await_session(run, ATTEMPT_SECONDS):
+                    return
+            if self.config.allow_cli_fallback:
+                run.attempts.append("code chat fallback")
+                command = shutil.which(self.config.code_command) or self.config.code_command
+                code = self._cli([command, "chat", "-m", self.config.agent, "-r", run.prompt])
+                if code == 0 and self._await_session(run, self.config.start_timeout):
+                    return
+            with run.lock:
+                run.status = "not_started"
+                run.message = (
+                    "VS Code did not start the chat. Check that the workspace window has the "
+                    "helper "
+                    "active (reload the window after installing it). Attempts: "
+                    + "; ".join(run.attempts)
+                )
+        finally:
+            self._save()
+
+    def _await_session(self, run: Run, seconds: float) -> bool:
+        end = self._clock() + seconds
+        while True:
+            sid = self.finder.find(run.prompt, run.created, self._claimed())
+            if sid:
+                with run.lock:
+                    run.session_id, run.status, run.message = sid, "running", ""
+                    run.view = SessionView(self.config.session_state / sid / "events.jsonl")
+                self._save()
+                return True
+            if self._clock() >= end:
+                return False
+            self._sleep(1.0)
+
+    # -- watching ---
     def get(self, run_id: str) -> Run:
         with self._lock:
             run = self._runs.get(run_id)
@@ -308,354 +233,191 @@ class RunManager:
             raise RunError("Unknown run.")
         return run
 
-    def history(self, limit: int = 30) -> list[dict[str, Any]]:
-        """Recent runs: live ones plus records left by earlier sessions (read-only)."""
-        seen: dict[str, dict[str, Any]] = {}
-        base = self.root / RUNS_DIR
-        if base.is_dir():
-            for record in sorted(base.glob("*/run.json"), reverse=True)[: limit * 3]:
-                try:
-                    data = json.loads(record.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                status = data.get("status", "")
-                if status not in TERMINAL:
-                    status = "interrupted"
-                seen[data.get("run_id", record.parent.name)] = {
-                    "id": data.get("run_id", record.parent.name),
-                    "category_id": data.get("category_id", ""),
-                    "status": status,
-                    "dry_run": data.get("dry_run", False),
-                    "created_at": data.get("created_at", ""),
-                }
+    def history(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
-            for run in self._runs.values():
-                seen[run.id] = {
-                    "id": run.id,
-                    "category_id": run.category_id,
-                    "status": run.status,
-                    "dry_run": run.dry_run,
-                    "created_at": run.created_at,
+            runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)[:limit]
+        return [
+            {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
+            for r in runs
+        ]
+
+    def view(self, run_id: str, since: int = 0) -> dict[str, Any]:
+        run = self.get(run_id)
+        with run.lock:
+            if run.session_id and run.view is None:
+                run.view = SessionView(self.config.session_state / run.session_id / "events.jsonl")
+            sv, status = run.view, run.status
+        data: dict[str, Any] = {
+            "id": run.id,
+            "category": categories.CATEGORIES[run.category_id].title,
+            "prompt": run.prompt,
+            "created": run.created,
+            "message": run.message,
+            "helper": self.helper_state(),
+            "progress": [],
+            "next": since,
+            "pending": None,
+            "summary": "",
+            "files": [],
+            "can_open_chat": False,
+        }
+        if sv is not None:
+            sv.poll()
+            now = self._clock()
+            state = sv.status(now)
+            with run.lock:
+                if run.status in ("running", "input_needed", "completed", "stopped"):
+                    changed = run.status != state
+                    run.status = state
+                    if changed:
+                        self._save()
+                status = run.status
+                if not run.ahp_id:
+                    run.ahp_id = self.finder.ahp_id(run.session_id) or ""
+                ahp = run.ahp_id
+            pending = sv.pending(now)
+            with sv.lock:
+                items = [i for i in sv.progress if i["seq"] > since]
+                data["next"] = sv.seq
+                summary = sv.final if status in ("completed", "stopped") else ""
+            data["progress"] = items
+            data["summary"] = summary
+            data["pending"] = (
+                {
+                    "kind": pending.kind,
+                    "text": pending.text,
+                    "key": pending.key,
+                    "can_decide": pending.kind == "permission" and bool(ahp),
                 }
-        return sorted(seen.values(), key=lambda r: r["created_at"], reverse=True)[:limit]
+                if pending
+                else None
+            )
+            data["files"] = self._files(run, sv, status)
+            data["can_open_chat"] = bool(ahp)
+        data["status"] = status
+        return data
 
-    # -- phase 1: collection ----------------------------------------------------------------
-    def _context(self, run: Run) -> RunContext:
-        adapter = run.adapter
-        client = adapter.replay_client(run.inputs) if run.dry_run else self.client
-        activity = ActivityLog(run.run_dir / "activity.jsonl")
-        return RunContext(
-            run_id=run.id,
-            category_id=run.category_id,
-            inputs=run.inputs,
-            dry_run=run.dry_run,
-            run_dir=run.run_dir,
-            output_dir=run.output_dir,
-            client=client,
-            activity=activity,
-            log=run.say,
-            cancelled=run.cancel_event.is_set,
-            retry_delay=self._retry_delay,
+    def _files(self, run: Run, sv: SessionView, status: str) -> list[dict[str, Any]]:
+        now = self._clock()
+        with run.lock:
+            stale = now - run.files_at >= FILES_REFRESH or run.files_n != len(sv.written)
+            if stale or status in ("completed", "stopped") and not run.files:
+                run.files = collect_files(self.config, dict(sv.written), run.created)
+                run.files_at, run.files_n = now, len(sv.written)
+            files = list(run.files)
+        return [{**{k: v for k, v in f.items()}, "index": i} for i, f in enumerate(files)]
+
+    def file_path(self, run_id: str, index: int) -> Path:
+        run = self.get(run_id)
+        with run.lock:
+            files = list(run.files)
+        if not 0 <= index < len(files) or not files[index]["download"]:
+            raise RunError("Unknown file.")
+        workspace = self.config.resolved_workspace()
+        path = confine(workspace / files[index]["path"], workspace)
+        if (
+            path is None
+            or not path.is_file()
+            or is_denied(path.relative_to(workspace), self.config)
+        ):
+            raise RunError("That file cannot be downloaded.")
+        return path
+
+    # -- VS Code actions ---
+    def probe(self) -> dict[str, Any]:
+        """Ask the helper which chat-related commands this VS Code exposes (names only)."""
+        workspace = str(self.config.resolved_workspace())
+        if not self.bridge.helper_connected(workspace):
+            raise RunError("The VS Code helper is not connected for this workspace.")
+        result = self.bridge.wait_result(
+            self.bridge.post_job({"kind": "probe", "workspace": workspace}), 20.0
         )
+        if result is None or result.get("errors"):
+            raise RunError("The probe failed: " + _result_text(result))
+        info = result.get("info") or {}
+        names = [str(c) for c in info.get("commands", [])][:400]
+        return {
+            "version": str(info.get("version", "")),
+            "folders": [str(f) for f in info.get("folders", [])][:5],
+            "commands": names,
+        }
 
-    def _collect(self, run: Run) -> None:
-        adapter = run.adapter
-        try:
-            run.ctx = ctx = self._context(run)
-            activity = ctx._activity  # noqa: SLF001
-            run.set_status(
-                "collecting",
-                "Collecting read-only evidence." + (" (dry run: replay)" if run.dry_run else ""),
-            )
-            started = utc_now()
-            activity.note(f"collection started dry_run={run.dry_run}")
-            window = (
-                self.window_override
-                if self.window_override is not None
-                else adapter.observation_window_seconds
-            )
-            if not run.dry_run:
-                ctx.set_window(window)
-            fragment = adapter.collect(ctx)
-            activity.note("collection ended")
-            ended = utc_now()
-            elapsed = (ended - started).total_seconds()
-            if window and not run.dry_run and elapsed > window:
-                run.set_status(
-                    "blocked",
-                    f"Observation window exceeded ({int(elapsed)}s > {window}s). Start a new run; "
-                    "evidence from different runs is never stitched.",
-                )
-                return
-            manifest = {"started_at": iso(started), "ended_at": iso(ended), **fragment}
-            if run.dry_run:
-                manifest["dry_run"] = True
-            manifest_path = run.run_dir / "collection-manifest.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            result = collection_check(run.run_dir / "activity.jsonl", manifest, adapter.qa_workflow)
-            (run.run_dir / "collection-check.json").write_text(
-                json.dumps(result, indent=2), encoding="utf-8"
-            )
-            run.collection = {
-                "status": result["status"],
-                "flags": result.get("flags", []),
-                "wiz_calls": result.get("wiz_calls", 0),
-                "counts": manifest.get("counts", []),
-                "started_at": manifest["started_at"],
-                "ended_at": manifest["ended_at"],
-            }
-            if result["status"] != "pass":
-                run.set_status(
-                    "blocked",
-                    "Post-collection check flagged the collection; generation is blocked.",
-                )
-                return
-            run.say("Post-collection check passed.")
-            run.field_specs = list(adapter.narrative_fields(ctx))
-            prefill = adapter.prefill(ctx) or {}
-            run.form = {
-                "fields": [f.to_json() for f in run.field_specs],
-                "reference": [
-                    {"title": str(b.get("title", "")), "text": str(b.get("text", ""))}
-                    for b in adapter.reference(ctx)
-                ],
-            }
-            run.field_values = (
-                coerce_fields(run.field_specs, prefill, partial=True) if run.field_specs else {}
-            )
-            if not run.field_specs:  # nothing to type: go straight to generation
-                run.set_status("generating", "No input fields; generating deliverables.")
-                self._generate(run)
-                return
-            run.set_status(
-                "awaiting_input",
-                "Review the pre-filled values, type the narrative fields and generate.",
-            )
-        except ReconnectRequired:
-            run.set_status(
-                "reconnect_required",
-                "Wiz asked to reconnect (401 / OAuth challenge). The run was stopped and no "
-                "collection window continues. Reconnect Wiz and start a new run.",
-            )
-        except ReadOnlyViolation as error:
-            run.set_status("failed", f"Refused (read-only console): {error}")
-        except WindowExceeded as error:
-            run.set_status("blocked", str(error))
-        except CollectionAborted as error:
-            run.set_status("cancelled" if run.cancel_event.is_set() else "failed", str(error))
-        except AdapterError as error:
-            run.set_status("failed", str(error))
-        except Exception as error:  # noqa: BLE001 - never crash the worker; keep detail private
-            run.say(traceback.format_exc())
-            run.set_status("failed", f"Unexpected {type(error).__name__}; see the private run log.")
-
-    # -- phase 2: generation ------------------------------------------------------------------
-    def submit_fields(self, run_id: str, values: Mapping[str, Any]) -> Run:
+    def open_chat(self, run_id: str) -> None:
         run = self.get(run_id)
-        with run.lock:
-            if run.status != "awaiting_input":
-                raise RunError("This run is not waiting for input.")
-            try:
-                run.field_values = coerce_fields(run.field_specs, values)
-            except AdapterError as error:
-                raise RunError(str(error)) from None
-            run.status = "generating"
-        self._start(self._generate, run)
-        return run
-
-    def _generate(self, run: Run) -> None:
-        adapter, ctx = run.adapter, run.ctx
-        if ctx is None:
-            raise RunError("This run has no collected context.")
-        try:
-            run.set_status("generating", "Generating deliverables.")
-            run.problems = []
-            run.output_dir.mkdir(parents=True, exist_ok=True)
-            expected = [
-                confine(p, run.output_dir) for p in adapter.expected_outputs(ctx, run.field_values)
-            ]
-            self._archive(run, expected)
-            try:
-                outputs = adapter.generate(ctx, run.field_values)
-                outputs = {slot: confine(Path(p), run.output_dir) for slot, p in outputs.items()}
-                category = CATEGORIES[run.category_id]
-                if sorted(outputs) != sorted(s.slot_id for s in category.slots):
-                    raise AdapterError("Generation did not produce exactly the category's slots.")
-            except BaseException:
-                self._rollback(run, expected, "failed")
-                raise
-            run.outputs = outputs
-            run.set_status("generating", "Validating every slot with its bound validator.")
-            bindings = adapter.bindings(ctx, outputs)
-            validation: dict[str, Any] = {"slots": {}, "extra": []}
-            problems: list[str] = []
-            for slot in category.slots:
-                found = list(bindings[slot.slot_id].validator(outputs[slot.slot_id]))
-                validation["slots"][slot.slot_id] = found or "passed"
-                problems += [f"{slot.slot_id}: {p}" for p in found]
-            extra = list(adapter.extra_checks(ctx, outputs))
-            validation["extra"] = extra or "passed"
-            problems += extra
-            run.validation = validation
-            if problems:
-                run.problems = problems
-                self._rollback(run, expected, "invalid")
-                run.outputs, run.output_hashes = {}, {}
-                run.set_status(
-                    "awaiting_input",
-                    "Validation found problems; fix the inputs and generate again.",
-                )
-                return
-            run.output_hashes = {slot: sha256_file(p) for slot, p in outputs.items()}
-            run.set_status(
-                "awaiting_review",
-                "Outputs validated. A named human reviewer must approve before completion.",
-            )
-        except (AdapterError, RunError) as error:
-            run.problems = [str(error)]
-            run.set_status(
-                "awaiting_input", "Generation was blocked; fix the inputs and try again."
-            )
-        except CollectionAborted as error:
-            run.set_status("cancelled", str(error))
-        except Exception as error:  # noqa: BLE001
-            run.say(traceback.format_exc())
-            run.problems = [f"Unexpected {type(error).__name__}; see the private run log."]
-            run.set_status("awaiting_input", "Generation failed; see the problems.")
-
-    def _archive(self, run: Run, expected: list[Path]) -> None:
-        existing = [p for p in expected if p.exists()]
-        run.moved = []
-        if not existing:
-            return
-        stamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
-        folder = run.output_dir / "archives" / stamp
-        folder.mkdir(parents=True, exist_ok=True)
-        for path in existing:
-            target = folder / path.name
-            shutil.move(str(path), str(target))
-            run.moved.append((path, target))
-            run.archived.append(str(target))
-        run.say(f"Archived {len(existing)} existing deliverable(s) before regenerating.")
-
-    def _rollback(self, run: Run, expected: list[Path], why: str) -> None:
-        """A failed or invalid generation must not leave the folder without its prior drafts.
-
-        Anything this attempt wrote at the expected paths is kept under ``archives`` (named for
-        the reason), then the archived previous deliverables are moved back.
-        """
-        attempted = [p for p in expected if p.exists()]
-        if attempted:
-            folder = run.output_dir / "archives" / f"{utc_now():%Y%m%dT%H%M%SZ}-{why}"
-            folder.mkdir(parents=True, exist_ok=True)
-            for path in attempted:
-                shutil.move(str(path), str(folder / path.name))
-        for original, archived in run.moved:
-            if archived.exists() and not original.exists():
-                shutil.move(str(archived), str(original))
-                if str(archived) in run.archived:
-                    run.archived.remove(str(archived))
-        if run.moved:
-            run.say("Restored the previous deliverables after an unsuccessful generation.")
-        run.moved = []
-
-    # -- phase 3: review gate -------------------------------------------------------------------
-    def approve(self, run_id: str, reviewer: Any, *, confirm: bool) -> Run:
-        run = self.get(run_id)
-        name = validate_reviewer(reviewer)
-        if confirm is not True:
-            raise RunError("Tick the confirmation that you reviewed the deliverables.")
-        with run.lock:
-            if run.status != "awaiting_review" or run.approval is not None:
-                raise RunError("This run is not awaiting approval.")
-            for slot, path in run.outputs.items():
-                if not path.is_file() or sha256_file(path) != run.output_hashes.get(slot):
-                    raise RunError("A deliverable changed since validation; generate again.")
-            run.approval = {
-                "reviewer": name,
-                "approved_at_utc": iso(utc_now()),
-                "independent_of_preparer": bool(run.preparer)
-                and run.preparer.lower() != name.lower(),
-                "output_sha256": dict(run.output_hashes),
+        if not run.ahp_id:
+            raise RunError("VS Code has not registered this chat yet.")
+        job = self.bridge.post_job(
+            {
+                "kind": "open_chat",
+                "workspace": str(self.config.resolved_workspace()),
+                "ahp": run.ahp_id,
+                "openWait": self.config.open_wait_ms,
             }
-            run.status = "finalizing"
-        self._start(self._finalize, run)
-        return run
+        )
+        result = self.bridge.wait_result(job, 20.0)
+        if result is None or result.get("errors"):
+            raise RunError("VS Code did not open the chat: " + _result_text(result))
 
-    def _finalize(self, run: Run) -> None:
-        adapter, ctx = run.adapter, run.ctx
-        if ctx is None:
-            raise RunError("This run has no collected context.")
-        try:
-            run.set_status("finalizing", "Running the enforced category pipeline.")
-            category = CATEGORIES[run.category_id]
-            bindings = adapter.bindings(ctx, run.outputs)
-            workflow_ok = (
-                run.collection.get("status") == "pass"
-                and not run.problems
-                and all(v == "passed" for v in run.validation.get("slots", {}).values())
-                and run.validation.get("extra") == "passed"
-            )
-            qa = {
-                "workflow_qa": "passed" if workflow_ok else "failed",
-                "review": "passed" if run.approval else "pending",
-                "category_id": run.category_id,
-                "version": category.version,
-                "slots": [s.slot_id for s in category.slots],
-                "template_sha256": {k: b.template_sha256 for k, b in bindings.items()},
-                "outputs_sha256": {k: sha256_file(p) for k, p in run.outputs.items()},
-                **adapter.qa_extras(ctx),
-            }
-            result = run_category_pipeline(
-                run.category_id, category.version, bindings, run.output_dir, qa
-            )
-            run.pipeline = {
-                "complete": result.complete,
-                "workflow_qa": qa["workflow_qa"],
-                "review": qa["review"],
-            }
-            if result.complete:
-                run.set_status(
-                    "complete", "Complete: reviewed and approved. Drafts only; nothing was sent."
-                )
-            else:
-                run.set_status("failed", "The category pipeline did not report completion.")
-        except PipelineError as error:
-            run.pipeline = {"complete": False, "error": str(error)[:500]}
-            run.set_status(
-                "failed", f"The category pipeline refused completion: {str(error)[:300]}"
-            )
-        except Exception as error:  # noqa: BLE001
-            run.say(traceback.format_exc())
-            run.set_status("failed", f"Unexpected {type(error).__name__}; see the private run log.")
-
-    def reject(self, run_id: str, reviewer: Any, reason: str = "") -> Run:
+    def decide(self, run_id: str, action: str) -> None:
+        if action not in ("accept", "skip"):
+            raise RunError("Unknown action.")
         run = self.get(run_id)
-        name = validate_reviewer(reviewer)
-        with run.lock:
-            if run.status != "awaiting_review":
-                raise RunError("This run is not awaiting review.")
-            run.approval = {
-                "reviewer": name,
-                "rejected_at_utc": iso(utc_now()),
-                "reason": str(reason)[:500],
-            }
-        run.set_status("rejected", "Rejected by reviewer; not complete.")
-        return run
+        sv = run.view
+        if sv is None or not run.ahp_id:
+            raise RunError("The chat is not ready for this action.")
+        sv.poll()
+        pending = sv.pending(self._clock())
+        if pending is None or pending.kind != "permission":
+            raise RunError("Nothing is waiting for approval right now.")
+        key = pending.key
 
-    def cancel(self, run_id: str) -> Run:
-        run = self.get(run_id)
-        run.cancel_event.set()
-        with run.lock:
-            current = run.status
-        if current in {"awaiting_input", "awaiting_review"}:
-            run.set_status("cancelled", "Cancelled.")
-        return run
+        def guard() -> tuple[bool, str]:
+            sv.poll()
+            now = self._clock()
+            current = sv.pending(now)
+            if current is None or current.key != key:
+                return False, "that prompt is no longer waiting"
+            if len(sv.permissions) + len(sv.questions) > 1:
+                return False, "several prompts are waiting, so it is unclear which to press"
+            return True, ""
 
-    def output_file(self, run_id: str, slot: str) -> Path:
-        run = self.get(run_id)
-        with run.lock:
-            path = run.outputs.get(slot)
-        if path is None:
-            raise RunError("Unknown deliverable.")
-        return confine(path, self.root)
+        resources = [
+            f"ahp-session:/{run.ahp_id}",
+            f"agent-host-copilotcli:/{run.ahp_id}",
+            f"copilotcli:/{run.ahp_id}",
+        ]
+        job = self.bridge.post_job(
+            {
+                "kind": "tool",
+                "action": action,
+                "workspace": str(self.config.resolved_workspace()),
+                "ahp": run.ahp_id,
+                "resources": resources,
+                "openWait": self.config.open_wait_ms,
+            },
+            guard=guard,
+        )
+        result = self.bridge.wait_result(job, 30.0)
+        if result is None:
+            raise RunError("VS Code did not respond.")
+        if result.get("info", {}).get("guard"):
+            raise RunError("Not pressed: " + short(result["info"]["guard"], 120))
+        if result.get("errors"):
+            raise RunError("VS Code could not press the button: " + _result_text(result))
+
+
+def _result_text(result: dict[str, Any] | None) -> str:
+    if result is None:
+        return "no answer from the VS Code helper"
+    errors = [short(e, 120) for e in result.get("errors", [])][:3]
+    info = result.get("info") or {}
+    if errors:
+        return "; ".join(errors)
+    return short(info.get("note") or "sent", 120)
+
+
+def _run_cli(argv: list[str]) -> int:
+    try:
+        return subprocess.run(argv, check=False, timeout=30, capture_output=True).returncode  # nosec B603
+    except (OSError, subprocess.SubprocessError):
+        return 1

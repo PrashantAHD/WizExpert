@@ -126,16 +126,17 @@ wizexpert governance monthly --month 2026-10 --input <csv...> `
 
 Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated verification does not replace release review.
 
-## Workflow console (click-driven, local)
+## Workflow console (local frontend for the VS Code agent chat)
 
 ```powershell
-wizexpert console --private-root <private workspace>   # opens http://127.0.0.1:8765/
+wizexpert console install-helper --code <path to code.cmd>        # once, then reload the VS Code window
+wizexpert console --workspace <workspace folder>                  # opens http://127.0.0.1:8765/
 ```
 
-Pick a category, enter the issue ID or reporting month, sign in to Wiz in your own
-browser, and the console runs the enforced category workflow (read-only collection,
-post-collection check, validation) and stops at **awaiting reviewer approval**. Private
-adapters supply the client-specific wiring. See [docs/CONSOLE.md](docs/CONSOLE.md).
+Pick a category, enter that category's input, press Start: the console opens a **new VS Code
+agent-mode chat** with your custom agent and the prompt you would have typed, then mirrors
+that session (progress, "input needed", final summary, files). The console adds no workflow
+rules; everything else is the normal agent session. See [docs/CONSOLE.md](docs/CONSOLE.md).
 
 ## Guardrails worth knowing
 
@@ -153,7 +154,7 @@ adapters supply the client-specific wiring. See [docs/CONSOLE.md](docs/CONSOLE.m
 | [Workflow QA](docs/WORKFLOW-QA.md) | Evidence-bound QA reviews |
 | [Campaigns](docs/CAMPAIGNS.md) | Repeated fixed-scope collection |
 | [Governance](docs/GOVERNANCE.md) | Profiles, workbook, dashboard, deck |
-| [Workflow console](docs/CONSOLE.md) | Local click-driven runs, Wiz MCP sign-in, review gate |
+| [Workflow console](docs/CONSOLE.md) | Local frontend that starts and mirrors a VS Code agent chat |
 | [Publication](docs/PUBLICATION.md) | Verification and pre-push checks |
 
 ## License

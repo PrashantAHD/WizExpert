@@ -42,3 +42,12 @@ th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); 
 .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#94a3b8; margin-right:4px; }
 .dot.on { background:#22c55e; }
 [hidden] { display:none !important; }
+.pending { border-color:var(--warn); background:#fff9f0; }
+.log .line { white-space:pre-wrap; margin:1px 0; }
+.log .line.tool { color:#8aa4c4; }
+.log .line.user { color:#f5d58a; }
+.log .line.failed { color:#f19a9a; }
+.badge.input_needed { background:#fff4e6; color:var(--warn); }
+.badge.completed { background:#dcfce7; color:var(--ok); }
+.badge.not_started, .badge.stopped, .badge.interrupted { background:#fee2e2; color:var(--bad); }
+a { color:var(--blue); }
