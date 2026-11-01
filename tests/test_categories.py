@@ -15,6 +15,14 @@ def test_slot_counts():
     assert len(cat.DAILY_PROGRESS.slots) == 4
 
 
+def test_risk_issues_excludes_assessment_basis_section():
+    c = cat.RISK_ISSUES
+    assert c.version == 3
+    text = " ".join(c.manifest()["category_rules"]).lower()
+    assert "assessment basis and limitations" in text
+    assert "do not include" in text
+
+
 def test_monthly_governance_category():
     c = cat.MONTHLY_GOVERNANCE
     assert cat.CATEGORIES["monthly-governance-reporting"] is c
@@ -30,7 +38,6 @@ def test_monthly_governance_category():
                  "no-send", "read-only", "gates", "retained history",
                  "offloading", "historical data loss"):
         assert term in text, term
-    assert "category_rules" not in cat.RISK_ISSUES.manifest()
     assert "category_rules" not in cat.DAILY_PROGRESS.manifest()
 
 
