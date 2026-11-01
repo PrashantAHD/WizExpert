@@ -30,6 +30,19 @@ wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
 wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
 
+### Auto-reload during development
+
+Use the VS Code command palette and choose **Tasks: Run Task** →
+**WizExpert: Workflow console (auto-reload)**. This starts the console in one dedicated
+VS Code terminal and opens the browser once. Changes to console Python, JavaScript, HTML,
+CSS, JSON or SVG files automatically restart the backend without requiring a second
+terminal or manual process management. Refresh the browser after the restart; the
+per-process CSRF token is intentionally regenerated.
+
+The normal `wizexpert console` command remains available when auto-reload is not needed.
+Changes to the helper extension still require reinstalling it and reloading the VS Code
+window.
+
 Options: `--agent` (custom agent name, default `WizExpert`), `--config` (private JSON:
 `agent`, `output_roots`, `exclude_dirs`, `deny_names`, `prompts`, `start_timeout`),
 `--state-dir`, `--copilot-home`, `--cli-fallback` and `--code` (see below), `--no-browser`.
