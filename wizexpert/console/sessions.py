@@ -15,14 +15,13 @@ import re
 import sqlite3
 import threading
 import time
-import urllib.parse
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .config import MAX_DOWNLOAD_BYTES, ConsoleConfig
+from .config import ConsoleConfig
 
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 TYPE_PREFIX = re.compile(rb'^\{\s*"type"\s*:\s*"([A-Za-z0-9_.]+)"')
@@ -449,8 +448,21 @@ def confine(path: str | Path, root: Path) -> Path | None:
     return resolved if resolved == root or root in resolved.parents else None
 
 
-def vscode_file_url(path: Path) -> str:
-    return "vscode://file/" + urllib.parse.quote(str(path).replace("\\", "/"), safe="/:")
+DELIVERABLE_EXTENSIONS = frozenset(
+    {".docx", ".xlsx", ".pptx", ".pdf", ".csv", ".md", ".html", ".eml", ".msg"}
+)
+
+
+def is_deliverable(relative: Path, config: ConsoleConfig) -> bool:
+    """A main deliverable: recognized extension, inside a configured output root."""
+    if relative.suffix.lower() not in DELIVERABLE_EXTENSIONS:
+        return False
+    parts = [p.lower() for p in relative.parts]
+    for root in config.output_roots:
+        root_parts = [p.lower() for p in Path(root).parts]
+        if root_parts and len(parts) > len(root_parts) and parts[: len(root_parts)] == root_parts:
+            return True
+    return False
 
 
 def collect_files(
@@ -466,6 +478,7 @@ def collect_files(
             resolved is None
             or not resolved.is_file()
             or is_denied(resolved.relative_to(workspace), config)
+            or not is_deliverable(resolved.relative_to(workspace), config)
         ):
             return
         try:
@@ -474,13 +487,12 @@ def collect_files(
             return
         key = norm(resolved)
         if key not in found:
+            relative = resolved.relative_to(workspace)
             found[key] = {
-                "path": resolved.relative_to(workspace).as_posix(),
-                "how": how,
-                "size": stat.st_size,
+                "name": resolved.name,
+                "location": relative.parent.as_posix(),
+                "path": relative.as_posix(),
                 "modified": stat.st_mtime,
-                "download": stat.st_size <= MAX_DOWNLOAD_BYTES,
-                "vscode": vscode_file_url(resolved),
             }
 
     for raw, tool in written.items():

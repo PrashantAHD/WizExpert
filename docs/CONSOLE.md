@@ -47,7 +47,7 @@ allow-listed commands, only for the workspace folder open in its window:
    have), then
 2. `workbench.action.chat.open` with `{mode: <agent>, query: <prompt>, isPartialQuery: false}`.
 
-Optional fallback (`--cli-fallback`): `code chat -m <agent> -r "<prompt>"`. It targets the
+Optional fallback (`--cli-fallback`): `code chat --mode <agent> --reuse-window "<prompt>"`. It targets the
 last active VS Code window, so use it only if the helper path fails.
 
 The session is identified read-only: a new `session-state/<id>` folder whose `cwd` is the
@@ -63,9 +63,11 @@ never writes to `session-state`.
   `workbench.action.chat.acceptTool` / `skipTool` only if that exact prompt is still the one
   waiting;
 - the final assistant summary once the agent stops;
-- files the session wrote (tool calls) or changed under the output roots (default
-  `deliverables`), with `vscode://file/` links and read-only downloads confined to the
-  workspace. Evidence, archive and secret-like files are never listed or served.
+- the main deliverable files only: files the session wrote (tool calls) or changed under the
+  output roots (default `deliverables`) with a recognized deliverable extension (`.docx`,
+  `.xlsx`, `.pptx`, `.pdf`, `.csv`, `.md`, `.html`, `.eml`, `.msg`), shown as file name and
+  location only. There are no open or download links and no file-serving endpoint; evidence,
+  archive, log, JSON and secret-like files are never listed.
 
 ## Safety properties
 
@@ -74,7 +76,7 @@ never writes to `session-state`.
   JSON content type. Strict CSP (no inline script), no caching, no framing, no referrer.
 - Helper endpoints accept only signed, fresh, non-replayed requests.
 - All text from the session is rendered with `textContent`; the page never builds markup.
-- Downloads are resolved and must stay inside the workspace.
+- File contents are never served; listed paths are confined to the workspace output roots.
 - Nothing is sent or changed by the console: no email, no Wiz, ticketing or cloud changes.
 
 ## Limitations

@@ -205,7 +205,7 @@ def test_invalid_input_is_rejected_over_http_and_not_started(console):
     assert status == 400 and b"helper is not connected" in body
 
 
-def test_run_ids_and_file_indexes_are_validated(console):
+def test_run_ids_are_validated_and_no_file_endpoint(console):
     server, *_ = console
     token = token_of(server)
     for path in (
@@ -213,7 +213,6 @@ def test_run_ids_and_file_indexes_are_validated(console):
         "/api/runs/abc",
         "/api/runs/20260101T000000Z-aaaaaa",
         "/api/runs/20260101T000000Z-aaaaaa/file/0",
-        "/api/runs/20260101T000000Z-aaaaaa/file/-1",
     ):
         assert api(server, token, "GET", path)[0] == 404
 
@@ -289,20 +288,20 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
 
         case = workspace / "deliverables" / "Case"
         case.mkdir()
-        (case / "report.txt").write_text("<script>alert(1)</script>", encoding="utf-8")
+        (case / "report.docx").write_text("<script>alert(1)</script>", encoding="utf-8")
         append(
             helper.events_path,
             event(
                 "assistant.message",
                 {"content": "<img src=x onerror=1> Collecting", "toolRequests": [{}]},
             ),
-            tool_start("create", {"path": str(case / "report.txt"), "file_text": "x"}, "c1"),
+            tool_start("create", {"path": str(case / "report.docx"), "file_text": "x"}, "c1"),
             tool_done("c1"),
         )
         view = json.loads(api(server, token, "GET", f"/api/runs/{run_id}?since=0")[2])
         assert (
             view["status"] == "running"
-            and view["files"][0]["path"] == "deliverables/Case/report.txt"
+            and view["files"][0]["path"] == "deliverables/Case/report.docx"
         )
         assert any("Collecting" in i["text"] for i in view["progress"])
 
@@ -318,12 +317,8 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
         )
         view = json.loads(api(server, token, "GET", f"/api/runs/{run_id}")[2])
         assert view["status"] == "completed" and view["summary"] == "Done. Deliverables are ready."
-        status, headers, body = api(server, token, "GET", f"/api/runs/{run_id}/file/0")
-        assert status == 200 and body == b"<script>alert(1)</script>"
-        assert (
-            headers["Content-Type"] == "application/octet-stream"
-            and "attachment" in headers["Content-Disposition"]
-        )
-        assert api(server, token, "GET", f"/api/runs/{run_id}/file/9")[0] == 404
+        assert api(server, token, "GET", f"/api/runs/{run_id}/file/0")[0] == 404
+        assert set(view["files"][0]) >= {"name", "location"}
+        assert not {"vscode", "download", "size"} & set(view["files"][0])
         history = json.loads(api(server, token, "GET", "/api/bootstrap")[2])["history"]
         assert history[0]["id"] == run_id and history[0]["status"] == "completed"

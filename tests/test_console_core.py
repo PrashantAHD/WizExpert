@@ -273,20 +273,25 @@ def test_files_listed_confined_and_filtered(env):
     (out / "report.docx").write_bytes(b"docx")
     (out / "evidence" / "raw.json").write_text("{}", encoding="utf-8")
     (workspace / "deliverables" / ".env").write_text("secret", encoding="utf-8")
-    (workspace / "notes.txt").write_text("n", encoding="utf-8")
+    (workspace / "notes.docx").write_text("n", encoding="utf-8")
+    (out / "scratch.txt").write_text("t", encoding="utf-8")
+    (out / "data.json").write_text("{}", encoding="utf-8")
+    (out / "Report.PDF").write_bytes(b"pdf")
     outside = workspace.parent / "outside.txt"
     outside.write_text("no", encoding="utf-8")
     written = {
         str(out / "report.docx"): "create",
-        "notes.txt": "edit",
+        "notes.docx": "edit",
         str(outside): "create",
         "..\\outside.txt": "edit",
         "deliverables/.env": "edit",
     }
     files = collect_files(config, written, time.time() - 60)
     paths = {f["path"] for f in files}
-    assert paths == {"deliverables/Case-1/report.docx", "notes.txt"}
-    assert all(f["vscode"].startswith("vscode://file/") for f in files)
+    assert paths == {"deliverables/Case-1/report.docx", "deliverables/Case-1/Report.PDF"}
+    by_name = {f["name"]: f for f in files}
+    assert by_name["report.docx"]["location"] == "deliverables/Case-1"
+    assert all(set(f) == {"name", "location", "path", "modified"} for f in files)
     assert confine(outside, workspace) is None and confine(out, workspace) == out.resolve()
     assert is_denied(Path("deliverables/.env"), config) and is_denied(
         Path("x/evidence/a.json"), config
@@ -388,9 +393,7 @@ def test_start_creates_chat_and_mirrors_session(env):
         )
         view = manager.view(run.id, view["next"])
         assert view["status"] == "completed" and view["summary"] == "Finished: see files."
-        assert manager.file_path(run.id, 0).name == "r.docx"
-        with pytest.raises(RunError):
-            manager.file_path(run.id, 5)
+        assert not hasattr(manager, "file_path")
 
 
 def test_start_fails_clearly_when_no_session_appears(env):
@@ -423,9 +426,9 @@ def test_cli_fallback_is_opt_in_and_uses_agent_and_prompt(env):
     assert run.status == "running"
     assert calls[0][1:] == [
         "chat",
-        "-m",
+        "--mode",
         "WizExpert",
-        "-r",
+        "--reuse-window",
         "Monthly Governance Reporting category: "
         "prepare the monthly governance reporting for 2026-09",
     ]

@@ -34,7 +34,6 @@ async function api(method, path, body) {
   return data;
 }
 function banner(text) { const b = $("banner"); b.hidden = !text; clear(b); if (text) b.append(text); }
-function bytes(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 function when(t) { return t ? new Date(t * 1000).toLocaleTimeString() : ""; }
 
 function renderHelper() {
@@ -112,7 +111,7 @@ async function poll() {
 }
 function renderRun(run) {
   // Rebuild only when something changed, so button messages and scroll position survive polling.
-  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path, f.size]), state.since, run.can_open_chat]);
+  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat]);
   if (sig === state.shown) return;
   state.shown = sig;
   const root = $("run"); clear(root);
@@ -139,21 +138,10 @@ function pendingBlock(run) {
 }
 async function openChat() { try { await api("POST", "/api/runs/" + state.runId + "/open"); } catch (e) { banner(e.message); } }
 function filesBlock(run) {
-  if (!run.files.length) return h("p", { class: "help" }, "No output files yet.");
-  const table = h("table", {}, h("tr", {}, h("th", {}, "File"), h("th", {}, "How"), h("th", {}, "Size"), h("th", {}, "")));
-  for (const f of run.files) {
-    const links = h("td", {});
-    if (f.vscode.startsWith("vscode://file/")) links.append(h("a", { href: f.vscode }, "Open in VS Code"), " ");
-    if (f.download) links.append(h("button", { class: "secondary", onclick: () => download(run.id, f) }, "Download"));
-    table.append(h("tr", {}, h("td", { class: "mono" }, f.path), h("td", {}, f.how), h("td", {}, bytes(f.size)), links));
-  }
+  if (!run.files.length) return h("p", { class: "help" }, "No deliverable files yet.");
+  const table = h("table", {}, h("tr", {}, h("th", {}, "File"), h("th", {}, "Location")));
+  for (const f of run.files) table.append(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", { class: "mono" }, f.location)));
   return table;
-}
-async function download(id, f) {
-  const r = await fetch("/api/runs/" + id + "/file/" + f.index, { headers: { "X-CSRF-Token": csrf } });
-  if (!r.ok) { banner("Download failed."); return; }
-  const url = URL.createObjectURL(await r.blob());
-  const a = h("a", { href: url, download: f.path.split("/").pop() }); document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 function progressBlock() {
   const box = h("div", { class: "log" });

@@ -29,7 +29,6 @@ DEFAULT_EXCLUDE_DIRS = (
     "inventories",
     "staging",
 )
-MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 
 
 def default_state_dir() -> Path:
