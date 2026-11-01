@@ -25,8 +25,6 @@ from .sessions import (
     SessionFinder,
     SessionView,
     collect_files,
-    confine,
-    is_denied,
     short,
 )
 
@@ -197,7 +195,9 @@ class RunManager:
             if self.config.allow_cli_fallback:
                 run.attempts.append("code chat fallback")
                 command = shutil.which(self.config.code_command) or self.config.code_command
-                code = self._cli([command, "chat", "-m", self.config.agent, "-r", run.prompt])
+                code = self._cli(
+                    [command, "chat", "--mode", self.config.agent, "--reuse-window", run.prompt]
+                )
                 if code == 0 and self._await_session(run, self.config.start_timeout):
                     return
             with run.lock:
@@ -306,22 +306,6 @@ class RunManager:
                 run.files_at, run.files_n = now, len(sv.written)
             files = list(run.files)
         return [{**{k: v for k, v in f.items()}, "index": i} for i, f in enumerate(files)]
-
-    def file_path(self, run_id: str, index: int) -> Path:
-        run = self.get(run_id)
-        with run.lock:
-            files = list(run.files)
-        if not 0 <= index < len(files) or not files[index]["download"]:
-            raise RunError("Unknown file.")
-        workspace = self.config.resolved_workspace()
-        path = confine(workspace / files[index]["path"], workspace)
-        if (
-            path is None
-            or not path.is_file()
-            or is_denied(path.relative_to(workspace), self.config)
-        ):
-            raise RunError("That file cannot be downloaded.")
-        return path
 
     # -- VS Code actions ---
     def probe(self) -> dict[str, Any]:

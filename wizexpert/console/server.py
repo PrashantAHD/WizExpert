@@ -7,7 +7,7 @@ extension) and shows that session's progress. Safety properties (each covered by
   Origin and a JSON content type;
 - the helper endpoints (/vscode/*) accept only HMAC-signed requests and sign their answers;
 - strict CSP (no inline script), no caching, no framing, no referrer;
-- downloads are confined to files the session produced inside the workspace.
+- the results list shows only deliverable file names and locations; no file content is served.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
@@ -295,20 +295,6 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, manager.view(match.group(1), since))
             except (RunError, ValueError):
                 return self._error(HTTPStatus.NOT_FOUND, "Unknown run.")
-        match = re.fullmatch(r"/api/runs/([^/]+)/file/(\d{1,4})", path)
-        if match and RUN_ID.fullmatch(match.group(1)):
-            try:
-                file = manager.file_path(match.group(1), int(match.group(2)))
-                data = file.read_bytes()
-            except (RunError, OSError):
-                return self._error(HTTPStatus.NOT_FOUND, "Unknown file.")
-            disposition = f"attachment; filename*=UTF-8''{quote(file.name)}"
-            return self._send(
-                HTTPStatus.OK,
-                data,
-                "application/octet-stream",
-                {"Content-Disposition": disposition},
-            )
         self._error(HTTPStatus.NOT_FOUND, "Not found.")
 
     def _api_post(self, path: str, body: dict[str, Any]) -> None:
