@@ -70,7 +70,7 @@ class Category:
 
 RISK_ISSUES = Category(
     "risk-issues",
-    2,
+    3,
     "Risk Issues",
     (
         Slot("internal-analysis", "Internal analysis", "document"),
@@ -83,6 +83,11 @@ RISK_ISSUES = Category(
         Slot("updated-detailed-report", "Updated detailed report", "document"),
     ),
     ("collection", "generation", "handoff"),
+    (
+        "Do not include an 'Assessment basis and limitations' section or heading "
+        "in any Risk Issues deliverable; keep material evidence qualifications "
+        "concise beside the relevant finding or recommendation.",
+    ),
 )
 
 DAILY_PROGRESS = Category(
@@ -160,4 +165,3 @@ def validate_binding(category_id: str, binding: dict[str, Any]) -> list[str]:
         ):
             problems.append(f"slot {slot_id!r} needs a pinned lowercase SHA-256")
     return problems
-
