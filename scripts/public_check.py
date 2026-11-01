@@ -28,7 +28,11 @@ SOURCE_SUFFIXES = {
 # Retired layouts that still exist in reachable Git history. They are tolerated only when
 # scanning history, never in the index or working tree, so they cannot be reintroduced.
 HISTORICAL_SOURCE_SUFFIXES = {"remediation": {".py", ".html", ".css", ".js"}}
-HISTORICAL_FILES = {".github/instructions/production-workflow.instructions.md"}
+HISTORICAL_FILES = {
+    ".github/instructions/production-workflow.instructions.md",
+    # A generic local task was briefly committed before the publication allowlist was checked.
+    ".vscode/tasks.json",
+}
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SYNTHETIC_MERGE_SUBJECT = re.compile(

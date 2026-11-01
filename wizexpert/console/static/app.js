@@ -69,26 +69,49 @@ function showInputs(category) {
   $("picker").hidden = true; $("run").hidden = true; $("inputs").hidden = false; banner("");
   const root = $("inputs"); clear(root);
   root.append(h("h2", {}, "2. " + category.title));
+  if (!(category.stages || []).length) { root.append(formPanel(category, category, null, showPicker)); return; }
+  // Staged category (e.g. Risk Issues): stage buttons, then one operation form at a time.
+  const detail = h("div", {});
+  const stageBar = h("p", {});
+  const showStage = (stage) => {
+    clear(detail);
+    const actions = category.actions.filter((a) => a.stage === stage.id);
+    if (actions.length === 1) { detail.append(formPanel(category, actions[0], actions[0].id, null)); return; }
+    const bar = h("p", {});
+    const form = h("div", {});
+    for (const a of actions) bar.append(h("button", { class: "secondary", onclick: () => { clear(form); form.append(h("p", { class: "help" }, a.description), formPanel(category, a, a.id, null)); } }, a.title), " ");
+    detail.append(bar, form);
+  };
+  for (const s of category.stages) stageBar.append(h("button", { onclick: () => showStage(s) }, s.title), " ");
+  stageBar.append(h("button", { class: "secondary", onclick: showPicker }, "Back"));
+  root.append(stageBar, detail);
+}
+function formPanel(category, spec, actionId, onBack) {
   const panel = h("div", { class: "panel" });
   const fields = {};
-  for (const f of category.fields) {
-    const input = h("input", { type: "text", maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" });
+  for (const f of spec.fields) {
+    const multiline = f.name === "email_text";
+    const input = multiline
+      ? h("textarea", { rows: 8, maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" })
+      : h("input", { type: "text", maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" });
     fields[f.name] = input;
     panel.append(h("label", {}, f.label + (f.required ? " *" : ""), h("div", { class: "help" }, f.help)), input);
   }
   const message = h("p", { class: "bad" });
-  const start = h("button", {}, "Start");
+  const start = h("button", {}, actionId === "new" || !actionId ? (category.stages && category.stages.length ? "Proceed" : "Start") : "Proceed");
   start.addEventListener("click", async () => {
     message.textContent = ""; start.disabled = true;
     try {
       const inputs = {}; for (const [k, v] of Object.entries(fields)) inputs[k] = v.value;
-      const res = await api("POST", "/api/runs", { category_id: category.id, inputs });
+      const body = { category_id: category.id, inputs };
+      if (actionId) body.action_id = actionId;
+      const res = await api("POST", "/api/runs", body);
       openRun(res.run_id);
     } catch (e) { message.textContent = e.message; start.disabled = false; }
   });
-  panel.append(h("p", {}, start, " ", h("button", { class: "secondary", onclick: showPicker }, "Back")), message);
+  panel.append(h("p", {}, start, onBack ? " " : null, onBack ? h("button", { class: "secondary", onclick: onBack }, "Back") : null), message);
   if (!state.helper.connected) panel.append(h("p", { class: "help" }, "The VS Code helper is not connected yet; see docs/CONSOLE.md (install the helper and reload the window)."));
-  root.append(panel);
+  return panel;
 }
 
 // ---- page 3: results ---------------------------------------------------------------------------------

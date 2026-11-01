@@ -142,10 +142,12 @@ class RunManager:
             "agent": self.config.agent,
         }
 
-    def start(self, category_id: str, raw: dict[str, Any]) -> Run:
+    def start(
+        self, category_id: str, raw: dict[str, Any], action_id: str | None = None
+    ) -> Run:
         try:
-            values = categories.validate(category_id, raw)
-            prompt = categories.build_prompt(category_id, values, self.config.prompts)
+            values = categories.validate(category_id, raw, action_id)
+            prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
         except InputError as error:
             raise RunError(str(error)) from None
         with self._lock:
