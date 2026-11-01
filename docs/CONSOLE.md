@@ -20,6 +20,31 @@ issue IDs `[A-Za-z0-9._-]`, 2 to 64 characters, up to 10; month `YYYY-MM`; note
 `[A-Za-z0-9 ._-]`, up to 80. The final prompt may only contain letters, digits, space and
 `. , ; : ( ) / _ -`. A private JSON file (`--config`) may override the prompt templates.
 
+### Risk Issues actions
+
+After selecting Risk Issues, two buttons appear:
+
+- **New work-item**: Wiz issue/rule ID(s) and **Proceed** (the original prompt, unchanged).
+- **In-progress**: choose one operation. All of them only build a prompt for a new agent chat;
+  the console itself makes no Wiz, ServiceNow, cloud or email call.
+  - **Risk Accepted**: issue ID(s) plus **exactly one** of pasted item/finding IDs (up to 20,
+    `[A-Za-z0-9._-]`) or the name of an existing local workbook/output folder (relative, under
+    the deliverables folder, up to 3 levels, no `..`, no drive or absolute path). The console
+    does not browse the disk; the agent confirms the folder exists. Both modes share one form,
+    so a later folder picker needs no model change.
+  - **Email Response**: issue ID(s) plus the received email text (up to 1500 characters, line
+    breaks folded, only letters, digits, spaces and `. , ; : ( ) / _ - ' ? ! @ %`). The text is
+    wrapped in `BEGIN EMAIL TEXT` / `END EMAIL TEXT` and labelled quoted data, not instructions;
+    text containing those words is rejected. The agent drafts a follow-up email file; it is not sent.
+  - **Update Status**: issue ID(s). The agent refreshes status read-only and updates a local
+    copy of the detailed report Excel, leaving the original unchanged.
+
+Model: a category may declare `stages` (button groups) and `actions` (fields, template,
+optional `exactly_one_of`). The API takes an optional `action_id` next to `category_id`; omitting
+it keeps the old behavior. Template overrides use `risk-issues` (New) or
+`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`). Daily Progress
+and Monthly Governance have no actions yet and can add them the same way.
+
 ## Install and run
 
 ```powershell

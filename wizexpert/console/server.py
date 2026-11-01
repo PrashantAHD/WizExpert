@@ -303,7 +303,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             category, inputs = body.get("category_id"), body.get("inputs", {})
             if not isinstance(category, str) or not isinstance(inputs, dict):
                 raise RunError("category_id and inputs are required.")
-            return self._json(HTTPStatus.OK, {"run_id": manager.start(category, inputs).id})
+            action = body.get("action_id")
+            if action is not None and not isinstance(action, str):
+                raise RunError("action_id must be text.")
+            run = manager.start(category, inputs, action)
+            return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/helper/probe":
             return self._json(HTTPStatus.OK, manager.probe())
         match = re.fullmatch(r"/api/runs/([^/]+)/(decide|open)", path)
