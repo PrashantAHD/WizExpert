@@ -1,89 +1,92 @@
 # Workflow console
 
-A local, click-driven page for the three reporting categories (Risk Issues, Daily
-Progress Reporting, Monthly Governance Reporting). It replaces typing commands, not the
-gates: each run still goes through the category contract, the post-collection check, the
-bound validators and a named human review.
+A local web page that is **only a frontend** for the VS Code agent-mode workflow. You pick a
+category, enter its input and press Start; the console opens a **new VS Code agent-mode chat**
+with your custom agent and the prompt you would have typed, then mirrors that chat.
+
+Everything else is the real agent session: model/subagent routing, `.github/hooks`, skills,
+instructions, the Wiz MCP server from your VS Code `mcp.json`, the workflow QA gates and
+VS Code's own tool approvals. The console adds **no workflow rules** of its own: no time
+windows, no Wiz calls, no validators, no review gates.
+
+| Category | Input | Prompt typed into the chat (default) |
+|---|---|---|
+| Risk Issues | Wiz issue/rule ID(s) | `Risk Issues category: prepare the deliverables for Wiz issue <ids>` |
+| Daily Progress Reporting | none, or a short note | `Daily Progress Reporting category: prepare the daily progress report for today` |
+| Monthly Governance Reporting | snapshot period `YYYY-MM` | `Monthly Governance Reporting category: prepare the monthly governance reporting for <YYYY-MM>` |
+
+Input is allow-listed (characters and length) so a form value cannot add instructions:
+issue IDs `[A-Za-z0-9._-]`, 2 to 64 characters, up to 10; month `YYYY-MM`; note
+`[A-Za-z0-9 ._-]`, up to 80. The final prompt may only contain letters, digits, space and
+`. , ; : ( ) / _ -`. A private JSON file (`--config`) may override the prompt templates.
+
+## Install and run
 
 ```powershell
-wizexpert console --private-root <private workspace> [--port 8765] [--no-browser]
+# once: install the helper extension (an unpacked copy lands in %USERPROFILE%\.vscode\extensions)
+wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
+# then reload the VS Code window that has the workspace open (Developer: Reload Window)
+
+wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
 
-The console is generic. Everything client-specific (collection plan, data fill, builders,
-validators, output folder) is a **private adapter** loaded from
-`<private-root>/templates/console_adapters/adapters.py`, which must define
-`get_adapters(private_root) -> list[CategoryAdapter]` (see `wizexpert/console/adapters.py`).
-Deliverables are written under `<private-root>/deliverables/`; run records, evidence copies
-and the activity log live in `<private-root>/deliverables/_console-runs/<run-id>/`.
-Nothing client-specific belongs in this repository.
+Options: `--agent` (custom agent name, default `WizExpert`), `--config` (private JSON:
+`agent`, `output_roots`, `exclude_dirs`, `deny_names`, `prompts`, `start_timeout`),
+`--state-dir`, `--copilot-home`, `--cli-fallback` and `--code` (see below), `--no-browser`.
+No workspace path or agent is built into the public code.
 
-## What a run does
+## How the chat is started
 
-1. **Pick a category, enter inputs** (issue-rule ID, reporting month, paths) and choose a
-   live run or, where the adapter supports it, an offline *dry run* that replays retained
-   evidence and writes only inside the private run folder.
-2. **Collect** through the Wiz MCP server (read-only; see below). Every call is recorded in
-   an activity log, parallel where the plan allows, retried up to three times per call.
-3. **Post-collection check**: `workflow-qa collection-check` runs on the real activity log
-   and a manifest (reused sources, expected vs collected counts). A flagged check blocks
-   generation exactly as it does on the command line.
-4. **Narrative**: values the generators can derive from collected data are pre-filled and
-   editable; narrative fields are typed by you. There is no text generation.
-5. **Generate**: existing deliverables are archived first (moved to `archives/<UTC>/`; they
-   are restored if generation fails or validates badly). Outputs are validated with each
-   slot's bound validator plus the adapter's actual-file checks.
-6. **Review**: the run stops at *awaiting reviewer approval*. A named human enters their
-   name and clicks **Approve** (or Reject). The name and UTC time go into the run's private
-   record (`run.json`); a placeholder name is refused and the record notes whether the
-   reviewer differs from the preparer. Only then does the enforced category pipeline
-   (`run_category_pipeline`) run with
-   `{workflow_qa, review, category_id, version, slots, template_sha256, outputs_sha256}`.
-   `workflow_qa` is `passed` only when the recorded collection check passed and every
-   validator passed on the actual files; the console never self-certifies review.
+The helper extension (plain JavaScript, no dependencies, `local.wizexpert-console-helper`)
+long-polls the console on `127.0.0.1` with HMAC-signed requests (same pattern as other local
+helper extensions): the shared token is never sent, a request needs a fresh timestamp, nonce
+and valid signature, and the helper trusts only answers the console signed. It runs only
+allow-listed commands, only for the workspace folder open in its window:
 
-The console does not run the evidence-bound `workflow-qa check` handoff review (rule
-coverage, native rendering review, independent reviewer attestations). That remains a
-separate gate and the console never fabricates it.
+1. `workbench.action.chat.newChat` (so the prompt never lands in a conversation you already
+   have), then
+2. `workbench.action.chat.open` with `{mode: <agent>, query: <prompt>, isPartialQuery: false}`.
 
-## Wiz sign-in (MCP, OAuth 2.1 + PKCE)
+Optional fallback (`--cli-fallback`): `code chat -m <agent> -r "<prompt>"`. It targets the
+last active VS Code window, so use it only if the helper path fails.
 
-The console is an MCP client for the remote Wiz MCP server (`--wiz-url`, default
-`https://mcp.app.wiz.io`, streamable HTTP, tools `discover` and `execute`).
+The session is identified read-only: a new `session-state/<id>` folder whose `cwd` is the
+workspace, created after Start, whose first user message equals the prompt. The console
+never writes to `session-state`.
 
-- **Connect Wiz** discovers the authorization server (MCP protected-resource metadata,
-  RFC 8414/OIDC metadata), registers a public client dynamically when offered (else pass
-  `--client-id`), and opens the sign-in page in **your** browser with an S256 PKCE challenge
-  and a single-use `state`. The redirect returns to `http://127.0.0.1:<port>/oauth/callback`.
-- Tokens are kept **in memory only**: never written to disk, logs, evidence or outputs.
-  They are discarded on Disconnect, on a 401, or when the process ends.
-- A 401 / OAuth challenge (or an authentication error from the tool) mid-run **stops the run**
-  with "Reconnect Wiz"; no observation window continues and nothing is published. Start a
-  new run after reconnecting.
-- **Read-only policy** (before any network traffic): only `discover` and `execute` are ever
-  called; `execute` accepts only read-verb tools (`get_*`, `list_*`, `search_*`, plus
-  `execute_graph_query` and `graph_search`), refuses any tool name containing a write verb
-  and any argument containing a GraphQL `mutation`.
-- The console adds no rules of its own: it runs the enforced workflow. Collection has no
-  elapsed-time limit unless an adapter's enforced workflow defines one
-  (`--observation-window-minutes` overrides; `0` disables). If a window applies and runs
-  out, the run is blocked and evidence from different runs is never stitched.
+## What the results page shows
+
+- live progress from the session log: assistant messages, tool calls (names and short
+  descriptions, not tool output or file contents), subagent tool calls;
+- **input needed** when the agent asks a question or waits for a tool approval, with a button
+  to open the chat in VS Code and (for approvals) optional **Allow / Skip**, which presses
+  `workbench.action.chat.acceptTool` / `skipTool` only if that exact prompt is still the one
+  waiting;
+- the final assistant summary once the agent stops;
+- files the session wrote (tool calls) or changed under the output roots (default
+  `deliverables`), with `vscode://file/` links and read-only downloads confined to the
+  workspace. Evidence, archive and secret-like files are never listed or served.
 
 ## Safety properties
 
 - Binds `127.0.0.1` only; the `Host` header must be the loopback name and port served.
 - Per-process CSRF token on every `/api` request; POSTs also need a matching `Origin` and a
-  JSON content type. Strict CSP (no inline script, no third-party resources), no caching,
-  no framing, no referrer. Request logging is disabled (the redirect carries a code).
-- All values from the server are rendered as text; the UI never builds markup from data.
-- Output paths are resolved and must stay inside the deliverables root; downloads are limited
-  to a run's recorded deliverables and are sent as attachments.
-- One active run at a time. Retained evidence is written exclusively (never overwritten).
-- Email is never sent (drafts only); Wiz, ticketing and cloud systems are never changed.
+  JSON content type. Strict CSP (no inline script), no caching, no framing, no referrer.
+- Helper endpoints accept only signed, fresh, non-replayed requests.
+- All text from the session is rendered with `textContent`; the page never builds markup.
+- Downloads are resolved and must stay inside the workspace.
+- Nothing is sent or changed by the console: no email, no Wiz, ticketing or cloud changes.
+
+## Limitations
+
+- Needs the helper installed and the window reloaded once.
+- Which custom agent the new chat uses depends on VS Code applying `mode` in
+  `workbench.action.chat.open`; the session log does not record the main agent, so the
+  console cannot confirm it. Check the agent shown in the chat on the first run.
+- A tool-approval prompt is recognised from the session log; if several are waiting, Allow/Skip
+  refuses and you answer in VS Code.
 
 ## Tests
 
-`python -m pytest tests/test_console_*.py` covers the server security (CSRF, Host/Origin,
-loopback bind, confinement), the MCP client against a fake MCP/OAuth server (PKCE, in-memory
-tokens, 401 reconnect, mutation refusal), run orchestration (collection gate, review gate,
-archive/rollback, window) with synthetic adapters. Live sign-in needs your browser and MFA
-and cannot be automated; test it manually with the steps above.
+`python -m pytest tests/test_console_*.py` uses fake session-state folders, a fake helper
+poll and a loopback HTTP server; no VS Code, Wiz or agent run is needed.

@@ -10,7 +10,7 @@ USAGE = (
     "  email-qa     check an email draft against its reviewed contract\n"
     "  campaign     PHP2Shell campaign reporting\n"
     "  governance   monthly governance reporting (needs the governance extra)\n"
-    "  console      local click-driven workflow console (127.0.0.1; see docs/CONSOLE.md)\n\n"
+    "  console      local frontend that starts a VS Code agent-mode chat (see docs/CONSOLE.md)\n\n"
     "The Risk Issues (wiz-issue-rule-id) workflow is being rebuilt.\n"
 )
 GOVERNANCE_COMMANDS = {
