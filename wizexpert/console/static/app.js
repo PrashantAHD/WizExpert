@@ -2,12 +2,16 @@
 // Every value from the server is rendered with textContent only (never as raw markup).
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const $ = (id) => document.getElementById(id);
-const state = { categories: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "" };
+const state = { categories: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "", view: "" };
 const STATUS_TEXT = {
   starting: "Starting the chat in VS Code", running: "Running", input_needed: "Input needed in VS Code",
   completed: "Finished", stopped: "Stopped", not_started: "Did not start", interrupted: "Interrupted",
 };
 const TERMINAL = new Set(["completed", "stopped", "not_started", "interrupted"]);
+const STAGE_HELP = {
+  new: "Start a fresh review and prepare the initial local deliverables.",
+  "in-progress": "Continue existing work with an acceptance, email, or status action.",
+};
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -37,9 +41,14 @@ function banner(text) { const b = $("banner"); b.hidden = !text; clear(b); if (t
 function when(t) { return t ? new Date(t * 1000).toLocaleTimeString() : ""; }
 
 function renderHelper() {
-  const box = $("helper"); clear(box);
+  const box = $("helper");
+  if (!box) return;
+  clear(box);
   const ok = state.helper.connected;
-  box.append(h("span", {}, h("span", { class: "dot" + (ok ? " on" : "") }), ok ? "VS Code helper connected" : "VS Code helper not connected"));
+  const details = ok
+    ? "Connected · " + (state.helper.agent || "WizExpert") + " · " + (state.helper.workspace || "workspace")
+    : "VS Code helper not connected";
+  box.append(h("span", {}, h("span", { class: "dot" + (ok ? " on" : "") }), details));
   box.append(h("button", { class: "secondary", onclick: checkHelper }, "Check"));
 }
 async function checkHelper() {
@@ -53,40 +62,81 @@ async function checkHelper() {
 // ---- page 1: category ---------------------------------------------------------------------------
 function showPicker() {
   clearInterval(state.timer); state.runId = null; banner("");
-  $("inputs").hidden = true; $("run").hidden = true; $("picker").hidden = false;
+  state.view = "picker";
+  $("home").hidden = false; $("inputs").hidden = true; $("run").hidden = true;
   const root = $("picker"); clear(root);
-  root.append(h("h2", {}, "1. Pick a category"));
-  const cards = h("div", { class: "cards" });
-  for (const c of state.categories) {
-    cards.append(h("div", { class: "card" }, h("strong", {}, c.title), h("p", {}, c.description),
-      h("p", {}, h("button", { onclick: () => showInputs(c) }, "Select"))));
-  }
-  root.append(cards);
+  root.append(h("h2", {}, "Select your workstream"));
 }
 
 // ---- page 2: inputs ---------------------------------------------------------------------------------
 function showInputs(category) {
-  $("picker").hidden = true; $("run").hidden = true; $("inputs").hidden = false; banner("");
+  state.view = "inputs";
+  $("home").hidden = true; $("run").hidden = true; $("inputs").hidden = false; banner("");
   const root = $("inputs"); clear(root);
-  root.append(h("h2", {}, "2. " + category.title));
+  root.append(h("button", { class: "secondary back-home", onclick: showPicker }, "Back to workflows"));
+  if (category.id === "risk-issues") {
+    root.append(h("img", {
+      class: "category-visual",
+      src: "/static/assets/workflow-risk-issues.svg",
+      alt: "Risk Issues workflow: collect, draft, communicate, approve, remediate or accept risk, validate, and update.",
+    }));
+  }
+  root.append(
+    h("div", { class: "detail-heading" },
+      h("p", { class: "breadcrumb" }, "Workflows / ", h("strong", {}, category.title)),
+    ),
+    h("h2", {}, category.title),
+    h("p", { class: "page-intro" }, category.description),
+    h("div", { class: "next-panel" },
+      h("strong", {}, "What happens next?"),
+      h("span", {}, "Your input opens a new VS Code WizExpert chat. This page only mirrors progress and local output files."),
+    ),
+  );
   if (!(category.stages || []).length) { root.append(formPanel(category, category, null, showPicker)); return; }
   // Staged category (e.g. Risk Issues): stage buttons, then one operation form at a time.
   const detail = h("div", {});
   const stageBar = h("p", {});
+  const stageButtons = {};
   const showStage = (stage) => {
     clear(detail);
+    detail.append(h("p", { class: "stage-help" }, STAGE_HELP[stage.id] || ""));
     const actions = category.actions.filter((a) => a.stage === stage.id);
+    if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
+      detail.append(h("p", { class: "work-item-label" }, "Existing work items"));
+      const workItems = h("div", { class: "work-item-list" });
+      const form = h("div", {});
+      for (const item of category.work_items) {
+        workItems.append(h("button", {
+          class: "secondary work-item-button",
+          onclick: () => {
+            clear(form);
+            form.append(formPanel(category, actions[0], actions[0].id, null, { work_item: item }));
+          },
+        }, h("strong", {}, item), h("span", {}, "Continue progress")));
+      }
+      detail.append(workItems, form);
+      return;
+    }
     if (actions.length === 1) { detail.append(formPanel(category, actions[0], actions[0].id, null)); return; }
-    const bar = h("p", {});
+    const bar = h("div", { class: "action-grid" });
     const form = h("div", {});
-    for (const a of actions) bar.append(h("button", { class: "secondary", onclick: () => { clear(form); form.append(h("p", { class: "help" }, a.description), formPanel(category, a, a.id, null)); } }, a.title), " ");
+    for (const a of actions) {
+      bar.append(h("button", {
+        class: "secondary action-card",
+        onclick: () => { clear(form); form.append(h("p", { class: "help" }, a.description), formPanel(category, a, a.id, null)); },
+      }, h("strong", {}, a.title), h("span", { class: "action-description" }, a.description)));
+    }
     detail.append(bar, form);
   };
-  for (const s of category.stages) stageBar.append(h("button", { onclick: () => showStage(s) }, s.title), " ");
-  stageBar.append(h("button", { class: "secondary", onclick: showPicker }, "Back"));
+  for (const s of category.stages) {
+    const button = h("button", { onclick: () => showStage(s) }, s.title);
+    stageButtons[s.id] = button;
+    stageBar.append(button, " ");
+  }
+  stageBar.append(h("button", { class: "secondary", onclick: showPicker }, "Back"), h("span", { class: "nav-help" }, "Return to workflows"));
   root.append(stageBar, detail);
 }
-function formPanel(category, spec, actionId, onBack) {
+function formPanel(category, spec, actionId, onBack, initialValues = {}) {
   const panel = h("div", { class: "panel" });
   const fields = {};
   for (const f of spec.fields) {
@@ -95,9 +145,10 @@ function formPanel(category, spec, actionId, onBack) {
       ? h("textarea", { rows: 8, maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" })
       : h("input", { type: "text", maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" });
     fields[f.name] = input;
+    if (initialValues[f.name]) input.value = initialValues[f.name];
     panel.append(h("label", {}, f.label + (f.required ? " *" : ""), h("div", { class: "help" }, f.help)), input);
   }
-  const message = h("p", { class: "bad" });
+  const message = h("p", { class: "bad", role: "alert" });
   const start = h("button", {}, actionId === "new" || !actionId ? (category.stages && category.stages.length ? "Proceed" : "Start") : "Proceed");
   start.addEventListener("click", async () => {
     message.textContent = ""; start.disabled = true;
@@ -110,14 +161,13 @@ function formPanel(category, spec, actionId, onBack) {
     } catch (e) { message.textContent = e.message; start.disabled = false; }
   });
   panel.append(h("p", {}, start, onBack ? " " : null, onBack ? h("button", { class: "secondary", onclick: onBack }, "Back") : null), message);
-  if (!state.helper.connected) panel.append(h("p", { class: "help" }, "The VS Code helper is not connected yet; see docs/CONSOLE.md (install the helper and reload the window)."));
   return panel;
 }
 
 // ---- page 3: results ---------------------------------------------------------------------------------
 function openRun(runId) {
   state.runId = runId; state.since = 0; state.progress = []; state.shown = "";
-  $("picker").hidden = true; $("inputs").hidden = true; $("run").hidden = false; clear($("run"));
+  $("home").hidden = true; $("inputs").hidden = true; $("run").hidden = false; clear($("run"));
   poll();
 }
 async function poll() {
@@ -138,7 +188,7 @@ function renderRun(run) {
   if (sig === state.shown) return;
   state.shown = sig;
   const root = $("run"); clear(root);
-  root.append(h("h2", {}, "3. " + run.category),
+  root.append(h("h2", {}, run.category),
     h("p", {}, h("span", { class: "badge " + run.status }, STATUS_TEXT[run.status] || run.status), " ", run.message));
   root.append(h("p", { class: "help" }, "Request: " + run.prompt));
   if (run.can_open_chat) root.append(h("p", {}, h("button", { class: "secondary", onclick: openChat }, "Open this chat in VS Code")));
@@ -181,10 +231,29 @@ async function refresh() {
   state.categories = data.categories; state.helper = data.helper; renderHelper();
   const root = $("history"); clear(root);
   if (data.history.length) {
-    root.append(h("h2", {}, "Recent runs"), h("table", {}, h("tr", {}, h("th", {}, "Run"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")),
+    root.append(h("h2", {}, "Recent activity"), h("table", {}, h("tr", {}, h("th", {}, "Run"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")),
       data.history.map((r) => h("tr", {}, h("td", { class: "mono" }, r.id), h("td", {}, r.category_id), h("td", {}, r.status),
         h("td", {}, h("button", { class: "secondary", onclick: () => openRun(r.id) }, "Open"))))));
   }
 }
-refresh().then(showPicker).catch((e) => banner("Could not load: " + e.message));
+document.querySelectorAll("[data-category]").forEach((link) => {
+  link.addEventListener("click", async () => {
+    let category = state.categories.find((c) => c.id === link.dataset.category);
+    if (!category) {
+      try {
+        await refresh();
+        category = state.categories.find((c) => c.id === link.dataset.category);
+      } catch (e) {
+        banner("Could not load workflows: " + e.message);
+        return;
+      }
+    }
+    if (!category) {
+      banner("This workflow is not available yet. Try again after the console finishes loading.");
+      return;
+    }
+    showInputs(category);
+  });
+});
+refresh().then(() => { if (state.view !== "inputs") showPicker(); }).catch((e) => banner("Could not load: " + e.message));
 setInterval(() => { if (!state.runId) refresh().catch(() => {}); }, 10000);

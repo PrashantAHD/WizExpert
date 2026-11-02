@@ -9,16 +9,64 @@
 </head>
 <body>
 <header class="top">
-  <h1>WizExpert Workflow Console</h1>
-  <div id="helper" class="wiz"></div>
+  <div class="brand">
+    <a class="brand-logo" href="/" aria-label="WizExpert Workflow Console">
+      <img src="/static/assets/logo.svg" alt="WizExpert">
+    </a>
+    <div class="brand-copy">
+      <strong>Workflow Console</strong>
+    </div>
+  </div>
 </header>
 <main>
-  <p class="notice">Local only (127.0.0.1). This page only starts and watches a normal VS Code agent-mode chat; all rules, tools, approvals and review stay in that chat. Nothing is sent or changed by this page.</p>
   <section id="banner" class="banner" hidden></section>
+  <div id="home">
+  <section class="about" aria-labelledby="about-title">
+    <div class="about-copy">
+      <p class="eyebrow">WIZEXPERT WORKFLOW STUDIO</p>
+      <h2 id="about-title">Bring every finding to a clear next step.</h2>
+      <p>A focused workspace for turning Wiz findings into reviewed updates, daily reporting, and governance deliverables.</p>
+      <p class="about-note">Start with evidence. Keep decisions visible. Finish with traceable outputs.</p>
+      <p class="attribution">Developed by <strong>Prashant Kumar</strong> · Cloud Security Engineer</p>
+      <div class="about-points" aria-label="WizExpert principles">
+        <span>Evidence first</span>
+        <span>Approval stays human</span>
+        <span>Outputs stay traceable</span>
+      </div>
+    </div>
+    <div class="about-mark" aria-hidden="true">
+      <p class="mark-eyebrow">THE WORKING LOOP</p>
+      <strong>Evidence<br>to<br>action.</strong>
+      <span>Focused workflows for security teams.</span>
+    </div>
+  </section>
   <section id="picker"></section>
+  <section class="visuals" aria-label="Workflow choices">
+    <div class="visual-grid">
+      <figure class="visual-card">
+        <img src="/static/assets/workflow-risk-issues.svg" alt="Risk Issues workflow: collect, draft, communicate, approve, remediate or accept risk, validate, and update.">
+        <p class="visual-summary">Resolve findings with a clear approval trail.</p>
+        <figcaption>
+          <button data-category="risk-issues" class="visual-title-button" type="button">Risk Issues</button>
+          <span>Prepare the Risk Issues deliverables for one or more Wiz issue (rule) IDs.</span>
+        </figcaption>
+      </figure>
+      <figure class="visual-card">
+        <img src="/static/assets/workflow-daily-progress.svg" alt="Daily Progress workflow: collect, draft, communicate, and either continue open work or close and update.">
+        <p class="visual-summary">Keep today’s progress current and reviewable.</p>
+        <figcaption><button data-category="daily-progress-reporting" class="visual-title-button" type="button">Daily Progress Reporting</button><span>Prepare the Daily Progress Reporting pack for today.</span></figcaption>
+      </figure>
+      <figure class="visual-card">
+        <img src="/static/assets/workflow-monthly-governance.svg" alt="Monthly Governance workflow: cutoff, collect, draft, handoff, retain history, and continue to the next month.">
+        <p class="visual-summary">Turn reporting cutoffs into a repeatable rhythm.</p>
+        <figcaption><button data-category="monthly-governance-reporting" class="visual-title-button" type="button">Monthly Governance Reporting</button><span>Prepare the monthly governance reporting for a snapshot period.</span></figcaption>
+      </figure>
+    </div>
+  </section>
+  <section id="history"></section>
+  </div>
   <section id="inputs" hidden></section>
   <section id="run" hidden></section>
-  <section id="history"></section>
 </main>
 <script src="/static/app.js"></script>
 </body>

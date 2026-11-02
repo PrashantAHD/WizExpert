@@ -497,8 +497,11 @@ def test_category_json_exposes_stages_and_actions():
     assert [a["id"] for a in risk["actions"]] == [
         "new", "risk-accepted", "email-response", "update-status",
     ]
-    for other in ("daily-progress-reporting", "monthly-governance-reporting"):
-        assert categories.CATEGORIES[other].to_json()["actions"] == []
+    daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
+    assert [s["id"] for s in daily["stages"]] == ["new", "in-progress"]
+    assert [a["id"] for a in daily["actions"]] == ["new-work-item", "continue-work-item"]
+    assert daily["work_items"] == ["PHP2SHELL Campaign"]
+    assert categories.CATEGORIES["monthly-governance-reporting"].to_json()["actions"] == []
 
 
 def test_risk_accepted_pasted_items_or_folder():
@@ -550,6 +553,35 @@ def test_actions_unavailable_on_other_categories():
         categories.validate("daily-progress-reporting", {}, "update-status")
     with pytest.raises(categories.InputError):
         categories.validate("risk-issues", {"issue_ids": "wc-1"}, ["new"])
+
+
+def test_daily_progress_new_issue_accepts_one_source():
+    values = categories.validate(
+        "daily-progress-reporting",
+        {"work_item_name": "PHP2SHELL Campaign", "issue_ids": "wc-id-1234"},
+        "new-work-item",
+    )
+    assert values["issue_ids"] == "wc-id-1234"
+    assert "PHP2SHELL Campaign" in categories.build_prompt(
+        "daily-progress-reporting", values, action_id="new-work-item"
+    )
+    with pytest.raises(categories.InputError):
+        categories.validate(
+            "daily-progress-reporting",
+            {"work_item_name": "PHP2SHELL Campaign"},
+            "new-work-item",
+        )
+
+
+def test_daily_progress_in_progress_uses_local_work_item():
+    values = categories.validate(
+        "daily-progress-reporting",
+        {"work_item": "PHP2SHELL Campaign"},
+        "continue-work-item",
+    )
+    assert "PHP2SHELL Campaign" in categories.build_prompt(
+        "daily-progress-reporting", values, action_id="continue-work-item"
+    )
 
 
 def test_action_override_key():

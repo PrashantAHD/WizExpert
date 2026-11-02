@@ -19,6 +19,15 @@ ROOT_FILES = {
     "README.md",
     "pyproject.toml",
 }
+PUBLIC_FILES = {
+    ".github/copilot-instructions.md",
+    ".vscode/stop-workflow-console.ps1",
+    ".vscode/tasks.json",
+    "wizexpert/console/static/assets/logo.svg",
+    "wizexpert/console/static/assets/workflow-daily-progress.svg",
+    "wizexpert/console/static/assets/workflow-monthly-governance.svg",
+    "wizexpert/console/static/assets/workflow-risk-issues.svg",
+}
 SOURCE_SUFFIXES = {
     "wizexpert": {".py", ".html", ".css", ".js"},
     "tests": {".py"},
@@ -127,7 +136,7 @@ def path_issues(name: str, *, historical: bool = False) -> list[str]:
     ):
         return ["unsafe file path"]
     issues = [label for label, pattern in PATTERNS if pattern.search(name)]
-    allowed = name in ROOT_FILES or name == ".githooks/pre-push"
+    allowed = name in ROOT_FILES or name in PUBLIC_FILES or name == ".githooks/pre-push"
     allowed |= historical and name in HISTORICAL_FILES
     if len(path.parts) >= 2:
         suffixes = set(SOURCE_SUFFIXES.get(path.parts[0], set()))

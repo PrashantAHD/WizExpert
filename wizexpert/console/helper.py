@@ -89,3 +89,14 @@ def install(out: Path, code_command: str = "code") -> int:
         [command, "--install-extension", str(vsix), "--force"], check=False, timeout=120
     )
     return result.returncode
+
+
+def reload_window(code_command: str = "code") -> int:
+    """Reload the active VS Code window so a newly installed helper can activate."""
+    command = shutil.which(code_command) or code_command
+    result = subprocess.run(  # nosec B603 - fixed arguments, user-chosen CLI name
+        [command, "--reuse-window", "--command", "workbench.action.reloadWindow"],
+        check=False,
+        timeout=30,
+    )
+    return result.returncode
