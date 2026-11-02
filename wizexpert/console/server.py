@@ -420,6 +420,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "categories": manager.categories(),
                     "helper": manager.helper_state(),
                     "history": manager.history(),
+                    "active": manager.active(),
                 },
             )
         if path == "/api/weekly-progress/previous-reports":
@@ -435,6 +436,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "deliverables folders; choose first report or enter a folder name.",
                 },
             )
+        if path == "/api/runs/active":
+            return self._json(HTTPStatus.OK, {"runs": manager.active()})
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
         if match and RUN_ID.fullmatch(match.group(1)):
             try:

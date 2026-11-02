@@ -7,6 +7,7 @@ configured agent (through the helper extension) and then follows the real sessio
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shutil
 import subprocess  # nosec B404
@@ -31,6 +32,9 @@ from .sessions import (
 ATTEMPT_SECONDS = 30.0
 FILES_REFRESH = 6.0
 MAX_RUNS = 50
+ACTIVE = ("starting", "running", "input_needed", "handed_off")
+HANDOFF_WAIT_SECONDS = 1800.0
+INACTIVE = ("completed", "stopped", "interrupted", "not_started")
 
 
 class RunError(Exception):
@@ -53,6 +57,10 @@ class Run:
     files: list[dict[str, Any]] = field(default_factory=list)
     files_at: float = 0.0
     files_n: int = -1
+    chain: list[dict[str, Any]] = field(default_factory=list)  # earlier chats of this run
+    handoff: dict[str, Any] | None = None  # handed off, new chat not resolved yet
+    handoff_try: float = 0.0
+    carried: dict[str, str] = field(default_factory=dict)  # files written by earlier chats
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -99,14 +107,105 @@ class RunManager:
                     item.get("session_id", ""),
                     item.get("ahp_id", ""),
                 )
-                if run.status == "starting":
+                run.chain = [c for c in item.get("chain", []) if isinstance(c, dict)][:50]
+                handoff = item.get("handoff")
+                run.handoff = handoff if isinstance(handoff, dict) else None
+                carried = item.get("carried")
+                run.carried = (
+                    {str(k): str(v) for k, v in carried.items()}
+                    if isinstance(carried, dict)
+                    else {}
+                )
+                self._runs[run.id] = run
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        # A restart is not evidence that a chat ended: runs that were active stay active and are
+        # re-bound to their session log (the log is the source of pending approvals/questions).
+        for run in list(self._runs.values()):
+            if run.status == "starting" and not run.session_id:
+                try:
+                    sid = self.finder.find(run.prompt, run.created, self._claimed())
+                except Exception:  # noqa: BLE001 - recovery is best effort
+                    sid = None
+                if sid:
+                    run.session_id, run.status, run.message = sid, "running", ""
+                else:
                     run.status, run.message = (
                         "not_started",
                         "The console stopped before this run started.",
                     )
-                self._runs[run.id] = run
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+            if run.status in ACTIVE and run.session_id:
+                run.view = self._make_view(run, seed=True)
+
+    def _make_view(self, run: Run, *, seed: bool = False, base_seq: int = 0) -> SessionView:
+        """A log reader for the run's current chat; after a restart it replays the chain."""
+        view = SessionView(self.config.session_state / run.session_id / "events.jsonl")
+        if seed:
+            for link in run.chain:
+                view._add(
+                    "handoff",
+                    "Handed off to a new chat"
+                    + (f": {link['title']}" if link.get("title") else "")
+                    + ".",
+                    float(link.get("time") or 0.0),
+                )
+        else:
+            view.seq = base_seq
+        return view
+
+    def _follow(self, run: Run) -> None:
+        """Re-bind the run to the new chat once the current chat handed off to it."""
+        sv = run.view
+        if sv is None or run.status in INACTIVE:
+            return
+        sv.poll()
+        found = sv.handoff
+        with run.lock:
+            if found is not None and run.handoff is None:
+                if found["ahp"] == run.ahp_id:
+                    return
+                run.handoff = {**found, "from": run.session_id, "from_ahp": run.ahp_id}
+                run.ahp_id = found["ahp"]  # Open chat / Stop already point at the new chat
+                run.status = "handed_off"
+                self._save()
+            pending = run.handoff
+            if pending is None:
+                return
+            now = self._clock()
+            if now - run.handoff_try < 2.0:
+                return
+            run.handoff_try = now
+        sid = self.finder.sdk_session(pending["ahp"]) or self.finder.find_handoff(
+            str(pending.get("prompt") or ""),
+            float(pending.get("since") or 0.0),
+            self._claimed() | {str(pending.get("from") or "")},
+        )
+        if not sid or sid == pending.get("from") or not (
+            self.config.session_state / sid / "events.jsonl"
+        ).exists():
+            if now - float(pending.get("since") or now) > HANDOFF_WAIT_SECONDS:
+                with run.lock:
+                    run.status, run.handoff = "interrupted", None
+                    run.message = "The handoff chat never appeared; open VS Code to continue."
+                    self._save()
+            return
+        with run.lock:
+            run.carried.update(sv.written)
+            run.chain.append(
+                {
+                    "session_id": pending.get("from", ""),
+                    "ahp_id": pending.get("from_ahp", ""),
+                    "next_ahp": pending["ahp"],
+                    "title": pending.get("title", ""),
+                    "time": pending.get("since", now),
+                }
+            )
+            del run.chain[:-50]
+            run.session_id, run.ahp_id, run.handoff = sid, pending["ahp"], None
+            run.status, run.message = "running", ""
+            run.view = self._make_view(run, base_seq=sv.seq)
+            run.files_n = -1
+            self._save()
 
     def _save(self) -> None:
         items = sorted(self._runs.values(), key=lambda r: r.created)[-MAX_RUNS:]
@@ -121,12 +220,17 @@ class RunManager:
                 "message": r.message,
                 "session_id": r.session_id,
                 "ahp_id": r.ahp_id,
+                "chain": r.chain,
+                "handoff": r.handoff,
+                "carried": dict(list(r.carried.items())[:200]),
             }
             for r in items
         ]
         try:
             self.config.state_dir.mkdir(parents=True, exist_ok=True)
-            self._index.write_text(json.dumps(data), encoding="utf-8")
+            tmp = self._index.with_name(f"runs.json.{secrets.token_hex(3)}.tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, self._index)  # atomic: a crash never leaves a half-written index
         except OSError:
             pass
 
@@ -144,10 +248,43 @@ class RunManager:
             "problem": self.helper_note,
         }
 
-    def _refuse_if_starting(self) -> None:
+    def _refuse_if_starting(self, category_id: str | None = None) -> None:
         with self._lock:
-            if any(r.status == "starting" for r in self._runs.values()):
-                raise RunError("Another run is still starting; wait for it to appear first.")
+            runs = list(self._runs.values())
+        if any(r.status == "starting" for r in runs):
+            raise RunError("Another run is still starting; wait for it to appear first.")
+        for r in runs:
+            if category_id and r.category_id == category_id and self._still_active(r):
+                raise RunError(
+                    "A run of this workflow is already active (run "
+                    + r.id
+                    + "). Open it from Recent activity instead of starting a duplicate."
+                )
+
+    def _still_active(self, run: Run) -> bool:
+        """True while the run is non-terminal, after re-reading its session log."""
+        if run.status not in ACTIVE:
+            return False
+        self._follow(run)
+        sv = run.view
+        if sv is not None:
+            sv.poll()
+            state = sv.status(self._clock())
+            with run.lock:
+                if run.status in ("running", "input_needed", "handed_off") and run.status != state:
+                    run.status = state
+                    self._save()
+        return run.status in ACTIVE
+
+    def active(self) -> list[dict[str, Any]]:
+        """Non-terminal runs (newest first) so a refreshed page or new tab can re-attach."""
+        with self._lock:
+            runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)
+        return [
+            {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
+            for r in runs
+            if self._still_active(r)
+        ]
 
     def start(
         self,
@@ -162,14 +299,14 @@ class RunManager:
         except InputError as error:
             raise RunError(str(error)) from None
         workspace = str(self.config.resolved_workspace())
-        self._refuse_if_starting()
+        self._refuse_if_starting(category_id)
         helper_ready = self.bridge.helper_connected(workspace)
         if not helper_ready and ensure_helper is not None:
             # Slow (install / wake / wait): never hold the manager lock, so status polling and
             # other requests keep answering; the starting check is repeated below.
             helper_ready = ensure_helper()
         with self._lock:
-            self._refuse_if_starting()
+            self._refuse_if_starting(category_id)
             helper_ready = helper_ready or self.bridge.helper_connected(workspace)
             if not helper_ready and not self.config.allow_cli_fallback:
                 raise RunError(
@@ -263,9 +400,10 @@ class RunManager:
 
     def view(self, run_id: str, since: int = 0) -> dict[str, Any]:
         run = self.get(run_id)
+        self._follow(run)
         with run.lock:
             if run.session_id and run.view is None:
-                run.view = SessionView(self.config.session_state / run.session_id / "events.jsonl")
+                run.view = self._make_view(run, seed=True)
             sv, status = run.view, run.status
         data: dict[str, Any] = {
             "id": run.id,
@@ -288,15 +426,22 @@ class RunManager:
             now = self._clock()
             state = sv.status(now)
             with run.lock:
-                if run.status in ("running", "input_needed", "completed", "stopped"):
+                if run.status in ("running", "input_needed", "handed_off", "completed", "stopped"):
                     changed = run.status != state
                     run.status = state
                     if changed:
                         self._save()
                 status = run.status
+                if status == "handed_off" and run.handoff:
+                    run.message = (
+                        "Handed off to a new chat"
+                        + (f" '{run.handoff.get('title')}'" if run.handoff.get("title") else "")
+                        + " \u2013 waiting for it to appear."
+                    )
                 if not run.ahp_id:
                     run.ahp_id = self.finder.ahp_id(run.session_id) or ""
                 ahp = run.ahp_id
+            data["message"] = run.message
             pending = sv.pending(now)
             with sv.lock:
                 items = [i for i in sv.progress if i["seq"] > since]
@@ -308,6 +453,7 @@ class RunManager:
                 {
                     "kind": pending.kind,
                     "text": pending.text,
+                    "detail": pending.detail,
                     "key": pending.key,
                     "can_decide": pending.kind == "permission" and bool(ahp),
                 }
@@ -326,7 +472,9 @@ class RunManager:
         with run.lock:
             stale = now - run.files_at >= FILES_REFRESH or run.files_n != len(sv.written)
             if stale or status in ("completed", "stopped") and not run.files:
-                run.files = collect_files(self.config, dict(sv.written), run.created)
+                run.files = collect_files(
+                    self.config, {**run.carried, **dict(sv.written)}, run.created
+                )
                 run.files_at, run.files_n = now, len(sv.written)
             files = list(run.files)
         return [{**{k: v for k, v in f.items()}, "index": i} for i, f in enumerate(files)]

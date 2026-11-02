@@ -6,6 +6,7 @@ const state = { categories: [], helper: {}, runId: null, timer: null, since: 0, 
 const STATUS_TEXT = {
   starting: "Starting the chat in VS Code", running: "Running", input_needed: "Input needed in VS Code",
   completed: "Finished", stopped: "Stopped", not_started: "Did not start", interrupted: "Interrupted",
+  handed_off: "Handed off \u2013 waiting for new chat",
 };
 const TERMINAL = new Set(["completed", "stopped", "not_started", "interrupted"]);
 const STAGE_HELP = {
@@ -70,8 +71,11 @@ async function checkHelper() {
 }
 
 // ---- page 1: category ---------------------------------------------------------------------------
-function showPicker() {
-  clearInterval(state.timer); state.runId = null; banner("");
+function showPicker(dismiss) {
+  clearTimeout(state.timer); state.runId = null; banner("");
+  if (dismiss) state.dismissed = true;
+  try { sessionStorage.removeItem("wizexpert.run"); } catch (_e) { /* storage unavailable */ }
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
   state.view = "picker";
   $("home").hidden = false; $("inputs").hidden = true; $("run").hidden = true;
   const root = $("picker"); clear(root);
@@ -272,7 +276,10 @@ function formPanel(category, spec, actionId, onBack, initialValues = {}) {
 
 // ---- page 3: results ---------------------------------------------------------------------------------
 function openRun(runId) {
-  state.runId = runId; state.since = 0; state.progress = []; state.shown = "";
+  clearTimeout(state.timer);
+  state.runId = runId; state.since = 0; state.progress = []; state.shown = ""; state.dismissed = false; state.view = "run";
+  try { sessionStorage.setItem("wizexpert.run", runId); } catch (_e) { /* storage unavailable */ }
+  if (location.hash !== "#run=" + runId) history.replaceState(null, "", "#run=" + runId);
   $("home").hidden = true; $("inputs").hidden = true; $("run").hidden = false; clear($("run"));
   poll();
 }
@@ -286,7 +293,10 @@ async function poll() {
     state.progress.push(...run.progress); if (state.progress.length > 400) state.progress.splice(0, state.progress.length - 400);
     renderRun(run);
     state.timer = setTimeout(poll, TERMINAL.has(run.status) ? 8000 : 1500); // keep files fresh after the chat ends
-  } catch (e) { banner("Lost contact with the console: " + e.message); state.timer = setTimeout(poll, 4000); }
+  } catch (e) {
+    if (/unknown run/i.test(e.message)) { showPicker(true); refresh().catch(() => {}); return; } // stale id from an old tab/link
+    banner("Lost contact with the console: " + e.message); state.timer = setTimeout(poll, 4000);
+  }
 }
 function renderRun(run) {
   // Rebuild only when something changed, so button messages and scroll position survive polling.
@@ -305,8 +315,9 @@ function renderRun(run) {
   }
   root.append(h("h3", {}, "Output files (" + run.files.length + ")"), filesBlock(run));
   if (run.can_open_output) root.append(h("p", {}, h("button", { class: "secondary", onclick: openLatestOutput }, "View latest output")));
-  root.append(h("h3", {}, "Progress"), progressBlock());
-  root.append(h("p", {}, h("button", { class: "secondary", onclick: () => { showPicker(); refresh(); } }, "Start another")));
+  root.append(h("h3", {}, "Progress"), activityBlock());
+  root.append(rawProgressBlock());
+  root.append(h("p", {}, h("button", { class: "secondary", onclick: () => { showPicker(true); refresh(); } }, "Start another")));
 }
 function stopButton(run) {
   const button = h("button", { class: "danger", onclick: async () => {
@@ -331,7 +342,9 @@ async function openLatestOutput() {
 }
 function pendingBlock(run) {
   const p = run.pending;
-  const box = h("div", { class: "panel pending" }, h("strong", {}, p.kind === "question" ? "The agent is asking a question" : "Waiting for tool approval"), h("div", { class: "ref" }, p.text));
+  const handoff = p.kind === "permission" && p.text.startsWith("Spend-Guard handoff");
+  const box = h("div", { class: "panel pending" }, h("strong", {}, p.kind === "question" ? "The agent is asking a question" : handoff ? "Approve handoff to a new chat" : "Waiting for tool approval"), h("div", { class: "ref" }, p.text));
+  if (p.detail) box.append(h("div", { class: "help" }, "Handoff prompt"), h("div", { class: "ref" }, p.detail));
   const msg = h("span", { class: "bad" });
   const act = (a) => async () => { msg.textContent = ""; try { await api("POST", "/api/runs/" + run.id + "/decide", { action: a }); } catch (e) { msg.textContent = e.message; } };
   if (p.can_decide) box.append(h("button", { onclick: act("accept") }, "Allow"), " ", h("button", { class: "danger", onclick: act("skip") }, "Skip"), " ");
@@ -345,14 +358,42 @@ function filesBlock(run) {
   for (const f of run.files) table.append(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", { class: "mono" }, f.location)));
   return table;
 }
-function progressBlock() {
+function activityBlock() {
+  const box = h("div", { class: "activity", "aria-live": "polite" });
+  const relevant = state.progress.filter((i) => i.kind === "tool" || i.kind === "assistant" || i.kind === "error" || i.kind === "handoff");
+  const recent = relevant.slice(-14);
+  const important = relevant.filter((i) => i.kind === "error" || i.failed || i.aborted);
+  const items = [...important, ...recent].filter((item, index, all) => all.indexOf(item) === index);
+  if (!items.length) return h("div", { class: "activity empty" }, "Waiting for the agent to start...");
+  for (const i of items) {
+    const active = i.kind === "tool" && !i.completed && !i.failed && !i.aborted;
+    const label = i.kind === "tool"
+      ? (i.sub ? (active ? "Running subagent task" : i.failed ? "Subagent task failed" : i.aborted ? "Subagent task stopped" : "Subagent task complete")
+        : (active ? "Running task" : i.failed ? "Task failed" : i.aborted ? "Task stopped" : "Task complete"))
+      : i.kind === "error" ? "Error" : i.kind === "handoff" ? "Handed off to a new chat" : i.sub ? "Subagent update" : "Agent update";
+    const bad = i.kind === "error" || i.failed || i.aborted;
+    box.append(h("div", { class: "activity-item " + i.kind + (active ? " active" : "") + (bad ? " failed" : "") },
+      h("span", { class: "activity-marker", "aria-hidden": "true" }, active ? "●" : bad ? "!" : "✓"),
+      h("div", { class: "activity-copy" },
+        h("strong", {}, label),
+        h("span", {}, i.text),
+      ),
+      h("time", {}, when(i.time)),
+    ));
+  }
+  return box;
+}
+function rawProgressBlock() {
+  const details = h("details", { class: "raw-progress" });
+  details.append(h("summary", {}, "Show raw event log"));
   const box = h("div", { class: "log" });
   for (const i of state.progress.slice(-120)) {
     const label = i.sub ? "subagent" : i.kind === "tool" ? "tool" : i.kind === "user" ? "you" : i.kind === "error" ? "error" : "agent";
     box.append(h("div", { class: "line " + i.kind + (i.failed ? " failed" : "") }, when(i.time) + "  [" + label + "] " + i.text));
   }
   if (!state.progress.length) box.append("Waiting for the first messages...");
-  return box;
+  details.append(box);
+  return details;
 }
 
 let lastConnect = 0;
@@ -362,11 +403,33 @@ async function autoConnect() {
   lastConnect = Date.now();
   try { Object.assign(state.helper, await api("POST", "/api/helper/connect")); renderHelper(); } catch (_e) { /* shown by the next status */ }
 }
+function wantedRun(data) {
+  // Deep link or this tab's last run first (it may have finished: the run view shows the final
+  // state), then the newest active run reported by the backend.
+  const fromHash = /^#run=([\w-]+)$/.exec(location.hash);
+  let saved = "";
+  try { saved = sessionStorage.getItem("wizexpert.run") || ""; } catch (_e) { /* storage unavailable */ }
+  return (fromHash && fromHash[1]) || saved || (data.active && data.active.length ? data.active[0].id : "");
+}
 async function refresh() {
   const data = await api("GET", "/api/bootstrap");
   state.categories = data.categories; state.helper = data.helper; renderHelper();
   autoConnect();
+  state.active = data.active || [];
+  if (!state.runId && state.view !== "inputs") {
+    if (!state.booted) {
+      const id = wantedRun(data);
+      if (id) openRun(id);
+    } else if (!state.dismissed && state.active.length) {
+      openRun(state.active[0].id);
+    }
+  }
+  state.booted = true;
   const root = $("history"); clear(root);
+  if (state.active.length) {
+    root.append(h("div", { class: "panel pending" }, h("strong", {}, "A task is still running: "),
+      state.active.map((r) => h("button", { class: "secondary", onclick: () => openRun(r.id) }, "Open " + r.category_id + " (" + (STATUS_TEXT[r.status] || r.status) + ")"))));
+  }
   if (data.history.length) {
     root.append(h("h2", {}, "Recent activity"), h("table", {}, h("tr", {}, h("th", {}, "Run"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")),
       data.history.map((r) => h("tr", {}, h("td", { class: "mono" }, r.id), h("td", {}, r.category_id), h("td", {}, r.status),
@@ -392,5 +455,9 @@ document.querySelectorAll("[data-category]").forEach((link) => {
     showInputs(category);
   });
 });
-refresh().then(() => { if (state.view !== "inputs") showPicker(); }).catch((e) => banner("Could not load: " + e.message));
+refresh().then(() => { if (state.view !== "inputs" && !state.runId) showPicker(); }).catch((e) => banner("Could not load: " + e.message));
+window.addEventListener("hashchange", () => {
+  const m = /^#run=([\w-]+)$/.exec(location.hash);
+  if (m && m[1] !== state.runId) openRun(m[1]);
+});
 setInterval(() => { if (!state.runId) refresh().catch(() => {}); }, 10000);
