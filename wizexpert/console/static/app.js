@@ -44,9 +44,8 @@ async function api(method, path, body) {
 function banner(text) { const b = $("banner"); b.hidden = !text; clear(b); if (text) b.append(text); }
 function helperRecoveryMessage(error) {
   const text = String(error && error.message || error);
-  if (!/helper|reconnect|chat/i.test(text)) return;
-  banner("VS Code needs one-time permission to create a chat in this workspace. "
-    + "Run Developer: Reload Window, click Refresh again, then choose Allow Always if prompted.");
+  if (!/helper|reconnect|chat|trust|permission/i.test(text)) return;
+  banner("VS Code helper problem: " + text);
 }
 function when(t) { return t ? new Date(t * 1000).toLocaleTimeString() : ""; }
 
@@ -57,7 +56,8 @@ function renderHelper() {
   const ok = state.helper.connected;
   const details = ok
     ? "Connected · " + (state.helper.agent || "WizExpert") + " · " + (state.helper.workspace || "workspace")
-    : "VS Code helper not connected";
+    : state.helper.connecting ? "Connecting the VS Code helper: a standard VS Code window for the workspace is opened automatically..."
+      : "VS Code helper not connected" + (state.helper.problem ? " - " + state.helper.problem : " - a standard VS Code window for the workspace is opened automatically");
   box.append(h("span", {}, h("span", { class: "dot" + (ok ? " on" : "") }), details));
   box.append(h("button", { class: "secondary", onclick: checkHelper }, "Check"));
 }
@@ -355,9 +355,17 @@ function progressBlock() {
   return box;
 }
 
+let lastConnect = 0;
+async function autoConnect() {
+  // The console opens a standard VS Code window for the workspace itself; one recovery at a time.
+  if (state.helper.connected || Date.now() - lastConnect < 30000) return;
+  lastConnect = Date.now();
+  try { Object.assign(state.helper, await api("POST", "/api/helper/connect")); renderHelper(); } catch (_e) { /* shown by the next status */ }
+}
 async function refresh() {
   const data = await api("GET", "/api/bootstrap");
   state.categories = data.categories; state.helper = data.helper; renderHelper();
+  autoConnect();
   const root = $("history"); clear(root);
   if (data.history.length) {
     root.append(h("h2", {}, "Recent activity"), h("table", {}, h("tr", {}, h("th", {}, "Run"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")),

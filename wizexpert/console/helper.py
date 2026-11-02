@@ -1,8 +1,8 @@
 """Build and install the VS Code helper extension (no packaging tools needed).
 
 ``build_vsix`` zips the bundled extension source with a generated manifest; ``install`` runs
-``code --install-extension`` so VS Code registers it. VS Code must reload its window to
-activate a newly installed extension.
+``code --install-extension`` so VS Code registers it. The helper only activates in a standard
+VS Code window (not the Agents window); ``open_workspace_window`` opens one for the workspace.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 
 NAME = "wizexpert-console-helper"
 PUBLISHER = "local"
-VERSION = "0.1.2"
+VERSION = "0.1.6"
 SOURCE = Path(__file__).resolve().parent / "extension" / "extension.js"
 
 PACKAGE = {
@@ -27,10 +27,22 @@ PACKAGE = {
     "publisher": PUBLISHER,
     "engines": {"vscode": "^1.90.0"},
     "categories": ["Other"],
-    "activationEvents": ["*"],
+    "activationEvents": [
+        "onStartupFinished",
+        "onUri",
+        "workspaceContains:**/*",
+        "onCommand:wizexpertConsoleHelper.status",
+    ],
     "main": "./extension.js",
     "extensionKind": ["ui"],
-    "contributes": {},
+    "contributes": {
+        "commands": [
+            {
+                "command": "wizexpertConsoleHelper.status",
+                "title": "WizExpert Console Helper: Show Status",
+            }
+        ]
+    },
 }
 CONTENT_TYPES = """<?xml version="1.0" encoding="utf-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -81,11 +93,65 @@ def build_vsix(out: Path) -> Path:
     return out
 
 
-def install(out: Path, code_command: str = "code") -> int:
-    """Build the vsix and install it into VS Code. Returns the CLI exit code."""
+EXTENSION_ID = f"{PUBLISHER}.{NAME}"
+
+
+def _cli(code_command: str) -> str:
+    return shutil.which(code_command) or code_command
+
+
+def installed_version(code_command: str = "code") -> str | None:
+    """Version of the helper VS Code has registered, or None (also when the CLI is unusable)."""
+    try:
+        result = subprocess.run(  # nosec B603 - fixed arguments, user-chosen CLI name
+            [_cli(code_command), "--list-extensions", "--show-versions"],
+            check=False,
+            timeout=60,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    prefix = EXTENSION_ID.lower() + "@"
+    for line in result.stdout.splitlines():
+        if line.strip().lower().startswith(prefix):
+            return line.strip().split("@", 1)[1]
+    return None
+
+
+def open_workspace_window(code_command: str, workspace: Path | str) -> int:
+    """Open a standard VS Code window (``code -n <workspace>``) for the configured workspace.
+
+    The VS Code "Agents" window never loads user-installed extensions, so the helper can only
+    connect from a standard workbench window. Argument list only (no shell); the single path
+    argument is the configured workspace and must be an existing folder.
+    """
+    folder = Path(workspace)
+    if not folder.is_dir():
+        return 1
+    try:
+        return subprocess.run(  # nosec B603 - fixed arguments, configured workspace folder
+            [_cli(code_command), "-n", str(folder)],
+            check=False,
+            timeout=30,
+            capture_output=True,
+        ).returncode
+    except (OSError, subprocess.SubprocessError):
+        return 1
+
+
+def install(out: Path, code_command: str = "code", force: bool = False) -> int:
+    """Build the vsix and install it into VS Code. Returns the CLI exit code.
+
+    Idempotent: when this exact version is already registered the install is skipped, because
+    ``--force`` re-extracts the folder under a running extension host and makes windows lose it.
+    """
+    if not force and installed_version(code_command) == VERSION:
+        return 0
     vsix = build_vsix(out)
-    command = shutil.which(code_command) or code_command
     result = subprocess.run(  # nosec B603 - fixed arguments, user-chosen CLI name
-        [command, "--install-extension", str(vsix), "--force"], check=False, timeout=120
+        [_cli(code_command), "--install-extension", str(vsix), "--force"],
+        check=False,
+        timeout=120,
     )
     return result.returncode
