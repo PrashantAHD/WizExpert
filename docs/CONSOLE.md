@@ -13,6 +13,7 @@ windows, no Wiz calls, no validators, no review gates.
 |---|---|---|
 | Risk Issues | Wiz issue/rule ID(s) | `Risk Issues category: prepare the deliverables for Wiz issue <ids>` |
 | Daily Progress Reporting | none, or a short note | `Daily Progress Reporting category: prepare the daily progress report for today` |
+| Weekly Progress Reporting | required Reporting Monday (`YYYY-MM-DD`, must be a real Monday), optional SNOW ticket/reference (empty: agent fetches/maps it from Wiz read-only), optional latest SNOW response (up to 1500 characters, folded, sent as quoted data between BEGIN/END SNOW RESPONSE, never instructions), optional previous-report folder (empty = first report), optional note | `Weekly Progress Reporting category: prepare the Monday report for the previous week ... SNOW reference <ref>`; states local-only, no Wiz/SNOW/cloud change, no email sent; initial deliverables Excel, slide deck, HTML, PDF, email draft |
 | Monthly Governance Reporting | snapshot period `YYYY-MM` | `Monthly Governance Reporting category: prepare the monthly governance reporting for <YYYY-MM>` |
 
 Input is allow-listed (characters and length) so a form value cannot add instructions:
@@ -45,14 +46,36 @@ it keeps the old behavior. Template overrides use `risk-issues` (New) or
 `risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`). Daily Progress
 also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
 name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
-work-item list. Monthly Governance remains a single-form category.
+work-item list and uses a single **Refresh** button for the selected item. Monthly Governance
+remains a single-form category.
+
+### Weekly Progress Reporting inputs
+
+The category depends on Risk Issues and Daily Progress Reporting: the prompt tells the agent to
+update the previous weekly report, reuse their latest local records/outputs (status, remediation
+progress, SNOW and email responses), fetch only current read-only Wiz status, reconcile new
+responses and never infer closure from an owner message. Items resolved during the covered period stay in that
+period's report with resolution/current-status evidence and drop off the next period's active
+carry-forward list unless they return to IN_PROGRESS; the prior report stays as the historical
+record. No external mutation, no email sent.
+
+The prompt states the reporting Monday and derives the covered prior week (the preceding
+Monday to Sunday) from it. The previous-report selector is filled from `GET /api/weekly-progress/previous-reports`
+(CSRF-protected, read-only, local only; no Wiz, SNOW or cloud call). It lists names and
+root-relative folder references only, never file contents: folders under the configured output
+roots whose path contains "weekly progress" and that directly hold a recognized deliverable
+file. Paths are confined to the workspace, excluded/denied locations and symlinks are skipped,
+depth is at most 3 levels and the list holds at most 50 newest folders. When nothing is found
+the response says so explicitly and the selector offers "None: this is the first report"
+(the prompt then states it is the first report). "Enter a folder name manually" remains as a
+fallback, also used when the listing fails; the agent confirms a typed folder exists.
 
 ## Install and run
 
 ```powershell
 # once: install the helper extension (an unpacked copy lands in %USERPROFILE%\.vscode\extensions)
 wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
-# then reload the VS Code window that has the workspace open (Developer: Reload Window)
+# then run Developer: Reload Window once in the VS Code window that has the workspace open
 
 wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
@@ -64,18 +87,49 @@ To build and install or update the helper as part of console startup, add
 wizexpert console --workspace <workspace folder> --install-helper
 ```
 
-The command does not force a VS Code reload, because that could interrupt active work.
+The command does not reload VS Code, because that could interrupt active work.
 After the first installation, use **Developer: Reload Window** once; later launches can
 omit `--install-helper` unless the helper source changes.
+If VS Code asks whether the helper may create a chat in this workspace, choose **Allow
+Always**. This is a one-time workspace permission for the local helper; it prevents each
+refresh from stopping at the chat-creation prompt.
 
-By default, submitting a run also checks the workspace helper connection and attempts the
-same install/reconnect flow if the helper is missing. Use `--no-auto-helper` only when
-you want submissions to fail immediately instead of changing the local VS Code setup.
+By default, submitting a run first allows a short normal reconnect window, then checks the
+workspace helper connection and installs the helper only if it is
+still missing, then waits up to about 20 seconds for it to connect. VS Code offers no
+supported way to reload a window from outside, so if the helper does not connect the console
+asks you to run **Developer: Reload Window** once in VS Code and try again. Use `--no-auto-helper` only when you want submissions
+to fail immediately instead of changing the local VS Code setup.
 
+On the live run screen, **Stop** requests that the active VS Code chat stop. After a successful
+run, **View latest output** opens only the newest output file already validated and listed by
+the console. The work-item card remains available for another **Refresh** after the run ends or
+fails.
+
+### Canonical local setup (one console, one backend)
+
+Chrome shows the console UI; the VS Code helper extension runs in the VS Code window
+that has the **same workspace** open. Both must use one workspace identity, so launch from
+the private outer root (the folder holding `deliverables/`, `AGENTS.md` and `.vscode/`),
+never from this repository:
+
+- Outer root (canonical `--workspace`): `<outer root>` (example `C:\Users\<you>\WizExpert`)
+- Package, tests and `.venv`: `<outer root>\WizExpert` (this public repository)
+- Launch: in VS Code opened on `<outer root>`, run **Tasks: Run Task** →
+  **WizExpert: Workflow console (auto-reload)**. It runs
+  `<outer root>\WizExpert\.venv\Scripts\python.exe -m wizexpert.console.dev --workspace <outer root> --port 8765`
+  in a fresh terminal. The task first stops an existing console belonging to the
+  same canonical workspace, so there is a single backend on port 8765.
+- Stop: **WizExpert: Stop workflow console** (outer root) stops that process.
+
+The task in this repository's `.vscode/tasks.json` deliberately does not start a console;
+it only explains this setup, so a second backend with a mismatched workspace cannot be
+launched by accident. The helper still refuses a workspace mismatch; that check is
+unchanged.
 ### Auto-reload during development
 
 Use the VS Code command palette and choose **Tasks: Run Task** →
-**WizExpert: Workflow console (auto-reload)**. This starts the console in one dedicated
+**WizExpert: Workflow console (auto-reload)**. This starts the console in a fresh
 VS Code terminal and opens the browser once. Changes to console Python, JavaScript, HTML,
 CSS, JSON or SVG files automatically restart the backend without requiring a second
 terminal or manual process management. Refresh the browser after the restart; the

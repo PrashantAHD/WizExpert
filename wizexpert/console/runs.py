@@ -267,6 +267,8 @@ class RunManager:
             "summary": "",
             "files": [],
             "can_open_chat": False,
+            "can_stop": False,
+            "can_open_output": False,
         }
         if sv is not None:
             sv.poll()
@@ -301,6 +303,8 @@ class RunManager:
             )
             data["files"] = self._files(run, sv, status)
             data["can_open_chat"] = bool(ahp)
+            data["can_stop"] = status not in ("completed", "stopped", "interrupted", "not_started")
+            data["can_open_output"] = status == "completed" and bool(data["files"])
         data["status"] = status
         return data
 
@@ -348,6 +352,60 @@ class RunManager:
         result = self.bridge.wait_result(job, 20.0)
         if result is None or result.get("errors"):
             raise RunError("VS Code did not open the chat: " + _result_text(result))
+
+    def stop(self, run_id: str) -> None:
+        run = self.get(run_id)
+        if not run.ahp_id:
+            raise RunError("The live chat is not ready to stop yet.")
+        if run.status in ("completed", "stopped", "interrupted", "not_started"):
+            raise RunError("This run is no longer active.")
+        sv = run.view
+        inactive = ("completed", "stopped", "interrupted", "not_started")
+
+        def guard() -> tuple[bool, str]:
+            if run.status in inactive:
+                return False, "this chat is no longer running"
+            if sv is not None:
+                sv.poll()
+                if sv.status(self._clock()) in inactive:
+                    return False, "this chat is no longer running"
+            return True, ""
+
+        job = self.bridge.post_job(
+            {
+                "kind": "stop_chat",
+                "workspace": str(self.config.resolved_workspace()),
+                "ahp": run.ahp_id,
+                "openWait": self.config.open_wait_ms,
+            },
+            guard=guard,
+        )
+        result = self.bridge.wait_result(job, 20.0)
+        if result is not None and result.get("info", {}).get("guard"):
+            raise RunError("Not stopped: " + short(result["info"]["guard"], 120))
+        if result is None or result.get("errors"):
+            raise RunError("VS Code did not stop the chat: " + _result_text(result))
+
+    def open_output(self, run_id: str) -> None:
+        run = self.get(run_id)
+        if run.status != "completed":
+            raise RunError("Latest output is available after a successful refresh.")
+        if run.view is None:
+            raise RunError("No output is available for this run.")
+        files = self._files(run, run.view, run.status)
+        if not files:
+            raise RunError("No safe local output was found for this run.")
+        latest = files[0]
+        path = (self.config.resolved_workspace() / latest["path"]).resolve()
+        if not path.is_file() or self.config.resolved_workspace() not in path.parents:
+            raise RunError("The latest output path is no longer available.")
+        workspace = str(self.config.resolved_workspace())
+        job = self.bridge.post_job(
+            {"kind": "open_file", "workspace": workspace, "path": str(path)}
+        )
+        result = self.bridge.wait_result(job, 20.0)
+        if result is None or result.get("errors"):
+            raise RunError("VS Code did not open the latest output: " + _result_text(result))
 
     def decide(self, run_id: str, action: str) -> None:
         if action not in ("accept", "skip"):

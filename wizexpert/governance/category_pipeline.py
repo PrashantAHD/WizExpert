@@ -1,4 +1,4 @@
-﻿"""Enforced category pipeline: select -> fixed slots -> build -> validate -> QA/review.
+"""Enforced category pipeline: select -> fixed slots -> build -> validate -> QA/review.
 
 The caller binds each fixed slot to a private builder and validator (plain
 callables supplied from private storage). This module only orchestrates: it

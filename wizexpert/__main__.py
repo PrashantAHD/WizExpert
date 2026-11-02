@@ -1,4 +1,4 @@
-﻿"""Command-line entry point: QA checks, PHP2Shell campaign and governance reporting."""
+"""Command-line entry point: QA checks, PHP2Shell campaign and governance reporting."""
 
 import sys
 from collections.abc import Sequence

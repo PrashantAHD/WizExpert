@@ -34,10 +34,20 @@ async function api(method, path, body) {
   const response = await fetch(path, options);
   let data = {};
   try { data = await response.json(); } catch (_e) { /* not JSON */ }
+  if (response.status === 403 && /csrf token/i.test(String(data.error || ""))) {
+    window.location.reload();
+    throw new Error("The console restarted; reloading the page to refresh its security token.");
+  }
   if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
   return data;
 }
 function banner(text) { const b = $("banner"); b.hidden = !text; clear(b); if (text) b.append(text); }
+function helperRecoveryMessage(error) {
+  const text = String(error && error.message || error);
+  if (!/helper|reconnect|chat/i.test(text)) return;
+  banner("VS Code needs one-time permission to create a chat in this workspace. "
+    + "Run Developer: Reload Window, click Refresh again, then choose Allow Always if prompted.");
+}
 function when(t) { return t ? new Date(t * 1000).toLocaleTimeString() : ""; }
 
 function renderHelper() {
@@ -74,11 +84,15 @@ function showInputs(category) {
   $("home").hidden = true; $("run").hidden = true; $("inputs").hidden = false; banner("");
   const root = $("inputs"); clear(root);
   root.append(h("button", { class: "secondary back-home", onclick: showPicker }, "Back to workflows"));
-  if (category.id === "risk-issues") {
+  if (category.id === "risk-issues" || category.id === "weekly-progress-reporting") {
     root.append(h("img", {
       class: "category-visual",
-      src: "/static/assets/workflow-risk-issues.svg",
-      alt: "Risk Issues workflow: collect, draft, communicate, approve, remediate or accept risk, validate, and update.",
+      src: category.id === "risk-issues"
+        ? "/static/assets/workflow-risk-issues.svg"
+        : "/static/assets/workflow-weekly-progress.svg",
+      alt: category.id === "risk-issues"
+        ? "Risk Issues workflow: collect, draft, communicate, approve, remediate or accept risk, validate, and update."
+        : "Weekly Progress workflow: use the previous report, reuse Risk Issues and Daily Progress records, refresh Wiz status, update deliverables, and carry active work forward.",
     }));
   }
   root.append(
@@ -98,43 +112,115 @@ function showInputs(category) {
   const stageBar = h("p", {});
   const stageButtons = {};
   const showStage = (stage) => {
+    for (const [id, button] of Object.entries(stageButtons)) {
+      const selected = id === stage.id;
+      button.classList.toggle("active", selected);
+      if (selected) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    }
     clear(detail);
     detail.append(h("p", { class: "stage-help" }, STAGE_HELP[stage.id] || ""));
     const actions = category.actions.filter((a) => a.stage === stage.id);
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
       detail.append(h("p", { class: "work-item-label" }, "Existing work items"));
       const workItems = h("div", { class: "work-item-list" });
-      const form = h("div", {});
       for (const item of category.work_items) {
-        workItems.append(h("button", {
-          class: "secondary work-item-button",
-          onclick: () => {
-            clear(form);
-            form.append(formPanel(category, actions[0], actions[0].id, null, { work_item: item }));
-          },
-        }, h("strong", {}, item), h("span", {}, "Continue progress")));
+        const message = h("p", { class: "bad", role: "alert" });
+        let refreshButton;
+        const refresh = async () => {
+          message.textContent = "";
+          refreshButton.disabled = true;
+          refreshButton.textContent = "Refreshing...";
+          try {
+            const res = await api("POST", "/api/runs", {
+              category_id: category.id,
+              action_id: actions[0].id,
+              inputs: { work_item: item },
+            });
+            openRun(res.run_id);
+          } catch (e) {
+            message.textContent = e.message;
+            helperRecoveryMessage(e);
+            refreshButton.disabled = false;
+            refreshButton.textContent = "Refresh";
+          }
+        };
+        refreshButton = h("button", { class: "secondary work-item-refresh", onclick: refresh }, "Refresh");
+        workItems.append(
+          h("div", { class: "work-item-entry" },
+            h("div", { class: "work-item-card" },
+              h("div", { class: "work-item-copy" },
+                h("strong", {}, item),
+                h("span", {}, "Refresh today's progress"),
+              ),
+              refreshButton,
+            ),
+            message,
+          ),
+        );
       }
-      detail.append(workItems, form);
+      detail.append(workItems);
       return;
     }
     if (actions.length === 1) { detail.append(formPanel(category, actions[0], actions[0].id, null)); return; }
     const bar = h("div", { class: "action-grid" });
     const form = h("div", {});
+    const actionButtons = {};
     for (const a of actions) {
-      bar.append(h("button", {
+      const actionButton = h("button", {
         class: "secondary action-card",
-        onclick: () => { clear(form); form.append(h("p", { class: "help" }, a.description), formPanel(category, a, a.id, null)); },
-      }, h("strong", {}, a.title), h("span", { class: "action-description" }, a.description)));
+        onclick: () => {
+          for (const [id, button] of Object.entries(actionButtons)) {
+            const selected = id === a.id;
+            button.classList.toggle("active", selected);
+            if (selected) button.setAttribute("aria-current", "page");
+            else button.removeAttribute("aria-current");
+          }
+          clear(form);
+          form.append(h("p", { class: "help" }, a.description), formPanel(category, a, a.id, null));
+        },
+      }, h("strong", {}, a.title), h("span", { class: "action-description" }, a.description));
+      actionButtons[a.id] = actionButton;
+      bar.append(actionButton);
     }
     detail.append(bar, form);
   };
   for (const s of category.stages) {
-    const button = h("button", { onclick: () => showStage(s) }, s.title);
+    const button = h(
+      "button",
+      { class: "stage-button", "data-title": s.title, onclick: () => showStage(s) },
+      s.title,
+    );
     stageButtons[s.id] = button;
     stageBar.append(button, " ");
   }
-  stageBar.append(h("button", { class: "secondary", onclick: showPicker }, "Back"), h("span", { class: "nav-help" }, "Return to workflows"));
+  stageBar.append(
+    h("button", { class: "secondary", onclick: showPicker }, "Back"),
+    h("span", { class: "nav-help" }, "Return to workflows"),
+  );
   root.append(stageBar, detail);
+}
+function previousReportPicker() {
+  // Options come from a local, read-only listing of weekly-progress folders (names only).
+  const FIRST = "", MANUAL = "__manual__";
+  const select = h("select", {}, h("option", { value: FIRST }, "None: this is the first report"));
+  const manual = h("input", { type: "text", maxlength: 120, autocomplete: "off", placeholder: "folder name under deliverables", hidden: true });
+  const note = h("div", { class: "help" }, "Loading previous reports...");
+  const manualOption = () => h("option", { value: MANUAL }, "Enter a folder name manually");
+  select.append(manualOption());
+  select.addEventListener("change", () => { manual.hidden = select.value !== MANUAL; });
+  api("GET", "/api/weekly-progress/previous-reports").then((res) => {
+    clear(select);
+    select.append(h("option", { value: FIRST }, "None: this is the first report"));
+    for (const r of res.reports) select.append(h("option", { value: r.reference }, r.reference));
+    select.append(manualOption());
+    note.textContent = res.empty ? res.message : res.reports.length + " previous report folder(s) found.";
+  }).catch(() => {
+    select.value = MANUAL; manual.hidden = false;
+    note.textContent = "Could not list previous reports; leave empty for the first report or enter a folder name.";
+  });
+  const field = { get value() { return select.value === MANUAL ? manual.value : select.value; } };
+  return { field, node: h("div", {}, select, manual, note) };
 }
 function formPanel(category, spec, actionId, onBack, initialValues = {}) {
   const panel = h("div", { class: "panel" });
@@ -144,12 +230,28 @@ function formPanel(category, spec, actionId, onBack, initialValues = {}) {
     const input = multiline
       ? h("textarea", { rows: 8, maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" })
       : h("input", { type: "text", maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" });
+    if (category.id === "weekly-progress-reporting" && f.name === "previous_report") {
+      const picker = previousReportPicker();
+      fields[f.name] = picker.field;
+      panel.append(h("label", {}, f.label, h("div", { class: "help" }, f.help)), picker.node);
+      continue;
+    }
+    if (f.options && f.options.length) {
+      const id = "opts-" + f.name;
+      input.setAttribute("list", id);
+      panel.append(h("datalist", { id }, ...f.options.map((o) => h("option", { value: o }))));
+    }
     fields[f.name] = input;
     if (initialValues[f.name]) input.value = initialValues[f.name];
     panel.append(h("label", {}, f.label + (f.required ? " *" : ""), h("div", { class: "help" }, f.help)), input);
   }
   const message = h("p", { class: "bad", role: "alert" });
-  const start = h("button", {}, actionId === "new" || !actionId ? (category.stages && category.stages.length ? "Proceed" : "Start") : "Proceed");
+  const startLabel = actionId === "continue-work-item"
+    ? "Refresh"
+    : actionId === "new" || !actionId
+      ? (category.stages && category.stages.length ? "Proceed" : "Start")
+      : "Proceed";
+  const start = h("button", {}, startLabel);
   start.addEventListener("click", async () => {
     message.textContent = ""; start.disabled = true;
     try {
@@ -158,7 +260,11 @@ function formPanel(category, spec, actionId, onBack, initialValues = {}) {
       if (actionId) body.action_id = actionId;
       const res = await api("POST", "/api/runs", body);
       openRun(res.run_id);
-    } catch (e) { message.textContent = e.message; start.disabled = false; }
+    } catch (e) {
+      message.textContent = e.message;
+      helperRecoveryMessage(e);
+      start.disabled = false;
+    }
   });
   panel.append(h("p", {}, start, onBack ? " " : null, onBack ? h("button", { class: "secondary", onclick: onBack }, "Back") : null), message);
   return panel;
@@ -184,7 +290,7 @@ async function poll() {
 }
 function renderRun(run) {
   // Rebuild only when something changed, so button messages and scroll position survive polling.
-  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat]);
+  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output]);
   if (sig === state.shown) return;
   state.shown = sig;
   const root = $("run"); clear(root);
@@ -192,13 +298,36 @@ function renderRun(run) {
     h("p", {}, h("span", { class: "badge " + run.status }, STATUS_TEXT[run.status] || run.status), " ", run.message));
   root.append(h("p", { class: "help" }, "Request: " + run.prompt));
   if (run.can_open_chat) root.append(h("p", {}, h("button", { class: "secondary", onclick: openChat }, "Open this chat in VS Code")));
+  if (run.can_stop) root.append(stopButton(run));
   if (run.pending) root.append(pendingBlock(run));
   if (run.status === "completed" || run.status === "stopped") {
     root.append(h("h3", {}, "Final summary"), h("div", { class: "ref" }, run.summary || "(the agent gave no final text)"));
   }
   root.append(h("h3", {}, "Output files (" + run.files.length + ")"), filesBlock(run));
+  if (run.can_open_output) root.append(h("p", {}, h("button", { class: "secondary", onclick: openLatestOutput }, "View latest output")));
   root.append(h("h3", {}, "Progress"), progressBlock());
   root.append(h("p", {}, h("button", { class: "secondary", onclick: () => { showPicker(); refresh(); } }, "Start another")));
+}
+function stopButton(run) {
+  const button = h("button", { class: "danger", onclick: async () => {
+    button.disabled = true;
+    button.textContent = "Stopping...";
+    try {
+      await api("POST", "/api/runs/" + run.id + "/stop");
+      banner("Stop requested for the live VS Code chat.");
+    } catch (e) {
+      button.disabled = false;
+      button.textContent = "Stop";
+      banner(e.message);
+    }
+  } }, "Stop");
+  return h("p", {}, button);
+}
+async function openLatestOutput() {
+  try {
+    await api("POST", "/api/runs/" + state.runId + "/open-output");
+    banner("Opened the latest local output in VS Code.");
+  } catch (e) { banner(e.message); }
 }
 function pendingBlock(run) {
   const p = run.pending;
