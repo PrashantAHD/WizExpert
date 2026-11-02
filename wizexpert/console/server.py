@@ -17,7 +17,9 @@ import hmac
 import json
 import re
 import secrets
+import subprocess  # nosec B404
 import threading
+import time
 import webbrowser
 from collections.abc import Sequence
 from http import HTTPStatus
@@ -35,6 +37,10 @@ STATIC_FILES = {
     "index.html": "text/html; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8",
     "style.css": "text/css; charset=utf-8",
+    "assets/logo.svg": "image/svg+xml",
+    "assets/workflow-risk-issues.svg": "image/svg+xml",
+    "assets/workflow-daily-progress.svg": "image/svg+xml",
+    "assets/workflow-monthly-governance.svg": "image/svg+xml",
 }
 MAX_BODY = 256 * 1024
 RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{6}")
@@ -55,13 +61,46 @@ SECURITY_HEADERS = {
 
 
 class ConsoleApp:
-    def __init__(self, manager: RunManager, bridge: Bridge, csrf_token: str, port: int) -> None:
+    def __init__(
+        self,
+        manager: RunManager,
+        bridge: Bridge,
+        csrf_token: str,
+        port: int,
+        config: ConsoleConfig,
+    ) -> None:
         self.manager = manager
         self.bridge = bridge
         self.csrf_token = csrf_token
         self.port = port
+        self.config = config
         self.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+
+    def ensure_helper(self) -> bool:
+        """Install, reload, and wait for the helper when a user submits a run."""
+        workspace = str(self.config.resolved_workspace())
+        if self.bridge.helper_connected(workspace):
+            return True
+        from . import helper
+
+        out = Path.home() / ".wizexpert-console" / "wizexpert-console-helper.vsix"
+        try:
+            if helper.install(out, self.config.code_command) != 0:
+                raise RunError("The VS Code helper could not be installed.")
+            if helper.reload_window(self.config.code_command) != 0:
+                raise RunError("VS Code did not accept the automatic window reload.")
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RunError(f"Could not automate the VS Code helper setup: {error}") from error
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if self.bridge.helper_connected(workspace):
+                return True
+            time.sleep(0.25)
+        raise RunError(
+            "The helper was installed and VS Code was reloaded, but it did not connect. "
+            "Check that this workspace is open in VS Code and try again."
+        )
 
 
 class ConsoleServer(ThreadingHTTPServer):
@@ -306,7 +345,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             action = body.get("action_id")
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
-            run = manager.start(category, inputs, action)
+            ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
+            run = manager.start(category, inputs, action, ensure_helper=ensure_helper)
             return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/helper/probe":
             return self._json(HTTPStatus.OK, manager.probe())
@@ -330,7 +370,7 @@ def build_server(
         token = load_or_create_token(config.bridge_config, bound_port)
         bridge = Bridge(token)
         manager = manager_factory(config, bridge) if manager_factory else RunManager(config, bridge)
-        return ConsoleApp(manager, bridge, secrets.token_urlsafe(32), bound_port)
+        return ConsoleApp(manager, bridge, secrets.token_urlsafe(32), bound_port, config)
 
     return ConsoleServer(port, factory)
 
@@ -369,6 +409,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--code", default="code", help="VS Code command-line launcher (for --cli-fallback)."
     )
+    parser.add_argument(
+        "--install-helper",
+        action="store_true",
+        help="Install or update the local VS Code helper before starting the console.",
+    )
+    parser.add_argument(
+        "--no-auto-helper",
+        action="store_true",
+        help="Do not install and reconnect the helper automatically when a run is submitted.",
+    )
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(args_list)
     if not 0 <= args.port <= 65535:
@@ -376,7 +426,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.workspace.is_dir():
         parser.error("--workspace must be an existing folder")
     config = ConsoleConfig(
-        workspace=args.workspace, allow_cli_fallback=args.cli_fallback, code_command=args.code
+        workspace=args.workspace,
+        allow_cli_fallback=args.cli_fallback,
+        code_command=args.code,
+        auto_install_helper=not args.no_auto_helper,
     )
     if args.agent:
         config.agent = args.agent
@@ -392,6 +445,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not AGENT_NAME.fullmatch(config.agent):
         parser.error(
             "the agent name may contain only letters, digits, space, dot, dash and underscore"
+        )
+    if args.install_helper:
+        from . import helper
+
+        helper_result = helper.install(
+            Path.home() / ".wizexpert-console" / "wizexpert-console-helper.vsix", args.code
+        )
+        if helper_result != 0:
+            parser.exit(
+                helper_result,
+                "Could not install the VS Code helper. "
+                "Run with --no-browser after resolving the VS Code CLI issue.\n",
+            )
+        print(
+            "VS Code helper installed. Reload the VS Code window once to activate it.",
+            flush=True,
         )
     try:
         server = build_server(config, port=args.port)

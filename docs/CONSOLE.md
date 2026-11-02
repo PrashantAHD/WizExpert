@@ -43,7 +43,9 @@ Model: a category may declare `stages` (button groups) and `actions` (fields, te
 optional `exactly_one_of`). The API takes an optional `action_id` next to `category_id`; omitting
 it keeps the old behavior. Template overrides use `risk-issues` (New) or
 `risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`). Daily Progress
-and Monthly Governance have no actions yet and can add them the same way.
+also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
+name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
+work-item list. Monthly Governance remains a single-form category.
 
 ## Install and run
 
@@ -54,6 +56,21 @@ wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
 
 wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
+
+To build and install or update the helper as part of console startup, add
+`--install-helper` (using the `code` launcher or the path supplied with `--code`):
+
+```powershell
+wizexpert console --workspace <workspace folder> --install-helper
+```
+
+The command does not force a VS Code reload, because that could interrupt active work.
+After the first installation, use **Developer: Reload Window** once; later launches can
+omit `--install-helper` unless the helper source changes.
+
+By default, submitting a run also checks the workspace helper connection and attempts the
+same install/reconnect flow if the helper is missing. Use `--no-auto-helper` only when
+you want submissions to fail immediately instead of changing the local VS Code setup.
 
 ### Auto-reload during development
 

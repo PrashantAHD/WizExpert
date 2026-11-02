@@ -179,7 +179,14 @@ def test_static_files_are_whitelisted(console, path):
 
 def test_static_assets_are_served(console):
     server, *_ = console
-    for name, kind in (("app.js", "javascript"), ("style.css", "css")):
+    for name, kind in (
+        ("app.js", "javascript"),
+        ("style.css", "css"),
+        ("assets/logo.svg", "svg"),
+        ("assets/workflow-risk-issues.svg", "svg"),
+        ("assets/workflow-daily-progress.svg", "svg"),
+        ("assets/workflow-monthly-governance.svg", "svg"),
+    ):
         status, headers, _b = request(server, "GET", f"/static/{name}")
         assert status == 200 and kind in headers["Content-Type"]
 

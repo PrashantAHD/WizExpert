@@ -60,6 +60,7 @@ class ConsoleConfig:
     prompts: dict[str, str] = field(default_factory=dict)  # category id -> template override
     allow_cli_fallback: bool = False
     code_command: str = "code"
+    auto_install_helper: bool = False
     start_timeout: float = 90.0
     open_wait_ms: int = 2500
     new_chat_wait_ms: int = 1500

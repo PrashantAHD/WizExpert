@@ -143,7 +143,11 @@ class RunManager:
         }
 
     def start(
-        self, category_id: str, raw: dict[str, Any], action_id: str | None = None
+        self,
+        category_id: str,
+        raw: dict[str, Any],
+        action_id: str | None = None,
+        ensure_helper: Callable[[], bool] | None = None,
     ) -> Run:
         try:
             values = categories.validate(category_id, raw, action_id)
@@ -153,9 +157,10 @@ class RunManager:
         with self._lock:
             if any(r.status == "starting" for r in self._runs.values()):
                 raise RunError("Another run is still starting; wait for it to appear first.")
-            if not self.bridge.helper_connected(str(self.config.resolved_workspace())) and (
-                not self.config.allow_cli_fallback
-            ):
+            helper_ready = self.bridge.helper_connected(str(self.config.resolved_workspace()))
+            if not helper_ready and ensure_helper is not None:
+                helper_ready = ensure_helper()
+            if not helper_ready and not self.config.allow_cli_fallback:
                 raise RunError(
                     "The VS Code helper is not connected for this workspace. Install it "
                     "(wizexpert console install-helper), reload the VS Code window with the "
