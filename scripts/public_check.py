@@ -19,6 +19,16 @@ ROOT_FILES = {
     "README.md",
     "pyproject.toml",
 }
+PUBLIC_FILES = {
+    ".github/copilot-instructions.md",
+    ".vscode/stop-workflow-console.ps1",
+    ".vscode/tasks.json",
+    "wizexpert/console/static/assets/logo.svg",
+    "wizexpert/console/static/assets/workflow-daily-progress.svg",
+    "wizexpert/console/static/assets/workflow-monthly-governance.svg",
+    "wizexpert/console/static/assets/workflow-weekly-progress.svg",
+    "wizexpert/console/static/assets/workflow-risk-issues.svg",
+}
 SOURCE_SUFFIXES = {
     "wizexpert": {".py", ".html", ".css", ".js"},
     "tests": {".py"},
@@ -28,7 +38,11 @@ SOURCE_SUFFIXES = {
 # Retired layouts that still exist in reachable Git history. They are tolerated only when
 # scanning history, never in the index or working tree, so they cannot be reintroduced.
 HISTORICAL_SOURCE_SUFFIXES = {"remediation": {".py", ".html", ".css", ".js"}}
-HISTORICAL_FILES = {".github/instructions/production-workflow.instructions.md"}
+HISTORICAL_FILES = {
+    ".github/instructions/production-workflow.instructions.md",
+    # A generic local task was briefly committed before the publication allowlist was checked.
+    ".vscode/tasks.json",
+}
 MAX_FILE_BYTES = 1_000_000
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SYNTHETIC_MERGE_SUBJECT = re.compile(
@@ -87,12 +101,19 @@ def git(root: Path, *args: str) -> bytes:
 
 
 def content_issues(
-    data: bytes, *, commit_message: bool = False, parents: frozenset[str] = frozenset()
+    data: bytes,
+    *,
+    commit_message: bool = False,
+    parents: frozenset[str] = frozenset(),
+    allow_bom: bool = False,
 ) -> list[str]:
     if len(data) > MAX_FILE_BYTES:
         return ["file exceeds publication size limit"]
     if b"\x00" in data:
         return ["binary content is not allowed"]
+    # Retired history may still hold BOMs; the index and working tree may not.
+    if data.startswith(b"\xef\xbb\xbf") and not allow_bom:
+        return ["UTF-8 BOM is not allowed"]
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -123,7 +144,7 @@ def path_issues(name: str, *, historical: bool = False) -> list[str]:
     ):
         return ["unsafe file path"]
     issues = [label for label, pattern in PATTERNS if pattern.search(name)]
-    allowed = name in ROOT_FILES or name == ".githooks/pre-push"
+    allowed = name in ROOT_FILES or name in PUBLIC_FILES or name == ".githooks/pre-push"
     allowed |= historical and name in HISTORICAL_FILES
     if len(path.parts) >= 2:
         suffixes = set(SOURCE_SUFFIXES.get(path.parts[0], set()))
@@ -175,7 +196,7 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
     if git(root, "rev-parse", "--is-shallow-repository").strip() != b"false":
         raise GuardError("Shallow history cannot be checked. Fetch complete history first.")
     problems: set[str] = set()
-    checked_blobs: dict[str, list[str]] = {}
+    checked_blobs: dict[tuple[str, bool], list[str]] = {}
     checked_entries: set[tuple[str, str, str]] = set()
 
     def report(source: str, issues: list[str]) -> None:
@@ -189,14 +210,17 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
         if mode not in {"100644", "100755"}:
             report(source, ["symlinks, submodules and non-regular files are not allowed"])
             return
-        if oid not in checked_blobs:
+        cache_key = (oid, historical)
+        if cache_key not in checked_blobs:
             size = int(git(root, "cat-file", "-s", oid))
-            checked_blobs[oid] = (
+            checked_blobs[cache_key] = (
                 ["file exceeds publication size limit"]
                 if size > MAX_FILE_BYTES
-                else content_issues(git(root, "cat-file", "blob", oid))
+                else content_issues(
+                    git(root, "cat-file", "blob", oid), allow_bom=historical
+                )
             )
-        report(source, checked_blobs[oid])
+        report(source, checked_blobs[cache_key])
 
     for entry in git(root, "ls-files", "--stage", "-z").split(b"\0"):
         if not entry:

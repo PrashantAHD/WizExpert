@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 760" role="img" aria-labelledby="title desc">
+  <title id="title">Risk Issues</title>
+  <desc id="desc">WizExpert is the hub. Each stage goes out and back. After approval: remediate, or skip to update.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0B2447"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="960" height="760" rx="28" fill="url(#bg)"/>
+  <text x="48" y="42" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Risk Issues</text>
+  <text x="48" y="66" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="14">WizExpert is the hub. Each stage goes out and back. After approval: remediate, or skip to update.</text>
+  <g fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M480 126 V154"/>
+    <path d="M480 226 V258 H125"/>
+    <path d="M480 258 H355"/>
+    <path d="M480 258 H585"/>
+    <path d="M480 258 H815"/>
+    <path d="M125 258 V292"/>
+    <path d="M355 258 V292"/>
+    <path d="M585 258 V292"/>
+    <path d="M815 258 V292"/>
+    <path d="M480 226 V428 H180"/>
+    <path d="M480 428 H780"/>
+    <path d="M180 428 V460"/>
+    <path d="M480 428 V460"/>
+    <path d="M780 428 V460"/>
+    <path d="M815 400 C815 430, 780 440, 780 460" stroke-dasharray="7 6"/>
+  </g>
+  <text x="860" y="430" fill="#A78BFA" font-family="Segoe UI, Arial, sans-serif" font-size="11">risk acceptance</text>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="84" width="360" height="42" rx="14" fill="#1E293B" stroke="#334155"/>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="1">1 · collect<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.03;0.04;0.1;0.11;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">2 · draft<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.1;0.11;0.17;0.18;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">3 · communicate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.17;0.18;0.24;0.25;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">4 · approval<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.24;0.25;0.31;0.32;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">5 · remediate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.31;0.32;0.38;0.39;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">6 · validate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.38;0.39;0.45;0.46;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">7 · update reports<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.45;0.46;0.52;0.53;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">1 · collect<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.54;0.55;0.61;0.62;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">2 · draft<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.61;0.62;0.68;0.69;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">3 · communicate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.68;0.69;0.75;0.76;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">4 · approval<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.75;0.76;0.82;0.83;1" dur="32s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">risk acceptance → update<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.82;0.83;0.9;0.91;1" dur="32s" repeatCount="indefinite"/></text>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="154" width="360" height="72" rx="16" fill="#1D4ED8" stroke="#60A5FA"/>
+    <text x="480" y="182" text-anchor="middle" fill="#BFDBFE" font-size="12">WIZEXPERT</text>
+    <text x="480" y="206" text-anchor="middle" fill="#F8FAFC" font-size="16" font-weight="700">every stage returns here</text>
+  </g>
+  <circle r="8" fill="#38BDF8" filter="url(#glow)">
+    <animate attributeName="cx" dur="32s" repeatCount="indefinite" calcMode="linear" keyTimes="0;0.03;0.03787;0.04575;0.05362;0.09213;0.09223;0.1;0.1079;0.1158;0.1236;0.1621;0.1622;0.17;0.1779;0.1857;0.1936;0.2321;0.2322;0.24;0.2479;0.2557;0.2636;0.3021;0.3022;0.31;0.3179;0.3257;0.3336;0.3721;0.3722;0.38;0.3879;0.3957;0.4036;0.4421;0.4422;0.45;0.4579;0.4657;0.4736;0.5121;0.5122;0.52;0.54;0.5479;0.5557;0.5636;0.6021;0.6022;0.61;0.6179;0.6258;0.6336;0.6721;0.6722;0.68;0.6879;0.6958;0.7036;0.7421;0.7422;0.75;0.7579;0.7657;0.7736;0.8121;0.8122;0.82;0.829;0.838;0.847;0.891;0.8911;0.9;0.94;0.98;1" values="480;480;480;125;125;125;125;480;480;355;355;355;355;480;480;585;585;585;585;480;480;815;815;815;815;480;480;180;180;180;180;480;480;480;480;480;480;480;480;780;780;780;780;480;480;480;125;125;125;125;480;480;355;355;355;355;480;480;585;585;585;585;480;480;815;815;815;815;480;480;780;780;780;780;480;480;480;480"/>
+    <animate attributeName="cy" dur="32s" repeatCount="indefinite" calcMode="linear" keyTimes="0;0.03;0.03787;0.04575;0.05362;0.09213;0.09223;0.1;0.1079;0.1158;0.1236;0.1621;0.1622;0.17;0.1779;0.1857;0.1936;0.2321;0.2322;0.24;0.2479;0.2557;0.2636;0.3021;0.3022;0.31;0.3179;0.3257;0.3336;0.3721;0.3722;0.38;0.3879;0.3957;0.4036;0.4421;0.4422;0.45;0.4579;0.4657;0.4736;0.5121;0.5122;0.52;0.54;0.5479;0.5557;0.5636;0.6021;0.6022;0.61;0.6179;0.6258;0.6336;0.6721;0.6722;0.68;0.6879;0.6958;0.7036;0.7421;0.7422;0.75;0.7579;0.7657;0.7736;0.8121;0.8122;0.82;0.829;0.838;0.847;0.891;0.8911;0.9;0.94;0.98;1" values="105;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;428;428;514;514;428;190;428;428;514;514;428;190;428;428;514;514;428;190;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;428;428;514;514;428;190;622;622;105"/>
+  </circle>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(20,292)">
+      <rect width="210" height="100" rx="14" fill="url(#card)" stroke="#3B82F6" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.029;0.03;0.1;0.101;0.539;0.54;0.61;0.611;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">1</text>
+      <text x="105" y="28" text-anchor="middle" fill="#3B82F6" font-size="11">COLLECT</text>
+      <text x="105" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Wiz evidence</text>
+      <text x="105" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">MCP read-only</text>
+    </g>
+    <g transform="translate(250,292)">
+      <rect width="210" height="100" rx="14" fill="url(#card)" stroke="#38BDF8" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.099;0.1;0.17;0.171;0.609;0.61;0.68;0.681;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">2</text>
+      <text x="105" y="28" text-anchor="middle" fill="#38BDF8" font-size="11">DRAFT</text>
+      <text x="105" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Analysis / sheet</text>
+      <text x="105" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">/ Email</text>
+    </g>
+    <g transform="translate(480,292)">
+      <rect width="210" height="100" rx="14" fill="url(#card)" stroke="#F59E0B" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.169;0.17;0.24;0.241;0.679;0.68;0.75;0.751;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">3</text>
+      <text x="105" y="28" text-anchor="middle" fill="#F59E0B" font-size="11">COMMUNICATE</text>
+      <text x="105" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">human gate</text>
+      <text x="105" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">tool never sends</text>
+    </g>
+    <g transform="translate(710,292)">
+      <rect width="210" height="100" rx="14" fill="url(#card)" stroke="#A78BFA" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.239;0.24;0.31;0.311;0.749;0.75;0.82;0.821;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">4</text>
+      <text x="105" y="28" text-anchor="middle" fill="#A78BFA" font-size="11">APPROVAL</text>
+      <text x="105" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">receive response</text>
+      <text x="105" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">then next stage</text>
+    </g>
+    <g transform="translate(40,460)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#FB7185" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.309;0.31;0.38;0.381;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">5</text>
+      <text x="140" y="28" text-anchor="middle" fill="#FB7185" font-size="11">REMEDIATE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">coordinate the fix</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">skipped on acceptance</text>
+    </g>
+    <g transform="translate(340,460)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#14B8A6" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.379;0.38;0.45;0.451;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">6</text>
+      <text x="140" y="28" text-anchor="middle" fill="#14B8A6" font-size="11">VALIDATE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">fresh Wiz check</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">skipped on acceptance</text>
+    </g>
+    <g transform="translate(640,460)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#22C55E" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.449;0.45;0.52;0.521;0.819;0.82;0.9;0.901;1" dur="32s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">7</text>
+      <text x="140" y="28" text-anchor="middle" fill="#22C55E" font-size="11">UPDATE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">reports / draft</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">always last</text>
+    </g>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="40" y="640" width="880" height="72" rx="16" fill="#1E293B" stroke="#334155" stroke-width="2">
+      <animate attributeName="fill" values="#1E293B;#1E293B;#14532D;#14532D;#1E293B" keyTimes="0;0.9;0.92;0.98;1" dur="32s" repeatCount="indefinite"/>
+      <animate attributeName="stroke" values="#334155;#334155;#22C55E;#22C55E;#334155" keyTimes="0;0.9;0.92;0.98;1" dur="32s" repeatCount="indefinite"/>
+    </rect>
+    <text x="480" y="668" text-anchor="middle" fill="#94A3B8" font-size="12">NOTHING LEAVES WITHOUT A PERSON</text>
+    <text x="480" y="692" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">pass A: remediate → validate → update   ·   pass B: risk acceptance → update</text>
+  </g>
+</svg>

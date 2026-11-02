@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" role="img" aria-labelledby="title desc">
+  <title id="title">Daily Progress Reporting</title>
+  <desc id="desc">WizExpert is the hub. Refresh daily until the closure gate. Then update and stop.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0B2447"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="960" height="700" rx="28" fill="url(#bg)"/>
+  <text x="48" y="42" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Daily Progress Reporting</text>
+  <text x="48" y="66" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="14">WizExpert is the hub. Refresh daily until the closure gate. Then update and stop.</text>
+  <g fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M480 126 V154"/>
+    <path d="M480 226 V258 H180"/>
+    <path d="M480 258 H780"/>
+    <path d="M180 258 V292"/>
+    <path d="M480 258 V292"/>
+    <path d="M780 258 V292"/>
+    <path d="M480 226 V400 H300"/>
+    <path d="M480 400 H660"/>
+    <path d="M300 400 V448"/>
+    <path d="M660 400 V448"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="84" width="360" height="42" rx="14" fill="#1E293B" stroke="#334155"/>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="1">1 · collect<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.04;0.05;0.16;0.17;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">2 · draft pack<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.16;0.17;0.28;0.29;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">3 · communicate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.28;0.29;0.4;0.41;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">still open → next day<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.4;0.41;0.52;0.53;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">collect again<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.52;0.53;0.62;0.63;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">draft again<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.62;0.63;0.72;0.73;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">communicate<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.72;0.73;0.82;0.83;1" dur="22s" repeatCount="indefinite"/></text>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700" opacity="0">gate met → update / close<animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.82;0.83;0.94;0.95;1" dur="22s" repeatCount="indefinite"/></text>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="154" width="360" height="72" rx="16" fill="#1D4ED8" stroke="#60A5FA"/>
+    <text x="480" y="182" text-anchor="middle" fill="#BFDBFE" font-size="12">WIZEXPERT</text>
+    <text x="480" y="206" text-anchor="middle" fill="#F8FAFC" font-size="16" font-weight="700">every stage returns here</text>
+  </g>
+  <circle r="8" fill="#38BDF8" filter="url(#glow)">
+    <animate attributeName="cx" dur="22s" repeatCount="indefinite" calcMode="linear" keyTimes="0;0.04;0.0535;0.067;0.0805;0.1465;0.1466;0.16;0.1735;0.187;0.2005;0.2665;0.2666;0.28;0.2935;0.307;0.3205;0.3865;0.3866;0.4;0.4135;0.427;0.4405;0.5065;0.5066;0.52;0.5312;0.5425;0.5537;0.6087;0.6089;0.62;0.6312;0.6425;0.6537;0.7087;0.7088;0.72;0.7312;0.7425;0.7537;0.8087;0.8088;0.82;0.8335;0.847;0.8605;0.9265;0.9266;0.94;0.97;1" values="480;480;480;180;180;180;180;480;480;480;480;480;480;480;480;780;780;780;780;480;480;300;300;300;300;480;480;180;180;180;180;480;480;480;480;480;480;480;480;780;780;780;780;480;480;660;660;660;660;480;480;480"/>
+    <animate attributeName="cy" dur="22s" repeatCount="indefinite" calcMode="linear" keyTimes="0;0.04;0.0535;0.067;0.0805;0.1465;0.1466;0.16;0.1735;0.187;0.2005;0.2665;0.2666;0.28;0.2935;0.307;0.3205;0.3865;0.3866;0.4;0.4135;0.427;0.4405;0.5065;0.5066;0.52;0.5312;0.5425;0.5537;0.6087;0.6089;0.62;0.6312;0.6425;0.6537;0.7087;0.7088;0.72;0.7312;0.7425;0.7537;0.8087;0.8088;0.82;0.8335;0.847;0.8605;0.9265;0.9266;0.94;0.97;1" values="105;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;400;400;500;500;400;190;258;258;346;346;258;190;258;258;346;346;258;190;258;258;346;346;258;190;400;400;500;500;400;190;600;105"/>
+  </circle>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(40,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#3B82F6" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.039;0.04;0.16;0.161;0.519;0.52;0.62;0.621;1" dur="22s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">1</text>
+      <text x="140" y="28" text-anchor="middle" fill="#3B82F6" font-size="11">COLLECT</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Wiz evidence</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">fixed-scope IDs</text>
+    </g>
+    <g transform="translate(340,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#38BDF8" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.159;0.16;0.28;0.281;0.619;0.62;0.72;0.721;1" dur="22s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">2</text>
+      <text x="140" y="28" text-anchor="middle" fill="#38BDF8" font-size="11">DRAFT</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Report / movements</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">VM-CVE / reply email</text>
+    </g>
+    <g transform="translate(640,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#F59E0B" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.279;0.28;0.4;0.401;0.719;0.72;0.82;0.821;1" dur="22s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">3</text>
+      <text x="140" y="28" text-anchor="middle" fill="#F59E0B" font-size="11">COMMUNICATE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">human gate</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">tool never sends</text>
+    </g>
+    <g transform="translate(160,448)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#A78BFA" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.399;0.4;0.52;0.521;1" dur="22s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">4a</text>
+      <text x="140" y="28" text-anchor="middle" fill="#A78BFA" font-size="11">STILL OPEN</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">next-day refresh</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">back through WizExpert</text>
+    </g>
+    <g transform="translate(520,448)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#22C55E" stroke-width="2" stroke-opacity="0.25">
+        <animate attributeName="stroke-opacity" values="0.25;0.25;1;1;0.25;0.25" keyTimes="0;0.819;0.82;0.94;0.941;1" dur="22s" repeatCount="indefinite"/>
+      </rect>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">4b</text>
+      <text x="140" y="28" text-anchor="middle" fill="#22C55E" font-size="11">CLOSE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">update / final pack</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">gate met</text>
+    </g>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="40" y="600" width="880" height="72" rx="16" fill="#1E293B" stroke="#334155" stroke-width="2">
+      <animate attributeName="fill" values="#1E293B;#1E293B;#14532D;#14532D;#1E293B" keyTimes="0;0.9;0.92;0.98;1" dur="22s" repeatCount="indefinite"/>
+      <animate attributeName="stroke" values="#334155;#334155;#22C55E;#22C55E;#334155" keyTimes="0;0.9;0.92;0.98;1" dur="22s" repeatCount="indefinite"/>
+    </rect>
+    <text x="480" y="628" text-anchor="middle" fill="#94A3B8" font-size="12">NOTHING LEAVES WITHOUT A PERSON</text>
+    <text x="480" y="652" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">still open → collect again   ·   gate met → update reports and close</text>
+  </g>
+</svg>
