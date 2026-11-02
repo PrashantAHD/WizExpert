@@ -47,6 +47,19 @@ th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); 
 .log .line.tool { color:#8aa4c4; }
 .log .line.user { color:#f5d58a; }
 .log .line.failed { color:#f19a9a; }
+.activity { display:grid; gap:8px; }
+.activity-item { display:grid; grid-template-columns:22px minmax(0,1fr) auto; gap:10px; align-items:start; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.activity-item.active { border-color:#8dd9d1; background:#f0fdfa; }
+.activity-item.failed, .activity-item.error { border-color:#f1b6b6; background:#fff7f7; }
+.activity-marker { color:var(--ok); font-weight:700; text-align:center; }
+.activity-item.active .activity-marker { color:#0f766e; }
+.activity-item.failed .activity-marker, .activity-item.error .activity-marker { color:var(--bad); }
+.activity-copy { display:grid; gap:2px; min-width:0; }
+.activity-copy span { color:var(--muted); overflow-wrap:anywhere; }
+.activity-item time { color:var(--muted); font-size:11px; white-space:nowrap; }
+.activity.empty { padding:12px; color:var(--muted); border:1px dashed var(--line); border-radius:8px; }
+.raw-progress { margin-top:10px; }
+.raw-progress summary { color:var(--muted); cursor:pointer; font-size:12px; padding:4px 0 8px; }
 .badge.input_needed { background:#fff4e6; color:var(--warn); }
 .badge.completed { background:#dcfce7; color:var(--ok); }
 .badge.not_started, .badge.stopped, .badge.interrupted { background:#fee2e2; color:var(--bad); }
@@ -1986,3 +1999,33 @@ a { color: #72c4bb; }
     }
   }
 }
+
+/* Readable pending approval/question text on the dark theme */
+.pending .ref {
+  background: #0a121c;
+  border: 1px solid #2c3b4d;
+  color: #e7edf5;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 13px;
+}
+.pending > strong { color: #f4c77d; }
+/* Contrast guard: the console is a dark theme (light --ink/--muted), so any element that
+   keeps a light surface must set its own dark text, and dark surfaces set light text. */
+.ref {
+  background: #0a121c;
+  border: 1px solid #2c3b4d;
+  color: #e7edf5;
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 13px;
+}
+.badge { color: #19324b; }
+.badge.complete, .badge.completed { color: #14532d; }
+.badge.failed, .badge.blocked, .badge.reconnect_required, .badge.rejected, .badge.cancelled,
+.badge.not_started, .badge.stopped, .badge.interrupted { color: #991b1b; }
+.badge.awaiting_input, .badge.awaiting_review, .badge.input_needed { color: #8a4a0f; }
+.banner { color: #5a3210; }
+.problems { color: #7f1d1d; }
+.panel th, .rows th, .card th { color: #d9bd86; }
+.panel td, .rows td, .card td { color: var(--ink); }
+.notice, .help, .card p { color: var(--muted); }
+.pending { color: var(--ink); }

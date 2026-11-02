@@ -194,6 +194,39 @@ never writes to `session-state`.
   location only. There are no open or download links and no file-serving endpoint; evidence,
   archive, log, JSON and secret-like files are never listed.
 
+## Running tasks survive refreshes and restarts
+
+The backend is the source of truth. Runs (category, prompt, chat/session binding, status) are
+saved atomically to `runs.json` in the console state directory and reloaded at startup; a run
+that was active stays active and re-reads its session log (which also holds any pending
+approval or question), so it is only ended when the log shows the chat ended. A run caught
+mid-start is re-matched to its new chat instead of being marked lost.
+
+- `GET /api/runs/active` (also `active` in `/api/bootstrap`) lists non-terminal runs.
+- On load the page re-opens the run from `#run=<id>` in the URL, then this tab's last run
+  (`sessionStorage`), then the newest active run; a run that finished meanwhile shows its final
+  state. Pending Allow / Skip / question prompts reappear. **Start another** opts out of
+  auto-reattach for that page, and a banner still links to the active run.
+- Starting a second run of a workflow that already has an active run is refused by the
+  backend, not only the UI.
+- Backend code changes still need a restart; do it when no task needs a button press, as
+  running chats continue in VS Code and are picked up again afterwards.
+
+## Spend-Guard handoffs
+
+When a chat calls `create_session` to continue in a fresh chat, the pending approval reads
+"Spend-Guard handoff: continue this run in a new chat '<title>' (model ...)" with the handoff
+prompt in a scrollable box; Allow / Skip work from the page like any approval (the same
+`acceptTool` / `skipTool` command, which VS Code applies to custom-tool prompts too). Other
+custom-tool approvals show the tool name and a few bounded, non-secret arguments.
+
+After an allowed handoff the run is not marked finished: it shows "Handed off to a new chat",
+status "Handed off - waiting for new chat", and is re-bound to the new chat (found through the
+agent-host database, else by the handoff prompt as the first message of a session created after
+the handoff). Status, progress, approvals, Stop, Open chat and output files then follow the new
+chat; successive handoffs chain. The chain (and an unresolved handoff) is saved in `runs.json`.
+If the new chat never appears within 30 minutes the run becomes "Interrupted".
+
 ## Safety properties
 
 - Binds `127.0.0.1` only; the `Host` header must be the loopback name and port served.

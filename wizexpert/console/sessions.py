@@ -132,6 +132,55 @@ class SessionFinder:
             pass
         return None
 
+    def sdk_session(self, ahp: str) -> str | None:
+        """Reverse of ahp_id: the Copilot session id behind a VS Code chat id."""
+        if not UUID.fullmatch(ahp):
+            return None
+        try:
+            con = sqlite3.connect(f"file:{self.config.agent_host_db}?mode=ro", uri=True, timeout=2)
+        except sqlite3.Error:
+            return None
+        try:
+            rows = con.execute(
+                "select provider_data from chats_v2 where owner_session_uri like ?",
+                (f"%:/{ahp}",),
+            ).fetchall()
+        except sqlite3.Error:
+            return None
+        finally:
+            con.close()
+        for (blob,) in rows:
+            try:
+                sid = str((json.loads(blob) or {}).get("sdkSessionId") or "")
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if UUID.fullmatch(sid):
+                return sid
+        return None
+
+    def find_handoff(self, prompt: str, since: float, exclude: set[str]) -> str | None:
+        """A session created after a handoff whose first message is the handoff prompt."""
+        want = " ".join(prompt.split())[:300]
+        if not want:
+            return None
+        try:
+            dirs = [
+                d for d in self.config.session_state.iterdir() if UUID.fullmatch(d.name)
+            ]
+        except OSError:
+            return None
+        dirs.sort(key=lambda d: _mtime(d / "events.jsonl"), reverse=True)
+        for folder in dirs[:60]:
+            if folder.name in exclude:
+                continue
+            info = read_workspace_yaml(folder / "workspace.yaml")
+            if not info or parse_time(info.get("created_at")) < since - 10:
+                continue
+            first = " ".join((self._first_user_message(folder / "events.jsonl") or "").split())
+            if first and (first.startswith(want) or want.startswith(first)):
+                return folder.name
+        return None
+
     def ahp_id(self, sdk_session_id: str) -> str | None:
         """The id VS Code uses to open this session's chat (via the agent-host database)."""
         if not UUID.fullmatch(sdk_session_id):
@@ -169,6 +218,7 @@ class Pending:
     key: str
     text: str
     since: float
+    detail: str = ""
 
 
 @dataclass
@@ -183,7 +233,7 @@ class SessionView:
     progress: deque = field(default_factory=lambda: deque(maxlen=MAX_PROGRESS))
     permissions: dict[str, Pending] = field(default_factory=dict)
     questions: dict[str, Pending] = field(default_factory=dict)
-    open_tools: dict[str, str] = field(default_factory=dict)
+    open_tools: dict[str, int] = field(default_factory=dict)
     written: dict[str, str] = field(default_factory=dict)
     final: str = ""
     last_has_tools: bool = False
@@ -193,6 +243,8 @@ class SessionView:
     last_event: float = 0.0
     last_type: str = ""
     _sub: bool = False
+    handoff: dict[str, Any] | None = None
+    handoff_calls: dict[str, dict[str, Any]] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     # -- reading ---
@@ -227,6 +279,8 @@ class SessionView:
         self.open_tools.clear()
         self.written.clear()
         self.final, self.finished, self.saw_user = "", False, False
+        self.handoff = None
+        self.handoff_calls.clear()
 
     def _line(self, raw: bytes) -> None:
         match = TYPE_PREFIX.match(raw)
@@ -266,15 +320,14 @@ class SessionView:
         self._add("user", data.get("content") or "", stamp)
 
     def _on_assistant_message(self, data: dict, stamp: float) -> None:
-        if self._sub:
-            return
         text = str(data.get("content") or "").strip()
-        self.last_has_tools = bool(data.get("toolRequests"))
-        if self.last_has_tools:
-            self.final = ""
+        if not self._sub:
+            self.last_has_tools = bool(data.get("toolRequests"))
+            if self.last_has_tools:
+                self.final = ""
         if text:
-            self._add("assistant", text, stamp)
-            if not self.last_has_tools:
+            self._add("assistant", text, stamp, sub=self._sub)
+            if not self._sub and not self.last_has_tools:
                 self.final = text[:20000]
 
     def _on_assistant_turn_start(self, data: dict, stamp: float) -> None:
@@ -282,8 +335,12 @@ class SessionView:
             self.finished = False
 
     def _on_session_error(self, data: dict, stamp: float) -> None:
-        if not self._sub:
-            self._add("error", str(data.get("message") or "The session reported an error."), stamp)
+        self._add(
+            "error",
+            str(data.get("message") or "The session reported an error."),
+            stamp,
+            sub=self._sub,
+        )
 
     def _on_tool_execution_start(self, data: dict, stamp: float) -> None:
         name, call_id = str(data.get("toolName") or "tool"), str(data.get("toolCallId") or "")
@@ -294,13 +351,12 @@ class SessionView:
             except ValueError:
                 args = {"text": args}
         args = args if isinstance(args, dict) else {}
-        self.open_tools[call_id] = name
         if name == "ask_user":
             question = short(
                 args.get("question") or args.get("message") or "The agent has a question.", 600
             )
             self.questions[call_id] = Pending("question", call_id, question, time.time())
-        self._add(
+        item = self._add(
             "tool",
             f"{name}: {tool_summary(name, args)}",
             stamp,
@@ -308,25 +364,63 @@ class SessionView:
             call_id=call_id,
             sub=self._sub,
         )
+        self.open_tools[call_id] = item["seq"]
+        if name == HANDOFF_TOOL and not self._sub:
+            self.handoff_calls[call_id] = {
+                "title": short(args.get("title") or "", 120),
+                "prompt": str(args.get("prompt") or "").strip()[:MAX_HANDOFF_PROMPT],
+                "since": stamp or time.time(),
+            }
         if name in WRITE_TOOLS:
             for path in written_paths(args):
                 self.written[path] = name
 
     def _on_tool_execution_complete(self, data: dict, stamp: float) -> None:
         call_id = str(data.get("toolCallId") or "")
-        self.open_tools.pop(call_id, None)
+        seq = self.open_tools.pop(call_id, None)
+        if seq is not None:
+            for item in reversed(self.progress):
+                if item.get("seq") == seq:
+                    item["completed"] = True
+                    break
         self.questions.pop(call_id, None)
+        call = self.handoff_calls.pop(call_id, None)
+        if call is not None and data.get("success") is not False:
+            result = data.get("result")
+            content = result.get("content") if isinstance(result, dict) else result
+            found = HANDOFF_URI.search(str(content or ""))
+            if found:
+                self.handoff = {"ahp": found.group(1), **call}
+                self._add(
+                    "handoff",
+                    "Handed off to a new chat"
+                    + (f": {call['title']}" if call["title"] else "")
+                    + ". This run continues there.",
+                    stamp,
+                )
         if data.get("success") is False:
             for item in reversed(self.progress):
-                if item.get("call_id") == call_id:
+                if item.get("seq") == seq:
                     item["failed"] = True
                     break
+
+    def _close_open_tools(self) -> None:
+        for seq in self.open_tools.values():
+            for item in reversed(self.progress):
+                if item.get("seq") == seq:
+                    item["aborted"] = True
+                    break
+        self.open_tools.clear()
 
     def _on_permission_requested(self, data: dict, stamp: float) -> None:
         request = data.get("permissionRequest") or {}
         key = str(data.get("requestId") or "")
         self.permissions[key] = Pending(
-            "permission", key, permission_summary(request), stamp or time.time()
+            "permission",
+            key,
+            permission_summary(request),
+            stamp or time.time(),
+            permission_detail(request),
         )
 
     def _on_permission_completed(self, data: dict, stamp: float) -> None:
@@ -335,14 +429,16 @@ class SessionView:
     def _on_abort(self, data: dict, stamp: float) -> None:
         self.permissions.clear()
         self.questions.clear()
-        self.open_tools.clear()
+        self._close_open_tools()
         self.finished = self.aborted = True
 
     def _on_hook_end(self, data: dict, stamp: float) -> None:
         if not self._sub and data.get("hookType") in ("agentStop", "sessionEnd"):
+            self._close_open_tools()
             self.finished = True
 
     def _on_session_shutdown(self, data: dict, stamp: float) -> None:
+        self._close_open_tools()
         self.finished = True
 
     # -- derived state ---
@@ -359,6 +455,8 @@ class SessionView:
         now = now or time.time()
         if self.pending(now):
             return "input_needed"
+        if self.handoff:
+            return "handed_off"
         if self.finished:
             return "stopped" if self.aborted else "completed"
         idle = now - max(self.last_event, _mtime(self.path))
@@ -395,8 +493,55 @@ def tool_summary(name: str, args: dict[str, Any]) -> str:
     return ""
 
 
+SECRET_KEY = re.compile(r"token|secret|passw|credential|authoriz|api.?key|cookie", re.IGNORECASE)
+HANDOFF_URI = re.compile(r"agent-host-session://ahp-session/(" + UUID.pattern + ")")
+HANDOFF_TOOL = "create_session"
+MAX_HANDOFF_PROMPT = 4000
+
+
+def _tool_args(request: dict[str, Any]) -> dict[str, Any]:
+    args = request.get("args")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            args = {}
+    return args if isinstance(args, dict) else {}
+
+
+def _is_handoff(request: dict[str, Any]) -> bool:
+    return (
+        request.get("kind") == "custom-tool"
+        and str(request.get("toolName") or "") == HANDOFF_TOOL
+    )
+
+
+def permission_detail(request: dict[str, Any]) -> str:
+    """Long text shown in the scrollable box (the handoff prompt), bounded."""
+    if _is_handoff(request):
+        text = str(_tool_args(request).get("prompt") or "").strip()
+        return text[:MAX_HANDOFF_PROMPT]
+    return ""
+
+
 def permission_summary(request: dict[str, Any]) -> str:
     kind = str(request.get("kind") or "permission")
+    if kind == "custom-tool" and request.get("toolName"):
+        args = _tool_args(request)
+        if _is_handoff(request):
+            title = short(args.get("title") or "untitled", 120)
+            model = short(args.get("model") or "", 60)
+            return (
+                f"Spend-Guard handoff: continue this run in a new chat '{title}'"
+                + (f" (model {model})" if model else "")
+            )
+        parts = [
+            f"{k}={short(v, 60)}"
+            for k, v in list(args.items())[:6]
+            if not SECRET_KEY.search(str(k)) and isinstance(v, str | int | float | bool)
+        ]
+        text = f"custom tool {short(request['toolName'], 80)}"
+        return short(text + (" (" + ", ".join(parts) + ")" if parts else ""), 300)
     detail = ""
     for key in (
         "toolName",

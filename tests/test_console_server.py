@@ -331,6 +331,10 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
         assert not {"vscode", "download", "size"} & set(view["files"][0])
         history = json.loads(api(server, token, "GET", "/api/bootstrap")[2])["history"]
         assert history[0]["id"] == run_id and history[0]["status"] == "completed"
+        boot = json.loads(api(server, token, "GET", "/api/bootstrap")[2])
+        assert boot["active"] == []
+        status, _h, body = api(server, token, "GET", "/api/runs/active")
+        assert status == 200 and json.loads(body) == {"runs": []}
 
 
 def _previous(server, token):
@@ -379,3 +383,19 @@ def test_weekly_ui_uses_listing_with_manual_fallback(console):
     assert status == 200
     assert b"/api/weekly-progress/previous-reports" in body
     assert b"None: this is the first report" in body and b"__manual__" in body
+
+
+def test_light_surfaces_set_explicit_text_color():
+    import re
+    from pathlib import Path
+
+    import wizexpert.console as pkg
+
+    css = (Path(pkg.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    guard = css[css.index("Contrast guard"):]
+    selectors = (
+        ".ref", ".badge", ".banner", ".problems", ".panel th", ".panel td", ".notice", ".pending",
+    )
+    for selector in selectors:
+        pattern = r"(^|[\s,}])" + re.escape(selector) + r"[^{]*\{[^}]*\bcolor\s*:"
+        assert re.search(pattern, guard), selector

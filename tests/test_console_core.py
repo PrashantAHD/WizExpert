@@ -166,11 +166,16 @@ def test_reducer_progress_questions_permissions_and_final(env):
     )
     view.poll()
     assert view.status() == "running"
-    assert [i["kind"] for i in view.progress] == ["user", "assistant", "tool", "tool"]
+    assert [i["kind"] for i in view.progress] == ["user", "assistant", "tool", "tool", "assistant"]
+    assert view.progress[2]["completed"] is True
+    assert not view.progress[3].get("completed", False)
     assert view.progress[-1]["sub"] is True
     assert (
         view.final == ""
     )  # a message with tool calls (or from a subagent) is not the final summary
+    append(path, event("session.error", {"message": "Subagent failed"}, agent="sub1"))
+    view.poll()
+    assert view.progress[-1]["kind"] == "error" and view.progress[-1]["sub"] is True
 
     append(path, tool_start("ask_user", {"message": "Which month?"}, "q1"))
     view.poll()
