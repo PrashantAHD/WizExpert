@@ -141,10 +141,14 @@ class Bridge:
 
     def helper_connected(self, workspace: str | None = None) -> bool:
         """A helper window polled recently (and, if given, has this workspace folder open)."""
+        return self.helper_seen_within(workspace, HELPER_ALIVE)
+
+    def helper_seen_within(self, workspace: str | None, seconds: float) -> bool:
+        """A helper for this workspace polled within ``seconds`` (longer than the alive limit)."""
         now = self._clock()
         with self._cond:
             for info in self.instances.values():
-                if now - info["seen"] > HELPER_ALIVE:
+                if now - info["seen"] > seconds:
                     continue
                 if workspace is None or any(norm(f) == norm(workspace) for f in info["folders"]):
                     return True

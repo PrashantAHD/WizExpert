@@ -75,7 +75,7 @@ fallback, also used when the listing fails; the agent confirms a typed folder ex
 ```powershell
 # once: install the helper extension (an unpacked copy lands in %USERPROFILE%\.vscode\extensions)
 wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
-# then run Developer: Reload Window once in the VS Code window that has the workspace open
+# the console then opens a standard VS Code window for the workspace itself when needed
 
 wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
@@ -87,21 +87,37 @@ To build and install or update the helper as part of console startup, add
 wizexpert console --workspace <workspace folder> --install-helper
 ```
 
-The command does not reload VS Code, because that could interrupt active work.
-After the first installation, use **Developer: Reload Window** once; later launches can
-omit `--install-helper` unless the helper source changes.
-If VS Code asks whether the helper may create a chat in this workspace, choose **Allow
-Always**. This is a one-time workspace permission for the local helper; it prevents each
-refresh from stopping at the chat-creation prompt.
+The command does not reload VS Code, because that could interrupt active work. The helper
+activates only in a **standard VS Code window**: the VS Code "Agents" window loads built-in
+extensions and Copilot Chat only, so the helper can never run there. When the helper is not
+connected, the console opens a standard window for the workspace itself (see below).
+Before creating a chat the helper checks that the workspace is trusted (opening the
+Workspace Trust editor if not) and that the chat commands exist, and it reports a concrete
+error in the console banner, the status bar and the "WizExpert Console Helper" output channel
+if either fails or VS Code does not answer. Extensions cannot trigger or pre-approve any other
+VS Code permission prompt; if one is waiting, choose **Allow Always** there.
 
-By default, submitting a run first allows a short normal reconnect window, then checks the
-workspace helper connection and installs the helper only if it is
-still missing, then waits up to about 20 seconds for it to connect. VS Code offers no
-supported way to reload a window from outside, so if the helper does not connect the console
-asks you to run **Developer: Reload Window** once in VS Code and try again. Use `--no-auto-helper` only when you want submissions
-to fail immediately instead of changing the local VS Code setup.
+Automatic helper recovery: the console page asks the server to connect the helper whenever it
+is not connected (`POST /api/helper/connect`, one recovery at a time, retried every 30 s), and a
+submitted run does the same. Recovery installs the helper only when its version is not already
+registered (`code --list-extensions --show-versions`; a forced re-install re-extracts the folder
+under running windows, so it is never repeated), then opens a standard VS Code window for the
+configured workspace with `code -n <workspace>` (argument list, no shell; at most one launch per
+90 s; a helper for the workspace seen within the last 120 s but gone first gets an 8 s grace to
+reconnect, e.g. during a window reload, before the window is opened), then waits up to
+45 seconds. The slow work never holds the run lock, and a second request
+joins the recovery instead of starting another install, window or run. If the helper still cannot
+connect, the concrete reason (the helper must run in a standard window, not the Agents window) is
+shown in the banner and recorded with the run, and the run falls back to
+`code chat` (below) exactly once, so no duplicate chat or job is created. With
+`--no-cli-fallback` the run fails with that reason instead. Use
+`--no-auto-helper` only when you want submissions to fail immediately instead of changing the
+local VS Code setup.
 
-On the live run screen, **Stop** requests that the active VS Code chat stop. After a successful
+On the live run screen, **Stop** requests that the active VS Code chat stop. The helper cancels
+with `workbench.action.chat.cancel` (older VS Code: `workbench.action.chat.stop`), picking the
+first allow-listed command that exists (`vscode.commands.getCommands`) after the guard check, and
+reports an error if none exists. After a successful
 run, **View latest output** opens only the newest output file already validated and listed by
 the console. The work-item card remains available for another **Refresh** after the run ends or
 fails.
@@ -156,7 +172,7 @@ allow-listed commands, only for the workspace folder open in its window:
    have), then
 2. `workbench.action.chat.open` with `{mode: <agent>, query: <prompt>, isPartialQuery: false}`.
 
-Optional fallback (`--cli-fallback`): `code chat --mode <agent> --reuse-window "<prompt>"`. It targets the
+Fallback (on by default; `--no-cli-fallback` disables it; `--cli-fallback` is accepted for compatibility): `code chat --mode <agent> --reuse-window "<prompt>"`. It targets the
 last active VS Code window, so use it only if the helper path fails.
 
 The session is identified read-only: a new `session-state/<id>` folder whose `cwd` is the
@@ -190,7 +206,8 @@ never writes to `session-state`.
 
 ## Limitations
 
-- Needs the helper installed and the window reloaded once.
+- Needs the helper installed and a standard VS Code window for the workspace (opened
+  automatically; the Agents window cannot run the helper).
 - Which custom agent the new chat uses depends on VS Code applying `mode` in
   `workbench.action.chat.open`; the session log does not record the main agent, so the
   console cannot confirm it. Check the agent shown in the chat on the first run.

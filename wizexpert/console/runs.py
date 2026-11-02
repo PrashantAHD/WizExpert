@@ -76,7 +76,8 @@ class RunManager:
         self._sleep = sleep
         self._cli = cli or _run_cli
         self._runs: dict[str, Run] = {}
-        self._lock = threading.Lock()
+        self.helper_note = ""  # why the helper could not connect (set by the server)
+        self._lock = threading.RLock()
         self._load()
 
     # -- persistence (prompt and ids only) ---
@@ -140,7 +141,13 @@ class RunManager:
             "any": self.bridge.helper_connected(None),
             "workspace": Path(workspace).name,
             "agent": self.config.agent,
+            "problem": self.helper_note,
         }
+
+    def _refuse_if_starting(self) -> None:
+        with self._lock:
+            if any(r.status == "starting" for r in self._runs.values()):
+                raise RunError("Another run is still starting; wait for it to appear first.")
 
     def start(
         self,
@@ -154,17 +161,22 @@ class RunManager:
             prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
         except InputError as error:
             raise RunError(str(error)) from None
+        workspace = str(self.config.resolved_workspace())
+        self._refuse_if_starting()
+        helper_ready = self.bridge.helper_connected(workspace)
+        if not helper_ready and ensure_helper is not None:
+            # Slow (install / wake / wait): never hold the manager lock, so status polling and
+            # other requests keep answering; the starting check is repeated below.
+            helper_ready = ensure_helper()
         with self._lock:
-            if any(r.status == "starting" for r in self._runs.values()):
-                raise RunError("Another run is still starting; wait for it to appear first.")
-            helper_ready = self.bridge.helper_connected(str(self.config.resolved_workspace()))
-            if not helper_ready and ensure_helper is not None:
-                helper_ready = ensure_helper()
+            self._refuse_if_starting()
+            helper_ready = helper_ready or self.bridge.helper_connected(workspace)
             if not helper_ready and not self.config.allow_cli_fallback:
                 raise RunError(
                     "The VS Code helper is not connected for this workspace. Install it "
-                    "(wizexpert console install-helper), reload the VS Code window with the "
-                    "workspace open, and try again."
+                    "(wizexpert console install-helper); the console opens a standard VS Code "
+                    "window for the workspace automatically, or open one yourself (the Agents "
+                    "window cannot run the helper), and try again."
                 )
             run_id = (
                 time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock()))
@@ -200,6 +212,8 @@ class RunManager:
                 if self._await_session(run, ATTEMPT_SECONDS):
                     return
             if self.config.allow_cli_fallback:
+                if self.helper_note and not self.bridge.helper_connected(workspace):
+                    run.attempts.append("helper unavailable: " + short(self.helper_note, 160))
                 run.attempts.append("code chat fallback")
                 command = shutil.which(self.config.code_command) or self.config.code_command
                 code = self._cli(
@@ -210,9 +224,8 @@ class RunManager:
             with run.lock:
                 run.status = "not_started"
                 run.message = (
-                    "VS Code did not start the chat. Check that the workspace window has the "
-                    "helper "
-                    "active (reload the window after installing it). Attempts: "
+                    "VS Code did not start the chat. The helper must run in a standard VS Code "
+                    "window for the workspace (not the Agents window). Attempts: "
                     + "; ".join(run.attempts)
                 )
         finally:
@@ -400,9 +413,7 @@ class RunManager:
         if not path.is_file() or self.config.resolved_workspace() not in path.parents:
             raise RunError("The latest output path is no longer available.")
         workspace = str(self.config.resolved_workspace())
-        job = self.bridge.post_job(
-            {"kind": "open_file", "workspace": workspace, "path": str(path)}
-        )
+        job = self.bridge.post_job({"kind": "open_file", "workspace": workspace, "path": str(path)})
         result = self.bridge.wait_result(job, 20.0)
         if result is None or result.get("errors"):
             raise RunError("VS Code did not open the latest output: " + _result_text(result))

@@ -21,9 +21,12 @@ const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,3400}$/;
 const COMMANDS = {
   newChat: 'workbench.action.chat.newChat',
   open: 'workbench.action.chat.open',
-  stop: 'workbench.action.chat.stop',
+  // Cancel command for the current chat request: 'cancel' in current VS Code (1.144 has no
+  // '...chat.stop'); the first candidate that exists at runtime is used.
+  stopCandidates: ['workbench.action.chat.cancel', 'workbench.action.chat.stop'],
   accept: 'workbench.action.chat.acceptTool',
   skip: 'workbench.action.chat.skipTool',
+  trust: 'workbench.trust.manage',
 };
 let stopped = false;
 let output = null;
@@ -96,6 +99,19 @@ function settleWithin(thenable, ms) {
   });
 }
 
+// Explicit permission check: the workspace must be trusted and the chat commands present.
+// Returns a concrete problem text, or '' when chat creation can proceed. With request=true an
+// untrusted workspace opens VS Code's Workspace Trust editor so the user can grant it.
+async function chatGate(request) {
+  if (vscode.workspace.isTrusted === false) {
+    if (request) await settleWithin(vscode.commands.executeCommand(COMMANDS.trust), 3000);
+    return 'This workspace is not trusted, so VS Code blocks chat creation. Trust the workspace (Workspace Trust editor), then retry.';
+  }
+  const all = await vscode.commands.getCommands(true);
+  const missing = [COMMANDS.newChat, COMMANDS.open].filter((c) => !all.includes(c));
+  return missing.length ? 'VS Code chat commands unavailable: ' + missing.join(', ') + '. Enable Copilot Chat and reload the window.' : '';
+}
+
 async function openChat(ahp, wait) {
   if (!UUID.test(String(ahp))) throw new Error('bad session id');
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp));
@@ -110,6 +126,8 @@ async function runJob(job) {
       const all = await vscode.commands.getCommands(true);
       info.version = vscode.version;
       info.folders = folders().map((f) => path.basename(f));
+      info.trusted = vscode.workspace.isTrusted !== false;
+      info.chatGate = await chatGate(false);
       info.commands = all.filter((c) => /chat|agent/i.test(c)).slice(0, 400);
     } else if (job.kind === 'start_chat') {
       if (!AGENT.test(String(job.agent)) || !PROMPT.test(String(job.prompt))) throw new Error('rejected input');
@@ -117,8 +135,11 @@ async function runJob(job) {
       // then submit the prompt in the requested custom agent mode.
       // A chat command promise can stay pending, so never wait on it indefinitely: the
       // result must always reach the console.
+      const gate = await chatGate(true);
+      if (gate) throw new Error(gate);
       const nc = await settleWithin(vscode.commands.executeCommand(COMMANDS.newChat), 8000);
-      if (nc.error) throw new Error('VS Code refused to create a chat (allow the one-time prompt, then reload): ' + String(nc.error.message || nc.error));
+      if (nc.error) throw new Error('VS Code refused to create a chat: ' + String(nc.error.message || nc.error));
+      if (nc.timedOut) throw new Error('VS Code did not answer the new-chat request within 8 seconds; a permission prompt may be waiting in this window. Check VS Code notifications, then reload the window.');
       await sleep(Math.min(Number(job.newChatWait) || 1500, 10000));
       const op = await settleWithin(vscode.commands.executeCommand(COMMANDS.open, { mode: String(job.agent), query: String(job.prompt), isPartialQuery: false }), 8000);
       if (op.error) throw new Error('VS Code refused to open the chat prompt: ' + String(op.error.message || op.error));
@@ -132,8 +153,12 @@ async function runJob(job) {
       if (!g || g.ok !== true) {
         info.guard = (g && g.reason) || 'refused';
       } else {
-        await vscode.commands.executeCommand(COMMANDS.stop);
+        const available = await vscode.commands.getCommands(true);
+        const stopCommand = COMMANDS.stopCandidates.find((c) => available.includes(c));
+        if (!stopCommand) throw new Error('No VS Code chat cancel command is available (looked for ' + COMMANDS.stopCandidates.join(', ') + ').');
+        await vscode.commands.executeCommand(stopCommand);
         info.note = 'stopped';
+        info.command = stopCommand;
       }
     } else if (job.kind === 'open_file') {
       const target = String(job.path || '');
@@ -191,11 +216,26 @@ async function loop() {
 }
 
 function activate(context) {
+  if (output) return; // already active in this window
   stopped = false;
   output = vscode.window.createOutputChannel('WizExpert Console Helper');
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   context.subscriptions.push(output, status);
+  context.subscriptions.push(vscode.commands.registerCommand('wizexpertConsoleHelper.status', () => {
+    output.show(true);
+    vscode.window.showInformationMessage('WizExpert helper ' + lastState);
+  }));
+  // The console opens a standard VS Code window for the workspace (`code -n`), where this helper
+  // activates (the Agents window never loads user extensions). The URI handler is only a no-op
+  // activation hook kept for manual use.
+  if (vscode.window.registerUriHandler) {
+    context.subscriptions.push(vscode.window.registerUriHandler({
+      handleUri(uri) { output.appendLine(new Date().toISOString() + ' woken by console (' + String(uri.path).slice(0, 20) + ')'); },
+    }));
+  }
+  output.appendLine(new Date().toISOString() + ' activated v' + (context.extension && context.extension.packageJSON.version) + ' instance ' + INSTANCE);
   report('starting', folders().join(', ') || 'no workspace folder open');
+  chatGate(false).then((g) => { if (g) report('blocked', g); }, () => {});
   loop().catch((e) => report('stopped', String(e && e.message).slice(0, 120)));
   context.subscriptions.push({ dispose: () => { stopped = true; } });
 }
