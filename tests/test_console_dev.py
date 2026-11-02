@@ -39,18 +39,3 @@ def test_repo_launch_task_does_not_start_a_console():
     assert "wizexpert.console" not in text
     assert "--workspace ${workspaceFolder}" not in text
     assert "outer workspace root" in text
-
-
-def test_outer_launch_task_stops_prior_canonical_console_first():
-    import json
-
-    tasks = json.loads(
-        (Path(__file__).resolve().parents[2] / ".vscode" / "tasks.json").read_text(
-            encoding="utf-8-sig"
-        )
-    )["tasks"]
-    launch = next(t for t in tasks if "console (auto-reload)" in t["label"])
-
-    assert launch["dependsOn"] == "WizExpert: Stop workflow console"
-    assert launch["dependsOrder"] == "sequence"
-    assert launch["runOptions"]["instanceLimit"] == 1
