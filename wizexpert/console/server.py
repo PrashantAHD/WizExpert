@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from . import sessions
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
 from .runs import RunError, RunManager
@@ -40,6 +41,7 @@ STATIC_FILES = {
     "assets/logo.svg": "image/svg+xml",
     "assets/workflow-risk-issues.svg": "image/svg+xml",
     "assets/workflow-daily-progress.svg": "image/svg+xml",
+    "assets/workflow-weekly-progress.svg": "image/svg+xml",
     "assets/workflow-monthly-governance.svg": "image/svg+xml",
 }
 MAX_BODY = 256 * 1024
@@ -78,9 +80,9 @@ class ConsoleApp:
         self.allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     def ensure_helper(self) -> bool:
-        """Install, reload, and wait for the helper when a user submits a run."""
+        """Install and wait for the helper when a user submits a run."""
         workspace = str(self.config.resolved_workspace())
-        if self.bridge.helper_connected(workspace):
+        if self._wait_for_helper(workspace, 3.0):
             return True
         from . import helper
 
@@ -88,19 +90,22 @@ class ConsoleApp:
         try:
             if helper.install(out, self.config.code_command) != 0:
                 raise RunError("The VS Code helper could not be installed.")
-            if helper.reload_window(self.config.code_command) != 0:
-                raise RunError("VS Code did not accept the automatic window reload.")
         except (OSError, subprocess.SubprocessError) as error:
             raise RunError(f"Could not automate the VS Code helper setup: {error}") from error
-        deadline = time.monotonic() + 5
+        if self._wait_for_helper(workspace, 20.0):
+            return True
+        raise RunError(
+            "The VS Code helper was installed but has not connected. In VS Code run "
+            "\"Developer: Reload Window\" once, then try again."
+        )
+
+    def _wait_for_helper(self, workspace: str, seconds: float) -> bool:
+        deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             if self.bridge.helper_connected(workspace):
                 return True
             time.sleep(0.25)
-        raise RunError(
-            "The helper was installed and VS Code was reloaded, but it did not connect. "
-            "Check that this workspace is open in VS Code and try again."
-        )
+        return self.bridge.helper_connected(workspace)
 
 
 class ConsoleServer(ThreadingHTTPServer):
@@ -327,6 +332,19 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "history": manager.history(),
                 },
             )
+        if path == "/api/weekly-progress/previous-reports":
+            reports = sessions.list_previous_weekly_reports(self.app.config)
+            return self._json(
+                HTTPStatus.OK,
+                {
+                    "reports": reports,
+                    "empty": not reports,
+                    "message": ""
+                    if reports
+                    else "No previous weekly progress reports were found in the local "
+                    "deliverables folders; choose first report or enter a folder name.",
+                },
+            )
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
         if match and RUN_ID.fullmatch(match.group(1)):
             try:
@@ -350,11 +368,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/helper/probe":
             return self._json(HTTPStatus.OK, manager.probe())
-        match = re.fullmatch(r"/api/runs/([^/]+)/(decide|open)", path)
+        match = re.fullmatch(r"/api/runs/([^/]+)/(decide|open|stop|open-output)", path)
         if match and RUN_ID.fullmatch(match.group(1)):
             run_id, action = match.groups()
             if action == "open":
                 manager.open_chat(run_id)
+            elif action == "stop":
+                manager.stop(run_id)
+            elif action == "open-output":
+                manager.open_output(run_id)
             else:
                 manager.decide(run_id, str(body.get("action", "")))
             return self._json(HTTPStatus.OK, {"ok": True})

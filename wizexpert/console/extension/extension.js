@@ -16,20 +16,36 @@ const INSTANCE = crypto.randomBytes(8).toString('hex'); // one per VS Code windo
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RESOURCE = /^(ahp-session|agent-host-copilotcli|copilotcli):\/[0-9a-f-]{36}$/;
 const AGENT = /^[A-Za-z0-9 ._-]{1,60}$/;
-const PROMPT = /^[A-Za-z0-9 .,;:()/_-]{1,600}$/;
+const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,3400}$/;
 // The only commands this helper will ever execute.
 const COMMANDS = {
   newChat: 'workbench.action.chat.newChat',
   open: 'workbench.action.chat.open',
+  stop: 'workbench.action.chat.stop',
   accept: 'workbench.action.chat.acceptTool',
   skip: 'workbench.action.chat.skipTool',
 };
 let stopped = false;
+let output = null;
+let status = null;
+let lastState = '';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const mac = (token, ...parts) => crypto.createHmac('sha256', token).update(parts.join('\n')).digest('hex');
 const digest = (buf) => crypto.createHash('sha256').update(buf || Buffer.alloc(0)).digest('hex');
 const norm = (p) => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+function report(state, detail) {
+  // Show connection state in the status bar and log changes, so a failure is never silent.
+  const text = state + (detail ? ': ' + detail : '');
+  if (text === lastState) return;
+  lastState = text;
+  if (status) {
+    status.text = 'WizExpert helper ' + state;
+    status.tooltip = detail || 'WizExpert console helper';
+    status.show();
+  }
+  if (output) output.appendLine(new Date().toISOString() + ' ' + text);
+}
 const folders = () => (vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath);
 
 // Signed request; an answer is trusted only if the console signed it back.
@@ -69,6 +85,17 @@ function call(method, reqPath, body, timeoutMs) {
   });
 }
 
+// Resolves within ms no matter what and never rejects (a late rejection is swallowed).
+function settleWithin(thenable, ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ timedOut: true }), ms);
+    Promise.resolve(thenable).then(
+      () => { clearTimeout(timer); resolve({}); },
+      (error) => { clearTimeout(timer); resolve({ error }); },
+    );
+  });
+}
+
 async function openChat(ahp, wait) {
   if (!UUID.test(String(ahp))) throw new Error('bad session id');
   await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp));
@@ -88,12 +115,35 @@ async function runJob(job) {
       if (!AGENT.test(String(job.agent)) || !PROMPT.test(String(job.prompt))) throw new Error('rejected input');
       // A fresh chat first (so the prompt never lands in a conversation you already have open),
       // then submit the prompt in the requested custom agent mode.
-      await vscode.commands.executeCommand(COMMANDS.newChat);
+      // A chat command promise can stay pending, so never wait on it indefinitely: the
+      // result must always reach the console.
+      const nc = await settleWithin(vscode.commands.executeCommand(COMMANDS.newChat), 8000);
+      if (nc.error) throw new Error('VS Code refused to create a chat (allow the one-time prompt, then reload): ' + String(nc.error.message || nc.error));
       await sleep(Math.min(Number(job.newChatWait) || 1500, 10000));
-      await vscode.commands.executeCommand(COMMANDS.open, { mode: String(job.agent), query: String(job.prompt), isPartialQuery: false });
-      info.note = 'sent';
+      const op = await settleWithin(vscode.commands.executeCommand(COMMANDS.open, { mode: String(job.agent), query: String(job.prompt), isPartialQuery: false }), 8000);
+      if (op.error) throw new Error('VS Code refused to open the chat prompt: ' + String(op.error.message || op.error));
+      info.note = op.timedOut ? 'sent (command still pending)' : 'sent';
     } else if (job.kind === 'open_chat') {
       await openChat(job.ahp, job.openWait);
+      info.note = 'opened';
+    } else if (job.kind === 'stop_chat') {
+      await openChat(job.ahp, job.openWait);
+      const g = await call('POST', '/vscode/guard', { id: job.id }, 5000).catch((e) => ({ ok: false, reason: e.message }));
+      if (!g || g.ok !== true) {
+        info.guard = (g && g.reason) || 'refused';
+      } else {
+        await vscode.commands.executeCommand(COMMANDS.stop);
+        info.note = 'stopped';
+      }
+    } else if (job.kind === 'open_file') {
+      const target = String(job.path || '');
+      const allowed = folders().some((folder) => {
+        const base = norm(folder);
+        const candidate = norm(target);
+        return candidate === base || candidate.startsWith(base + '/');
+      });
+      if (!allowed) throw new Error('rejected file path');
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
       info.note = 'opened';
     } else if (job.kind === 'tool') {
       const command = job.action === 'accept' ? COMMANDS.accept : job.action === 'skip' ? COMMANDS.skip : null;
@@ -124,6 +174,7 @@ async function loop() {
     try {
       const f = encodeURIComponent(JSON.stringify(folders()));
       const res = await call('GET', `/vscode/jobs?after=${after}&instance=${INSTANCE}&folders=${f}`, undefined, 40000);
+      report('connected', folders().map((x) => path.basename(x)).join(', '));
       if (after < 0) { after = typeof res.last === 'number' ? res.last : 0; continue; } // skip jobs from before we connected
       for (const job of res.jobs || []) {
         if (job.id <= after) continue;
@@ -132,14 +183,20 @@ async function loop() {
         const { errors, info } = await runJob(job);
         call('POST', '/vscode/result', { id: job.id, errors, info }, 5000).catch(() => {});
       }
-    } catch {
+    } catch (e) {
+      report('waiting', String(e && e.message).slice(0, 120));
       await sleep(5000); // console not running
     }
   }
 }
 
 function activate(context) {
-  loop();
+  stopped = false;
+  output = vscode.window.createOutputChannel('WizExpert Console Helper');
+  status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
+  context.subscriptions.push(output, status);
+  report('starting', folders().join(', ') || 'no workspace folder open');
+  loop().catch((e) => report('stopped', String(e && e.message).slice(0, 120)));
   context.subscriptions.push({ dispose: () => { stopped = true; } });
 }
 

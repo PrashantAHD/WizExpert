@@ -465,6 +465,58 @@ def is_deliverable(relative: Path, config: ConsoleConfig) -> bool:
     return False
 
 
+WEEKLY_REPORT_MARKER = re.compile(r"weekly[ _-]*progress", re.IGNORECASE)
+PREVIOUS_REPORT_LIMIT = 50
+PREVIOUS_REPORT_DEPTH = 3
+_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}(/[A-Za-z0-9][A-Za-z0-9._-]{0,39}){0,2}")
+
+
+def list_previous_weekly_reports(config: ConsoleConfig) -> list[dict[str, str]]:
+    """Folders under the configured output roots that hold weekly-progress deliverables.
+
+    Names and root-relative references only (never file contents). Folders are confined to the
+    workspace, excluded/denied locations and symlinks are skipped, depth and count are bounded.
+    A folder qualifies when its path contains "weekly progress" and it directly holds a
+    recognized deliverable file.
+    """
+    workspace = config.resolved_workspace()
+    found: dict[str, float] = {}
+    for rel in config.output_roots:
+        base = confine(workspace / rel, workspace)
+        if base is None or not base.is_dir():
+            continue
+        for folder, dirs, files in os.walk(base):
+            here = Path(folder)
+            depth = len(here.relative_to(base).parts)
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in config.exclude_dirs
+                and depth < PREVIOUS_REPORT_DEPTH
+                and not (here / d).is_symlink()
+                and confine(here / d, base) is not None
+            ]
+            relative = here.relative_to(base)
+            reference = relative.as_posix()
+            if not relative.parts or not WEEKLY_REPORT_MARKER.search(reference):
+                continue
+            if not _REFERENCE.fullmatch(reference):
+                continue
+            if is_denied(here.relative_to(workspace), config):
+                continue
+            times = [
+                _mtime(here / n)
+                for n in files
+                if Path(n).suffix.lower() in DELIVERABLE_EXTENSIONS
+                and not is_denied(Path(n), config)
+                and not (here / n).is_symlink()
+            ]
+            if times:
+                found[reference] = max(found.get(reference, 0.0), max(times))
+    ordered = sorted(found, key=lambda r: (-found[r], r))[:PREVIOUS_REPORT_LIMIT]
+    return [{"name": r.rsplit("/", 1)[-1], "reference": r} for r in ordered]
+
+
 def collect_files(
     config: ConsoleConfig, written: dict[str, str], since: float, *, scan: bool = True
 ) -> list[dict[str, Any]]:

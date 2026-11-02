@@ -64,6 +64,7 @@ generation logic is not used.
 |---|---|
 | **Risk Issues** | Internal Analysis; Client Assessment; Stakeholder Email; Detailed Report; Internal Follow-up Email; Updated Detailed Report |
 | **Daily Progress Reporting** | Daily Progress Report; Day-to-Day Movements; VM/CVE Details; Stakeholder Reply Email |
+| **Weekly Progress Reporting** | Excel Workbook; Slide Deck; HTML Report; PDF Report; Email Draft (Monday, previous week, in-progress Wiz items) |
 | **Monthly Governance Reporting** | Monthly Governance Workbook; Monthly Governance Slide Deck; Executive Dashboard |
 
 Each category has its own loop. Open the SVG in a browser if GitHub shows a still frame.
@@ -71,6 +72,10 @@ Each category has its own loop. Open the SVG in a browser if GitHub shows a stil
 <img src="docs/assets/workflow-daily-progress.svg" alt="Daily Progress: WizExpert hub, collect draft communicate, still open next day or close and update" width="920">
 
 <sub>Daily Progress Reporting. Still open → collect again. Gate met → update and close.</sub>
+
+<img src="docs/assets/workflow-weekly-progress.svg" alt="Weekly Progress: previous report baseline, reuse Risk Issues and Daily Progress records, refresh Wiz status, update deliverables, carry active work forward" width="920">
+
+<sub>Weekly Progress Reporting. Previous report → reuse records → refresh status → update → carry active work forward.</sub>
 
 <img src="docs/assets/workflow-monthly-governance.svg" alt="Monthly Governance: WizExpert hub, cutoff, collect, draft, handoff, retain history" width="920">
 
@@ -129,8 +134,9 @@ Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated ver
 ## Workflow console (local frontend for the VS Code agent chat)
 
 ```powershell
-wizexpert console install-helper --code <path to code.cmd>        # once, then reload the VS Code window
+wizexpert console install-helper --code <path to code.cmd>        # once, then run "Developer: Reload Window" in VS Code
 wizexpert console --workspace <workspace folder>                  # opens http://127.0.0.1:8765/
+# Local layout: use the private outer root as <workspace folder>; see docs/CONSOLE.md (Canonical local setup).
 ```
 
 Pick a category, enter that category's input, press Start: the console opens a **new VS Code

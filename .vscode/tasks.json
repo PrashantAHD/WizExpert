@@ -4,26 +4,15 @@
     {
       "label": "WizExpert: Workflow console (auto-reload)",
       "type": "process",
-      "command": "python",
+      "command": "powershell",
       "args": [
-        "-m",
-        "wizexpert.console.dev",
-        "--watch-root",
-        "${workspaceFolder}/wizexpert/console",
-        "--workspace",
-        "${workspaceFolder}",
-        "--port",
-        "8765",
-        "--no-browser"
+        "-NoProfile",
+        "-Command",
+        "Write-Error 'Launch the console from the private outer workspace root (the folder that contains deliverables and this repository as WizExpert/): open that folder in VS Code and run the same task there. It uses --workspace <outer root> with this repository .venv.'; exit 1"
       ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "isBackground": true,
       "presentation": {
         "reveal": "always",
-        "panel": "dedicated",
-        "close": false
+        "panel": "shared"
       },
       "problemMatcher": []
     },

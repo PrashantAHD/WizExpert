@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import re
@@ -185,6 +186,7 @@ def test_static_assets_are_served(console):
         ("assets/logo.svg", "svg"),
         ("assets/workflow-risk-issues.svg", "svg"),
         ("assets/workflow-daily-progress.svg", "svg"),
+        ("assets/workflow-weekly-progress.svg", "svg"),
         ("assets/workflow-monthly-governance.svg", "svg"),
     ):
         status, headers, _b = request(server, "GET", f"/static/{name}")
@@ -329,3 +331,51 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
         assert not {"vscode", "download", "size"} & set(view["files"][0])
         history = json.loads(api(server, token, "GET", "/api/bootstrap")[2])["history"]
         assert history[0]["id"] == run_id and history[0]["status"] == "completed"
+
+
+def _previous(server, token):
+    status, _h, body = api(server, token, "GET", "/api/weekly-progress/previous-reports")
+    assert status == 200
+    return json.loads(body)
+
+
+def test_previous_reports_empty_is_explicit_and_needs_csrf(console):
+    server, *_ = console
+    assert request(server, "GET", "/api/weekly-progress/previous-reports")[0] == 403
+    data = _previous(server, token_of(server))
+    assert data["reports"] == [] and data["empty"] is True
+    assert "first report" in data["message"]
+
+
+def test_previous_reports_lists_only_safe_weekly_folders(console, tmp_path):
+    server, config, _home = console
+    root = config.workspace / "deliverables"
+    good = root / "Weekly-Progress" / "2026-10-26"
+    good.mkdir(parents=True)
+    (good / "report.xlsx").write_text("SECRET-CONTENT")
+    other = root / "Daily-Progress"
+    other.mkdir()
+    (other / "report.xlsx").write_text("x")
+    (root / "Weekly-Progress" / "empty").mkdir()
+    (root / "Weekly-Progress" / "notes.tmp").write_text("x")
+    evidence = root / "Weekly-Progress" / "evidence"
+    evidence.mkdir()
+    (evidence / "a.xlsx").write_text("x")
+    outside = tmp_path / "outside" / "weekly-progress-x"
+    outside.mkdir(parents=True)
+    (outside / "a.xlsx").write_text("x")
+    with contextlib.suppress(OSError):
+        (root / "weekly-progress-link").symlink_to(outside, target_is_directory=True)
+    status, _h, body = api(server, token_of(server), "GET", "/api/weekly-progress/previous-reports")
+    data = json.loads(body)
+    assert status == 200 and data["empty"] is False
+    assert data["reports"] == [{"name": "2026-10-26", "reference": "Weekly-Progress/2026-10-26"}]
+    assert b"SECRET-CONTENT" not in body and str(tmp_path).encode() not in body
+
+
+def test_weekly_ui_uses_listing_with_manual_fallback(console):
+    server, *_ = console
+    status, _h, body = request(server, "GET", "/static/app.js")
+    assert status == 200
+    assert b"/api/weekly-progress/previous-reports" in body
+    assert b"None: this is the first report" in body and b"__manual__" in body

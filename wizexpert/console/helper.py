@@ -15,7 +15,7 @@ from pathlib import Path
 
 NAME = "wizexpert-console-helper"
 PUBLISHER = "local"
-VERSION = "0.1.0"
+VERSION = "0.1.2"
 SOURCE = Path(__file__).resolve().parent / "extension" / "extension.js"
 
 PACKAGE = {
@@ -27,7 +27,7 @@ PACKAGE = {
     "publisher": PUBLISHER,
     "engines": {"vscode": "^1.90.0"},
     "categories": ["Other"],
-    "activationEvents": ["onStartupFinished"],
+    "activationEvents": ["*"],
     "main": "./extension.js",
     "extensionKind": ["ui"],
     "contributes": {},
@@ -87,16 +87,5 @@ def install(out: Path, code_command: str = "code") -> int:
     command = shutil.which(code_command) or code_command
     result = subprocess.run(  # nosec B603 - fixed arguments, user-chosen CLI name
         [command, "--install-extension", str(vsix), "--force"], check=False, timeout=120
-    )
-    return result.returncode
-
-
-def reload_window(code_command: str = "code") -> int:
-    """Reload the active VS Code window so a newly installed helper can activate."""
-    command = shutil.which(code_command) or code_command
-    result = subprocess.run(  # nosec B603 - fixed arguments, user-chosen CLI name
-        [command, "--reuse-window", "--command", "workbench.action.reloadWindow"],
-        check=False,
-        timeout=30,
     )
     return result.returncode

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from wizexpert.governance import categories as cat
 
@@ -39,8 +39,6 @@ def test_monthly_governance_category():
                  "offloading", "historical data loss"):
         assert term in text, term
     assert "category_rules" not in cat.DAILY_PROGRESS.manifest()
-
-
 def test_manifest_is_placeholder_only_and_stable():
     for category in cat.CATEGORIES.values():
         text = str(category.manifest())
@@ -77,3 +75,22 @@ def test_exact_slot_ids():
         "daily-progress-report", "day-to-day-movements",
         "vm-and-cve-details", "stakeholder-reply-email",
     ]
+
+
+def test_weekly_progress_category():
+    c = cat.WEEKLY_PROGRESS
+    assert cat.CATEGORIES["weekly-progress-reporting"] is c
+    assert [s.slot_id for s in c.slots] == [
+        "weekly-progress-workbook", "weekly-progress-slide-deck", "weekly-progress-html",
+        "weekly-progress-pdf", "weekly-progress-email",
+    ]
+    text = " ".join(c.manifest()["category_rules"])
+    assert "Monday" in text and "IN_PROGRESS" in text and "no-send" in text
+    assert c.depends_on == ("risk-issues", "daily-progress-reporting")
+    assert all(d in cat.CATEGORIES for d in c.depends_on)
+    assert c.manifest()["depends_on"] == list(c.depends_on)
+    assert "depends_on" not in cat.DAILY_PROGRESS.manifest()
+    for term in ("previous weekly report", "re-collect", "current read-only wiz status",
+                 "never infer closure", "resolved during the covered", "carry-forward",
+                 "return to in_progress", "historical record"):
+        assert term in text.lower(), term

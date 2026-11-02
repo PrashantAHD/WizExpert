@@ -1,4 +1,4 @@
-﻿"""Public-safe, placeholder-only category definitions for repeatable work types.
+"""Public-safe, placeholder-only category definitions for repeatable work types.
 
 A category fixes the deliverable slots, required gates and drift rules of a work
 type. It contains no client names, evidence, identifiers or counts. Private
@@ -40,9 +40,12 @@ class Category:
     slots: tuple[Slot, ...]
     gates: tuple[str, ...]
     category_rules: tuple[str, ...] = ()
+    depends_on: tuple[str, ...] = ()
 
     def manifest(self) -> dict[str, Any]:
         extra = {"category_rules": list(self.category_rules)} if self.category_rules else {}
+        if self.depends_on:
+            extra["depends_on"] = list(self.depends_on)
         return {
             **extra,
             "schema_version": SCHEMA_VERSION,
@@ -102,6 +105,40 @@ DAILY_PROGRESS = Category(
     ),
     ("collection", "generation", "handoff"),
 )
+WEEKLY_PROGRESS = Category(
+    "weekly-progress-reporting",
+    1,
+    "Weekly Progress Reporting",
+    (
+        Slot("weekly-progress-workbook", "Weekly progress Excel workbook", "workbook"),
+        Slot("weekly-progress-slide-deck", "Weekly progress slide deck", "deck"),
+        Slot("weekly-progress-html", "Weekly progress HTML report", "document"),
+        Slot("weekly-progress-pdf", "Weekly progress PDF report", "document"),
+        Slot("weekly-progress-email", "Weekly progress email draft (not sent)", "email-draft"),
+    ),
+    ("collection", "generation", "handoff"),
+    (
+        "Deliver on Mondays, covering the previous week.",
+        "Scope is current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah.",
+        "The five slots are the initial deliverables; the owner may remove one later "
+        "through a recorded owner change that bumps the category version.",
+        "Read-only and no-send: local files only, never send email or change Wiz, "
+        "ticketing or cloud records.",
+        "Update the previous weekly report rather than recreating the inventory; items "
+        "often stay IN_PROGRESS across weeks.",
+        "Reuse the latest local Risk Issues and Daily Progress Reporting records and "
+        "outputs for status, remediation progress, SNOW ticket responses and email "
+        "responses; do not duplicate or re-collect them unnecessarily.",
+        "Fetch only the current read-only Wiz status and reconcile any new responses "
+        "against the reused records.",
+        "Never infer closure from an owner message; closure needs current Wiz status.",
+        "Items resolved during the covered Monday-Sunday period stay in that period's "
+        "report with resolution and current-status evidence; the next period drops them "
+        "from the active carry-forward list unless they return to IN_PROGRESS, and the "
+        "prior report keeps the historical record unchanged.",
+    ),
+    ("risk-issues", "daily-progress-reporting"),
+)
 MONTHLY_GOVERNANCE = Category(
     "monthly-governance-reporting",
     2,
@@ -139,7 +176,10 @@ MONTHLY_GOVERNANCE = Category(
         "Keep client names, evidence and identifiers out of this repository.",
     ),
 )
-CATEGORIES = {c.category_id: c for c in (RISK_ISSUES, DAILY_PROGRESS, MONTHLY_GOVERNANCE)}
+CATEGORIES = {
+    c.category_id: c
+    for c in (RISK_ISSUES, DAILY_PROGRESS, WEEKLY_PROGRESS, MONTHLY_GOVERNANCE)
+}
 
 
 def validate_binding(category_id: str, binding: dict[str, Any]) -> list[str]:
