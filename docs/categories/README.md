@@ -1,6 +1,6 @@
-﻿# Category definitions: Reusable reporting categories
+# Category definitions: Reusable reporting categories
 
-Reusable, drift-resistant definitions for three completed work types. The
+Reusable, drift-resistant definitions for four work types. The
 machine-readable source is `wizexpert/governance/categories.py`; this page is
 the public-safe skill and instruction text. It holds placeholders only: no
 client names, evidence, identifiers, counts, accounts, CVEs or private
@@ -12,7 +12,23 @@ deliverables. Private templates, bindings and outputs stay in private storage.
 |---|---|
 | `risk-issues` (6) | internal-analysis, client-assessment, stakeholder-email (draft, not sent), detailed-report, internal-follow-up-email (draft, not sent), updated-detailed-report |
 | `daily-progress-reporting` (4) | daily-progress-report, day-to-day-movements, vm-and-cve-details, stakeholder-reply-email (draft, not sent) |
+| `weekly-progress-reporting` (5) | weekly-progress-workbook (Excel), weekly-progress-slide-deck, weekly-progress-html, weekly-progress-pdf, weekly-progress-email (draft, not sent); delivered Mondays for the previous week, scoped to in-progress Wiz items assigned to Prashant, Syed or Kimrah; the owner may remove a slot later via a recorded owner change; `depends_on` `risk-issues` and `daily-progress-reporting` |
 | `monthly-governance-reporting` (3) | monthly-governance-workbook, monthly-governance-slide-deck, executive-dashboard |
+
+### Weekly progress reporting dependencies
+
+`weekly-progress-reporting` declares `depends_on` (`risk-issues`,
+`daily-progress-reporting`; shown in its manifest). Each Monday run updates the previous
+weekly report instead of recreating the inventory, because items often remain IN_PROGRESS
+across weeks. It reuses the latest local Risk Issues and Daily Progress records and outputs
+for status, remediation progress, SNOW ticket responses and email responses, without
+duplicating or re-collecting them unnecessarily, and fetches only the current read-only Wiz
+status, reconciling new responses. Closure is never inferred from an owner message.
+
+Resolved-item lifecycle: items resolved during the covered Monday-Sunday period stay in that
+period's report with resolution and current-status evidence. The next period drops them from
+the active carry-forward list unless they return to IN_PROGRESS; the prior report is kept
+unchanged as the historical record.
 
 ### Monthly governance reporting rules (high level)
 
@@ -117,3 +133,18 @@ in the repository tree.
 
 These builders are structure-only and are not the production binding. Private
 templates, the private binding layer and pinned hashes remain private.
+
+### Weekly progress reporting data model
+
+`wizexpert.governance.weekly_progress` is the public-safe, placeholder-only
+model for the weekly category: `period_for` (Monday reporting date -> prior
+Monday-Sunday), `build_weekly_dataset` (previous report baseline + current
+read-only status rows + required Risk Issues / Daily Progress record references
+-> carried, new, resolved, dropped or needs-status items), `validate_weekly_dataset`
+and `placeholder_dataset`. Rules: IN_PROGRESS items carry forward; items resolved
+in the covered period stay in that period with resolution evidence and drop the
+next period; an owner message never closes an item; no "Assessment basis and
+limitations" section and no internal Wiz tracking instructions in outputs. It
+makes no Wiz/SNOW call and sends no email. The five slot renderers, validators
+and the client confidentiality footer live in the private workspace
+(`templates/weekly-progress/`), not in this repository.

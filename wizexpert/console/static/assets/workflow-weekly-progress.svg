@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" role="img" aria-labelledby="title desc">
+  <title id="title">Weekly Progress Reporting</title>
+  <desc id="desc">WizExpert uses the previous weekly report, reuses Risk Issues and Daily Progress records, refreshes read-only Wiz status, updates the Monday report, and carries active work into the next week.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0B2447"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="960" height="700" rx="28" fill="url(#bg)"/>
+  <text x="48" y="42" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Weekly Progress Reporting</text>
+  <text x="48" y="66" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="14">Every Monday: update the previous week, carry active work forward, and retain resolved history.</text>
+  <g fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M480 126 V154"/>
+    <path d="M480 226 V258 H180"/>
+    <path d="M480 258 H780"/>
+    <path d="M180 258 V292"/>
+    <path d="M480 258 V292"/>
+    <path d="M780 258 V292"/>
+    <path d="M480 226 V400 H300"/>
+    <path d="M480 400 H660"/>
+    <path d="M300 400 V448"/>
+    <path d="M660 400 V448"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="84" width="360" height="42" rx="14" fill="#1E293B" stroke="#334155"/>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">1 · set Monday period</text>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="154" width="360" height="72" rx="16" fill="#1D4ED8" stroke="#60A5FA"/>
+    <text x="480" y="182" text-anchor="middle" fill="#BFDBFE" font-size="12">WIZEXPERT</text>
+    <text x="480" y="206" text-anchor="middle" fill="#F8FAFC" font-size="16" font-weight="700">weekly update hub</text>
+  </g>
+  <circle cx="480" cy="190" r="8" fill="#38BDF8" filter="url(#glow)"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(40,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#3B82F6" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">1</text>
+      <text x="140" y="28" text-anchor="middle" fill="#3B82F6" font-size="11">BASELINE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Previous report</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">Monday to Sunday</text>
+    </g>
+    <g transform="translate(340,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#38BDF8" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">2</text>
+      <text x="140" y="28" text-anchor="middle" fill="#38BDF8" font-size="11">REUSE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Risk / Daily records</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">responses and movement</text>
+    </g>
+    <g transform="translate(640,292)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#F59E0B" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">3</text>
+      <text x="140" y="28" text-anchor="middle" fill="#F59E0B" font-size="11">REFRESH</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Wiz status</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">read-only reconciliation</text>
+    </g>
+    <g transform="translate(160,448)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#A78BFA" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">4</text>
+      <text x="140" y="28" text-anchor="middle" fill="#A78BFA" font-size="11">UPDATE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Workbook / deck</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">HTML, PDF, email draft</text>
+    </g>
+    <g transform="translate(520,448)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#22C55E" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">5</text>
+      <text x="140" y="28" text-anchor="middle" fill="#22C55E" font-size="11">CARRY FORWARD</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Active work continues</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">resolved items drop next week</text>
+    </g>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="480" y="610" text-anchor="middle" fill="#CBD5E1" font-size="13">Resolved during the covered period stay in that report; the prior report stays unchanged.</text>
+    <text x="480" y="636" text-anchor="middle" fill="#64748B" font-size="12">Read-only collection and local drafts. The tool never changes Wiz, SNOW, cloud or email.</text>
+  </g>
+</svg>

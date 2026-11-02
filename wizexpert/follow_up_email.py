@@ -1,4 +1,4 @@
-﻿"""Render and validate the Risk Issues follow-up email draft (HTML only, never sent)."""
+"""Render and validate the Risk Issues follow-up email draft (HTML only, never sent)."""
 
 from __future__ import annotations
 
