@@ -169,6 +169,9 @@ never from this repository:
   the console lives exactly as long as the standard VS Code window session. The task first stops an
   existing console belonging to the same canonical workspace, so there is a single backend on port 8765.
   Tasks run only in a standard window; the Agents window starts neither the task nor the helper.
+  Versioned copies of `tasks.json`, `start-console.ps1` and `stop-console.ps1` live in
+  `scripts/console-workspace/`; copy them into `<outer root>\.vscode\` (the scripts resolve the
+  workspace as the parent of their own folder).
 - Stop: **WizExpert: Stop workflow console** (outer root) stops that process.
 
 The task in this repository's `.vscode/tasks.json` deliberately does not start a console;
