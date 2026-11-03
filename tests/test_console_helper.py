@@ -82,7 +82,7 @@ def test_chat_creation_checks_permission_and_reports_concrete_errors():
     assert "async function chatGate(" in source and "isTrusted" in source
     assert "const gate = await chatGate(true)" in source
     assert "nc.timedOut" in source and "report('blocked'" in source
-    assert helper.VERSION == "0.1.8"
+    assert helper.VERSION == "0.1.9"
 
 
 def test_helper_activates_on_startup_and_logs_activation():
