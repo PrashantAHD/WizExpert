@@ -14,6 +14,10 @@ for ($i = 0; $i -lt 10 -and $id; $i++) {
     $id = $p.ParentProcessId
 }
 
+if (-not $owner) {
+    Write-Warning "No owning Code.exe ancestor found; the console will NOT auto-stop when VS Code exits. Run stop-console.ps1 to stop it."
+}
+
 $console = Start-Process -FilePath $python -NoNewWindow -PassThru -WorkingDirectory $repo -ArgumentList @(
     "-m", "wizexpert.console.dev",
     "--watch-root", "`"$repo\wizexpert\console`"",

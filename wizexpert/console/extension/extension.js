@@ -217,7 +217,11 @@ async function runJobUnbounded(job) {
         for (const r of job.resources || []) {
           if (!RESOURCE.test(String(r))) continue;
           // A session without a waiting prompt ignores this, so trying every URI form is safe.
-          try { await settleWithin(vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }), 5000); } catch (e) { errors.push(String(e.message).slice(0, 120)); }
+          try {
+            const t = await settleWithin(vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }), 5000);
+            if (t.error) errors.push(String(t.error.message || t.error).slice(0, 120));
+            else if (t.timedOut) errors.push('timed out');
+          } catch (e) { errors.push(String(e.message).slice(0, 120)); }
         }
       }
     } else {
