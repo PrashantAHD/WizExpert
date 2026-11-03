@@ -47,7 +47,7 @@ def test_weekly_prompt_with_max_snow_response_passes_python_and_js():
     text = ("Owner said it's 100% fine? yes! a@b. " * 60)[: categories.MAX_EMAIL]
     values = categories.validate(
         "weekly-progress-reporting",
-        {"reporting_monday": "2026-11-02", "snow_response": text},
+        {"reporting_monday": "2026-11-03", "snow_response": text},
     )
     prompt = categories.build_prompt("weekly-progress-reporting", values)
     assert len(prompt) <= limit
@@ -254,7 +254,7 @@ def test_extension_stop_picks_first_available_allow_listed_cancel_command():
     assert re.findall(r"'([^']+)'", candidates)[0] == "workbench.action.chat.cancel"
     assert "workbench.action.chat.stop" in candidates  # older VS Code
     branch = source.split("job.kind === 'stop_chat'", 1)[1].split("job.kind === 'open_file'", 1)[0]
-    assert "getCommands(true)" in branch
+    assert "commandsWithin(5000)" in branch
     assert "COMMANDS.stopCandidates.find((c) => available.includes(c))" in branch
     assert "if (!stopCommand) throw new Error(" in branch
     assert "executeCommand(stopCommand)" in branch

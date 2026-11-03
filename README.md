@@ -64,7 +64,7 @@ generation logic is not used.
 |---|---|
 | **Risk Issues** | Internal Analysis; Client Assessment; Stakeholder Email; Detailed Report; Internal Follow-up Email; Updated Detailed Report |
 | **Daily Progress Reporting** | Daily Progress Report; Day-to-Day Movements; VM/CVE Details; Stakeholder Reply Email |
-| **Weekly Progress Reporting** | Excel Workbook; Slide Deck; HTML Report; PDF Report; Email Draft (Monday, previous week, in-progress Wiz items) |
+| **Weekly Progress Reporting** | Excel Workbook; Slide Deck; HTML Report; PDF Report; Email Draft (Tuesday; current in-progress Wiz items plus resolved since previous Monday) |
 | **Monthly Governance Reporting** | Monthly Governance Workbook; Monthly Governance Slide Deck; Executive Dashboard |
 
 Each category has its own loop. Open the SVG in a browser if GitHub shows a still frame.

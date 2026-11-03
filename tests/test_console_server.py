@@ -291,7 +291,7 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
             time.sleep(0.1)
         assert view["status"] == "running"
         assert (
-            helper.jobs[0]["prompt"]
+            [j for j in helper.jobs if j["kind"] == "start_chat"][0]["prompt"]
             == "Risk Issues category: prepare the deliverables for Wiz issue wc-id-5"
         )
 
@@ -399,3 +399,59 @@ def test_light_surfaces_set_explicit_text_color():
     for selector in selectors:
         pattern = r"(^|[\s,}])" + re.escape(selector) + r"[^{]*\{[^}]*\bcolor\s*:"
         assert re.search(pattern, guard), selector
+
+
+def test_history_reset_is_confirmed_backed_up_and_scoped(console):
+    server, config, _home = console
+    token = token_of(server)
+    deliverable = config.workspace / "deliverables" / "keep.txt"
+    deliverable.write_text("x", encoding="utf-8")
+    config.state_dir.mkdir(parents=True, exist_ok=True)
+    (config.state_dir / "runs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "abcdef123456",
+                    "category_id": "risk-issues",
+                    "prompt": "p",
+                    "created": 1.0,
+                    "status": "completed",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    # runs are loaded at startup, so rebuild the manager state through a fresh server
+    server.app.manager._load()
+    status, _h, _b = api(server, token, "POST", "/api/history/reset", {})
+    assert status == 400 and (config.state_dir / "runs.json").exists()
+    status, _h, body = api(
+        server, token, "POST", "/api/history/reset", {"confirm": "reset-console-history"}
+    )
+    assert status == 200 and json.loads(body)["cleared"] == 1
+    assert not (config.state_dir / "runs.json").exists()
+    assert list(config.state_dir.glob("runs.json.reset-*.bak"))
+    assert deliverable.read_text(encoding="utf-8") == "x"
+    _s, _h, boot = api(server, token, "GET", "/api/bootstrap")
+    assert json.loads(boot)["history"] == []
+
+
+def test_home_has_about_section():
+    from pathlib import Path
+
+    import wizexpert.console as pkg
+
+    js = (Path(pkg.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
+    for name in (
+        "About WizExpert",
+        "Risk Issues",
+        "Daily Progress Reporting",
+        "Weekly Progress Reporting",
+        "Monthly Governance Reporting",
+        "The journey",
+        "Human approval",
+        "Read-only access",
+    ):
+        assert name in js
+    css = (Path(pkg.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    assert ".journey" in css and ".about-case" in css

@@ -4,75 +4,76 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="csrf-token" content="__CSRF_TOKEN__">
+<meta name="color-scheme" content="light">
 <title>WizExpert Workflow Console</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header class="top">
-  <div class="brand">
-    <a class="brand-logo" href="/" aria-label="WizExpert Workflow Console">
-      <img src="/static/assets/logo.svg" alt="WizExpert">
-    </a>
-    <div class="brand-copy">
-      <strong>Workflow Console</strong>
+<a class="skip-link" href="#main">Skip to content</a>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="side-top">
+      <a class="brand" href="/" aria-label="WizExpert Workflow Console home" title="Home">
+        <img src="/static/assets/logo.svg" alt="WizExpert" height="30">
+      </a>
+      <button id="nav-toggle" class="icon-btn" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+        <svg class="ico-close" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M16 9l-3 3 3 3"/></svg>
+        <svg class="ico-open" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="M13 9l3 3-3 3"/></svg>
+      </button>
     </div>
+    <nav class="nav" aria-label="Primary">
+      <a class="nav-link" href="/" title="Home">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></span>
+        <span class="nav-label">Home</span>
+      </a>
+      <a class="nav-link" href="/dashboard" title="Dashboard">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg></span>
+        <span class="nav-label">Dashboard</span>
+      </a>
+      <a class="nav-link" href="/in-progress" title="In progress">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        <span class="nav-label">In progress</span> <span id="nav-count" class="nav-count"></span>
+      </a>
+      <a class="nav-link" href="/history" title="History">
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/></svg></span>
+        <span class="nav-label">History</span>
+      </a>
+      <p class="nav-heading" id="nav-workflows-title">Workflows</p>
+      <div id="nav-workflows" class="nav-sub" role="group" aria-labelledby="nav-workflows-title"></div>
+    </nav>
+    <div class="sidebar-foot">
+      <details class="shortcuts"><summary>Keyboard shortcuts</summary>
+        <ul>
+          <li><kbd>g</kbd> <kbd>h</kbd> Home</li>
+          <li><kbd>g</kbd> <kbd>d</kbd> Dashboard</li>
+          <li><kbd>g</kbd> <kbd>p</kbd> In progress</li>
+          <li><kbd>g</kbd> <kbd>y</kbd> History</li>
+          <li><kbd>/</kbd> Search history</li>
+          <li><kbd>[</kbd> Toggle sidebar</li>
+        </ul>
+      </details>
+      <div id="helper" class="helper" aria-label="VS Code helper status"></div>
+      <p class="credit">Developed by <strong>Prashant Kumar</strong></p>
+    </div>
+  </aside>
+  <div class="content">
+    <header class="topbar">
+      <p id="page-label" class="page-label" aria-hidden="true">Home</p>
+      <p class="topbar-note">Evidence first. Approval stays human. Outputs stay traceable.</p>
+      <a id="active-run" class="active-run" href="/" hidden></a>
+    </header>
+    <div id="route-status" class="sr-only" role="status" aria-live="polite"></div>
+    <main id="main" tabindex="-1">
+      <section id="banner" class="banner" role="status" aria-live="polite" hidden></section>
+      <section id="v-home" class="view" aria-label="Home" tabindex="-1"></section>
+      <section id="v-dashboard" class="view" aria-label="Dashboard" tabindex="-1" hidden></section>
+      <section id="v-progress" class="view" aria-label="In progress" tabindex="-1" hidden></section>
+      <section id="v-history" class="view" aria-label="History" tabindex="-1" hidden></section>
+      <section id="v-workflow" class="view" aria-label="Workflow" tabindex="-1" hidden></section>
+      <section id="v-run" class="view" aria-label="Run" tabindex="-1" hidden></section>
+    </main>
   </div>
-</header>
-<main>
-  <section id="banner" class="banner" hidden></section>
-  <div id="home">
-  <section class="about" aria-labelledby="about-title">
-    <div class="about-copy">
-      <p class="eyebrow">WIZEXPERT WORKFLOW STUDIO</p>
-      <h2 id="about-title">Bring every finding to a clear next step.</h2>
-      <p>A focused workspace for turning Wiz findings into reviewed updates, daily reporting, and governance deliverables.</p>
-      <p class="about-note">Start with evidence. Keep decisions visible. Finish with traceable outputs.</p>
-      <p class="attribution">Developed by <strong>Prashant Kumar</strong> · Cloud Security Engineer</p>
-      <div class="about-points" aria-label="WizExpert principles">
-        <span>Evidence first</span>
-        <span>Approval stays human</span>
-        <span>Outputs stay traceable</span>
-      </div>
-    </div>
-    <div class="about-mark" aria-hidden="true">
-      <p class="mark-eyebrow">THE WORKING LOOP</p>
-      <strong>Evidence<br>to<br>action.</strong>
-      <span>Focused workflows for security teams.</span>
-    </div>
-  </section>
-  <section id="picker"></section>
-  <section class="visuals" aria-label="Workflow choices">
-    <div class="visual-grid">
-      <figure class="visual-card">
-        <img src="/static/assets/workflow-risk-issues.svg" alt="Risk Issues workflow: collect, draft, communicate, approve, remediate or accept risk, validate, and update.">
-        <p class="visual-summary">Resolve findings with a clear approval trail.</p>
-        <figcaption>
-          <button data-category="risk-issues" class="visual-title-button" type="button">Risk Issues</button>
-          <span>Prepare the Risk Issues deliverables for one or more Wiz issue (rule) IDs.</span>
-        </figcaption>
-      </figure>
-      <figure class="visual-card">
-        <img src="/static/assets/workflow-daily-progress.svg" alt="Daily Progress workflow: collect, draft, communicate, and either continue open work or close and update.">
-        <p class="visual-summary">Keep today’s progress current and reviewable.</p>
-        <figcaption><button data-category="daily-progress-reporting" class="visual-title-button" type="button">Daily Progress Reporting</button><span>Prepare the Daily Progress Reporting pack for today.</span></figcaption>
-      </figure>
-      <figure class="visual-card">
-        <img src="/static/assets/workflow-weekly-progress.svg" alt="Weekly Progress workflow: use the previous report, reuse Risk Issues and Daily Progress records, refresh Wiz status, update deliverables, and carry active work forward.">
-        <p class="visual-summary">Every Monday, report the previous week’s in-progress items.</p>
-        <figcaption><button data-category="weekly-progress-reporting" class="visual-title-button" type="button">Weekly Progress Reporting</button><span>Prepare the Monday weekly progress report for in-progress Wiz items.</span></figcaption>
-      </figure>
-      <figure class="visual-card">
-        <img src="/static/assets/workflow-monthly-governance.svg" alt="Monthly Governance workflow: cutoff, collect, draft, handoff, retain history, and continue to the next month.">
-        <p class="visual-summary">Turn reporting cutoffs into a repeatable rhythm.</p>
-        <figcaption><button data-category="monthly-governance-reporting" class="visual-title-button" type="button">Monthly Governance Reporting</button><span>Prepare the monthly governance reporting for a snapshot period.</span></figcaption>
-      </figure>
-    </div>
-  </section>
-  <section id="history"></section>
-  </div>
-  <section id="inputs" hidden></section>
-  <section id="run" hidden></section>
-</main>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

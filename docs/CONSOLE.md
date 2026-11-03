@@ -13,7 +13,7 @@ windows, no Wiz calls, no validators, no review gates.
 |---|---|---|
 | Risk Issues | Wiz issue/rule ID(s) | `Risk Issues category: prepare the deliverables for Wiz issue <ids>` |
 | Daily Progress Reporting | none, or a short note | `Daily Progress Reporting category: prepare the daily progress report for today` |
-| Weekly Progress Reporting | required Reporting Monday (`YYYY-MM-DD`, must be a real Monday), optional SNOW ticket/reference (empty: agent fetches/maps it from Wiz read-only), optional latest SNOW response (up to 1500 characters, folded, sent as quoted data between BEGIN/END SNOW RESPONSE, never instructions), optional previous-report folder (empty = first report), optional note | `Weekly Progress Reporting category: prepare the Monday report for the previous week ... SNOW reference <ref>`; states local-only, no Wiz/SNOW/cloud change, no email sent; initial deliverables Excel, slide deck, HTML, PDF, email draft |
+| Weekly Progress Reporting | required Reporting Tuesday (`YYYY-MM-DD`, must be a real Tuesday), optional SNOW ticket/reference (empty: agent fetches/maps it from Wiz read-only), optional latest SNOW response (up to 1500 characters, folded, sent as quoted data between BEGIN/END SNOW RESPONSE, never instructions), optional previous-report folder (empty = first report), optional note | `Weekly Progress Reporting category: prepare the Tuesday report (current IN_PROGRESS plus items resolved from the previous Monday to the report-week Monday) ... SNOW reference <ref>`; states local-only, no Wiz/SNOW/cloud change, no email sent; primary output is one editable branded slide deck, with optional PDF export and private email draft; Excel and standalone report HTML are retired |
 | Monthly Governance Reporting | snapshot period `YYYY-MM` | `Monthly Governance Reporting category: prepare the monthly governance reporting for <YYYY-MM>` |
 
 Input is allow-listed (characters and length) so a form value cannot add instructions:
@@ -53,8 +53,9 @@ remains a single-form category.
 
 The category depends on Risk Issues and Daily Progress Reporting: the prompt tells the agent to
 update the previous weekly report, reuse their latest local records/outputs (status, remediation
-progress, SNOW and email responses), fetch only current read-only Wiz status, reconcile new
-responses and never infer closure from an owner message. Items resolved during the covered period stay in that
+progress, SNOW and email responses), fetch the complete current read-only Wiz IN_PROGRESS
+inventory, including historical items absent from the previous report, reconcile new responses
+and never infer closure from an owner message. Items resolved during the covered period stay in that
 period's report with resolution/current-status evidence and drop off the next period's active
 carry-forward list unless they return to IN_PROGRESS; the prior report stays as the historical
 record. No external mutation, no email sent.
@@ -69,6 +70,19 @@ depth is at most 3 levels and the list holds at most 50 newest folders. When not
 the response says so explicitly and the selector offers "None: this is the first report"
 (the prompt then states it is the first report). "Enter a folder name manually" remains as a
 fallback, also used when the listing fails; the agent confirms a typed folder exists.
+
+## Navigation, drafts and accessibility
+
+- Real, shareable URLs (`history.pushState`): `/`, `/workflow/<id>[/<stage>[/<action>]]`, `/run/<id>`. Back and Forward work; old `#workflow=` / `#run=` links are upgraded in place.
+- The page never jumps by itself: only a click, Back/Forward or the first page load changes the view. A stale run link shows an explanation with a button instead of redirecting.
+- Unsaved form values are remembered per workflow in `sessionStorage` (this tab only) and cleared once a run starts. Secret-looking fields and values (tokens, passwords, keys) are never stored.
+- Scroll position is restored on Back/Forward and reload; the stage and action selection live in the URL.
+- Layout: a left sidebar (Home, Dashboard, In progress with a live count, History, workflows, helper status) that a top-bar button collapses to an icon rail with tooltips (the choice is remembered in `localStorage`, key `wizexpert.sidebar`; on narrow screens it starts collapsed and becomes a compact top bar under 960px); content views are Home, Dashboard, In progress, History, Workflow and Run, built from shared cards, tables, status badges and loading/empty/error boxes.
+- Pages: Home (a dark hero with the WizExpert logo and principles and workflow cards with their illustrations; no operational details), `/dashboard` (run summary tiles, current activity and recent runs, with refresh; shortcut `g` `d`), `/in-progress` (needs-attention and running tasks with refresh), `/history` (filter by status, workflow and text; filters live in the URL query so a view can be shared) and `/run/<id>` (status, progress, log, output files, Open chat / Stop / View output; unchanged helper actions).
+- Data comes from the existing `/api/bootstrap` (recent runs, active runs); the backend keeps its most recent 20 runs. A snapshot of run id, workflow, status and start time is cached in `sessionStorage` and shown immediately, then refreshed in the background with a visible Updated / Refreshing / error bar and a Refresh button. No secrets, helper details or form values enter this cache.
+- Each workflow page lists its own previous runs (status, start time, Open button) and any running task, with an empty state; it never opens a run by itself.
+- A header indicator shows running tasks on every page and links to the run.
+- Loading, empty and error states share one look; keyboard users get a skip link, arrow-key movement in stage/action groups, focus on the new heading after navigation, and reduced-motion support.
 
 ## Install and run
 
@@ -97,7 +111,21 @@ error in the console banner, the status bar and the "WizExpert Console Helper" o
 if either fails or VS Code does not answer. Extensions cannot trigger or pre-approve any other
 VS Code permission prompt; if one is waiting, choose **Allow Always** there.
 
-Automatic helper recovery: the console page asks the server to connect the helper whenever it
+Automatic helper recovery: the rule is that a console run never fails because of the state of a
+VS Code window or helper. If a standard window for the workspace with a working helper is open,
+the chat starts there; if none is open, or the open one is unresponsive, a new standard window is
+opened and the chat starts there. "Connected" only means the helper polls, so before `start_chat`
+the console sends a quick targeted `probe` job (10 s). A helper that does not answer (or answers
+with an error) is marked unhealthy and excluded from "connected" until it answers a job, recovery
+(below) opens a new window, and `start_chat` is sent only to the healthy instance (jobs carry an
+optional `target` instance; other helpers skip them, so the old window cannot also run it). If
+`start_chat` itself gets no answer the console first checks whether a chat for that prompt
+appeared; only if none did it recovers and retries once, so no duplicate chat is created. The
+run fails only when recovery is impossible, with the reason recorded. The helper bounds every
+VS Code call (including `getCommands`) and the whole job by a time limit, always posts a result,
+and logs each job and outcome to the "WizExpert Console Helper" output channel.
+
+The console page asks the server to connect the helper whenever it
 is not connected (`POST /api/helper/connect`, one recovery at a time, retried every 30 s), and a
 submitted run does the same. Recovery installs the helper only when its version is not already
 registered (`code --list-extensions --show-versions`; a forced re-install re-extracts the folder
@@ -203,14 +231,27 @@ approval or question), so it is only ended when the log shows the chat ended. A 
 mid-start is re-matched to its new chat instead of being marked lost.
 
 - `GET /api/runs/active` (also `active` in `/api/bootstrap`) lists non-terminal runs.
-- On load the page re-opens the run from `#run=<id>` in the URL, then this tab's last run
-  (`sessionStorage`), then the newest active run; a run that finished meanwhile shows its final
-  state. Pending Allow / Skip / question prompts reappear. **Start another** opts out of
-  auto-reattach for that page, and a banner still links to the active run.
+- The address decides the page: `#run=<id>` reopens that run (a run that finished meanwhile
+  shows its final state, and pending Allow / Skip / question prompts reappear),
+  `#workflow=<id>` reopens that workflow's input page, and the plain address is always the
+  homepage. The homepage never jumps into a run on its own; it shows an **Open** button for
+  each active run.
 - Starting a second run of a workflow that already has an active run is refused by the
   backend, not only the UI.
 - Backend code changes still need a restart; do it when no task needs a button press, as
   running chats continue in VS Code and are picked up again afterwards.
+
+## Resetting Dashboard and History
+
+To start with an empty Dashboard and History (for example after moving to new runs), POST
+`{"confirm": "reset-console-history"}` to `/api/history/reset` (normal CSRF/Origin rules apply).
+Only the console's own `runs.json` index is touched: it is moved aside to
+`runs.json.reset-<timestamp>-<id>.bak` in the state directory (nothing is deleted). Deliverable
+files, work-item folders, VS Code session logs and workflow configuration are not changed.
+The reset is refused while any run is active. Prior risk issues can be re-added through
+Existing / In-progress. The browser's per-tab cache key was bumped so stale history is not shown.
+
+The Home page has an **About WizExpert** section describing the four workflows.
 
 ## Spend-Guard handoffs
 
