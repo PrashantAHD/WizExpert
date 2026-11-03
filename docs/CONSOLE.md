@@ -13,7 +13,7 @@ windows, no Wiz calls, no validators, no review gates.
 |---|---|---|
 | Risk Issues | Wiz issue/rule ID(s) | `Risk Issues category: prepare the deliverables for Wiz issue <ids>` |
 | Daily Progress Reporting | none, or a short note | `Daily Progress Reporting category: prepare the daily progress report for today` |
-| Weekly Progress Reporting | required Reporting Monday (`YYYY-MM-DD`, must be a real Monday), optional SNOW ticket/reference (empty: agent fetches/maps it from Wiz read-only), optional latest SNOW response (up to 1500 characters, folded, sent as quoted data between BEGIN/END SNOW RESPONSE, never instructions), optional previous-report folder (empty = first report), optional note | `Weekly Progress Reporting category: prepare the Monday report for the previous week ... SNOW reference <ref>`; states local-only, no Wiz/SNOW/cloud change, no email sent; initial deliverables Excel, slide deck, HTML, PDF, email draft |
+| Weekly Progress Reporting | required Reporting Tuesday (`YYYY-MM-DD`, must be a real Tuesday), optional SNOW ticket/reference (empty: agent fetches/maps it from Wiz read-only), optional latest SNOW response (up to 1500 characters, folded, sent as quoted data between BEGIN/END SNOW RESPONSE, never instructions), optional previous-report folder (empty = first report), optional note | `Weekly Progress Reporting category: prepare the Tuesday report (current IN_PROGRESS plus items resolved from the previous Monday to the report-week Monday) ... SNOW reference <ref>`; follows retain-first evidence reuse (inspect the previous weekly folder and retained Risk Issues/Daily Progress evidence before any Wiz fetch; fetch only missing or conflicting details); for a rule with multiple IN_PROGRESS issues and absent/conflicting assignee evidence, inspects one representative issue and applies its assignee to grouped rows only when clearly rule-consistent, otherwise keeps the ambiguity; states local-only, no Wiz/SNOW/cloud change, no email sent; primary output is one editable branded slide deck, with optional PDF export and private email draft; Excel and standalone report HTML are retired |
 | Monthly Governance Reporting | snapshot period `YYYY-MM` | `Monthly Governance Reporting category: prepare the monthly governance reporting for <YYYY-MM>` |
 
 Input is allow-listed (characters and length) so a form value cannot add instructions:
@@ -53,8 +53,9 @@ remains a single-form category.
 
 The category depends on Risk Issues and Daily Progress Reporting: the prompt tells the agent to
 update the previous weekly report, reuse their latest local records/outputs (status, remediation
-progress, SNOW and email responses), fetch only current read-only Wiz status, reconcile new
-responses and never infer closure from an owner message. Items resolved during the covered period stay in that
+progress, SNOW and email responses), fetch the complete current read-only Wiz IN_PROGRESS
+inventory, including historical items absent from the previous report, reconcile new responses
+and never infer closure from an owner message. Items resolved during the covered period stay in that
 period's report with resolution/current-status evidence and drop off the next period's active
 carry-forward list unless they return to IN_PROGRESS; the prior report stays as the historical
 record. No external mutation, no email sent.
@@ -70,12 +71,25 @@ the response says so explicitly and the selector offers "None: this is the first
 (the prompt then states it is the first report). "Enter a folder name manually" remains as a
 fallback, also used when the listing fails; the agent confirms a typed folder exists.
 
+## Navigation, drafts and accessibility
+
+- Real, shareable URLs (`history.pushState`): `/`, `/workflow/<id>[/<stage>[/<action>]]`, `/run/<id>`. Back and Forward work; old `#workflow=` / `#run=` links are upgraded in place.
+- The page never jumps by itself: only a click, Back/Forward or the first page load changes the view. A stale run link shows an explanation with a button instead of redirecting.
+- Unsaved form values are remembered per workflow in `sessionStorage` (this tab only) and cleared once a run starts. Secret-looking fields and values (tokens, passwords, keys) are never stored.
+- Scroll position is restored on Back/Forward and reload; the stage and action selection live in the URL.
+- Layout: a left sidebar (Home, Dashboard, In progress with a live count, History, workflows, helper status) that a top-bar button collapses to an icon rail with tooltips (the choice is remembered in `localStorage`, key `wizexpert.sidebar`; on narrow screens it starts collapsed and becomes a compact top bar under 960px); content views are Home, Dashboard, In progress, History, Workflow and Run, built from shared cards, tables, status badges and loading/empty/error boxes.
+- Pages: Home (a dark hero with the WizExpert logo and principles and workflow cards with their illustrations; no operational details), `/dashboard` (run summary tiles, current activity and recent runs, with refresh; shortcut `g` `d`), `/in-progress` (needs-attention and running tasks with refresh), `/history` (filter by status, workflow and text; filters live in the URL query so a view can be shared) and `/run/<id>` (status, progress, log, output files, Open chat / Stop / View output; unchanged helper actions).
+- Data comes from the existing `/api/bootstrap` (recent runs, active runs); the backend keeps its most recent 20 runs. A snapshot of run id, workflow, status and start time is cached in `sessionStorage` and shown immediately, then refreshed in the background with a visible Updated / Refreshing / error bar and a Refresh button. No secrets, helper details or form values enter this cache.
+- Each workflow page lists its own previous runs (status, start time, Open button) and any running task, with an empty state; it never opens a run by itself.
+- A header indicator shows running tasks on every page and links to the run.
+- Loading, empty and error states share one look; keyboard users get a skip link, arrow-key movement in stage/action groups, focus on the new heading after navigation, and reduced-motion support.
+
 ## Install and run
 
 ```powershell
 # once: install the helper extension (an unpacked copy lands in %USERPROFILE%\.vscode\extensions)
 wizexpert console install-helper --code "<path to VS Code>\bin\code.cmd"
-# then run Developer: Reload Window once in the VS Code window that has the workspace open
+# the console then opens a standard VS Code window for the workspace itself when needed
 
 wizexpert console --workspace <workspace folder> [--agent WizExpert] [--port 8765]
 ```
@@ -87,21 +101,51 @@ To build and install or update the helper as part of console startup, add
 wizexpert console --workspace <workspace folder> --install-helper
 ```
 
-The command does not reload VS Code, because that could interrupt active work.
-After the first installation, use **Developer: Reload Window** once; later launches can
-omit `--install-helper` unless the helper source changes.
-If VS Code asks whether the helper may create a chat in this workspace, choose **Allow
-Always**. This is a one-time workspace permission for the local helper; it prevents each
-refresh from stopping at the chat-creation prompt.
+The command does not reload VS Code, because that could interrupt active work. The helper
+activates only in a **standard VS Code window**: the VS Code "Agents" window loads built-in
+extensions and Copilot Chat only, so the helper can never run there. When the helper is not
+connected, the console opens a standard window for the workspace itself (see below).
+Before creating a chat the helper checks that the workspace is trusted (opening the
+Workspace Trust editor if not) and that the chat commands exist, and it reports a concrete
+error in the console banner, the status bar and the "WizExpert Console Helper" output channel
+if either fails or VS Code does not answer. Extensions cannot trigger or pre-approve any other
+VS Code permission prompt; if one is waiting, choose **Allow Always** there.
 
-By default, submitting a run first allows a short normal reconnect window, then checks the
-workspace helper connection and installs the helper only if it is
-still missing, then waits up to about 20 seconds for it to connect. VS Code offers no
-supported way to reload a window from outside, so if the helper does not connect the console
-asks you to run **Developer: Reload Window** once in VS Code and try again. Use `--no-auto-helper` only when you want submissions
-to fail immediately instead of changing the local VS Code setup.
+Automatic helper recovery: the rule is that a console run never fails because of the state of a
+VS Code window or helper. If a standard window for the workspace with a working helper is open,
+the chat starts there; if none is open, or the open one is unresponsive, a new standard window is
+opened and the chat starts there. "Connected" only means the helper polls, so before `start_chat`
+the console sends a quick targeted `probe` job (10 s). A helper that does not answer (or answers
+with an error) is marked unhealthy and excluded from "connected" until it answers a job, recovery
+(below) opens a new window, and `start_chat` is sent only to the healthy instance (jobs carry an
+optional `target` instance; other helpers skip them, so the old window cannot also run it). If
+`start_chat` itself gets no answer the console first checks whether a chat for that prompt
+appeared; only if none did it recovers and retries once, so no duplicate chat is created. The
+run fails only when recovery is impossible, with the reason recorded. The helper bounds every
+VS Code call (including `getCommands`) and the whole job by a time limit, always posts a result,
+and logs each job and outcome to the "WizExpert Console Helper" output channel.
 
-On the live run screen, **Stop** requests that the active VS Code chat stop. After a successful
+The console page asks the server to connect the helper whenever it
+is not connected (`POST /api/helper/connect`, one recovery at a time, retried every 30 s), and a
+submitted run does the same. Recovery installs the helper only when its version is not already
+registered (`code --list-extensions --show-versions`; a forced re-install re-extracts the folder
+under running windows, so it is never repeated), then opens a standard VS Code window for the
+configured workspace with `code -n <workspace>` (argument list, no shell; at most one launch per
+90 s; a helper for the workspace seen within the last 120 s but gone first gets an 8 s grace to
+reconnect, e.g. during a window reload, before the window is opened), then waits up to
+45 seconds. The slow work never holds the run lock, and a second request
+joins the recovery instead of starting another install, window or run. If the helper still cannot
+connect, the concrete reason (the helper must run in a standard window, not the Agents window) is
+shown in the banner and recorded with the run, and the run falls back to
+`code chat` (below) exactly once, so no duplicate chat or job is created. With
+`--no-cli-fallback` the run fails with that reason instead. Use
+`--no-auto-helper` only when you want submissions to fail immediately instead of changing the
+local VS Code setup.
+
+On the live run screen, **Stop** requests that the active VS Code chat stop. The helper cancels
+with `workbench.action.chat.cancel` (older VS Code: `workbench.action.chat.stop`), picking the
+first allow-listed command that exists (`vscode.commands.getCommands`) after the guard check, and
+reports an error if none exists. After a successful
 run, **View latest output** opens only the newest output file already validated and listed by
 the console. The work-item card remains available for another **Refresh** after the run ends or
 fails.
@@ -156,7 +200,7 @@ allow-listed commands, only for the workspace folder open in its window:
    have), then
 2. `workbench.action.chat.open` with `{mode: <agent>, query: <prompt>, isPartialQuery: false}`.
 
-Optional fallback (`--cli-fallback`): `code chat --mode <agent> --reuse-window "<prompt>"`. It targets the
+Fallback (on by default; `--no-cli-fallback` disables it; `--cli-fallback` is accepted for compatibility): `code chat --mode <agent> --reuse-window "<prompt>"`. It targets the
 last active VS Code window, so use it only if the helper path fails.
 
 The session is identified read-only: a new `session-state/<id>` folder whose `cwd` is the
@@ -178,6 +222,52 @@ never writes to `session-state`.
   location only. There are no open or download links and no file-serving endpoint; evidence,
   archive, log, JSON and secret-like files are never listed.
 
+## Running tasks survive refreshes and restarts
+
+The backend is the source of truth. Runs (category, prompt, chat/session binding, status) are
+saved atomically to `runs.json` in the console state directory and reloaded at startup; a run
+that was active stays active and re-reads its session log (which also holds any pending
+approval or question), so it is only ended when the log shows the chat ended. A run caught
+mid-start is re-matched to its new chat instead of being marked lost.
+
+- `GET /api/runs/active` (also `active` in `/api/bootstrap`) lists non-terminal runs.
+- The address decides the page: `#run=<id>` reopens that run (a run that finished meanwhile
+  shows its final state, and pending Allow / Skip / question prompts reappear),
+  `#workflow=<id>` reopens that workflow's input page, and the plain address is always the
+  homepage. The homepage never jumps into a run on its own; it shows an **Open** button for
+  each active run.
+- Starting a second run of a workflow that already has an active run is refused by the
+  backend, not only the UI.
+- Backend code changes still need a restart; do it when no task needs a button press, as
+  running chats continue in VS Code and are picked up again afterwards.
+
+## Resetting Dashboard and History
+
+To start with an empty Dashboard and History (for example after moving to new runs), POST
+`{"confirm": "reset-console-history"}` to `/api/history/reset` (normal CSRF/Origin rules apply).
+Only the console's own `runs.json` index is touched: it is moved aside to
+`runs.json.reset-<timestamp>-<id>.bak` in the state directory (nothing is deleted). Deliverable
+files, work-item folders, VS Code session logs and workflow configuration are not changed.
+The reset is refused while any run is active. Prior risk issues can be re-added through
+Existing / In-progress. The browser's per-tab cache key was bumped so stale history is not shown.
+
+The Home page has an **About WizExpert** section describing the four workflows.
+
+## Spend-Guard handoffs
+
+When a chat calls `create_session` to continue in a fresh chat, the pending approval reads
+"Spend-Guard handoff: continue this run in a new chat '<title>' (model ...)" with the handoff
+prompt in a scrollable box; Allow / Skip work from the page like any approval (the same
+`acceptTool` / `skipTool` command, which VS Code applies to custom-tool prompts too). Other
+custom-tool approvals show the tool name and a few bounded, non-secret arguments.
+
+After an allowed handoff the run is not marked finished: it shows "Handed off to a new chat",
+status "Handed off - waiting for new chat", and is re-bound to the new chat (found through the
+agent-host database, else by the handoff prompt as the first message of a session created after
+the handoff). Status, progress, approvals, Stop, Open chat and output files then follow the new
+chat; successive handoffs chain. The chain (and an unresolved handoff) is saved in `runs.json`.
+If the new chat never appears within 30 minutes the run becomes "Interrupted".
+
 ## Safety properties
 
 - Binds `127.0.0.1` only; the `Host` header must be the loopback name and port served.
@@ -190,7 +280,8 @@ never writes to `session-state`.
 
 ## Limitations
 
-- Needs the helper installed and the window reloaded once.
+- Needs the helper installed and a standard VS Code window for the workspace (opened
+  automatically; the Agents window cannot run the helper).
 - Which custom agent the new chat uses depends on VS Code applying `mode` in
   `workbench.action.chat.open`; the session log does not record the main agent, so the
   console cannot confirm it. Check the agent shown in the chat on the first run.

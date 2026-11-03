@@ -13,6 +13,7 @@ extension) and shows that session's progress. Safety properties (each covered by
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hmac
 import json
 import re
@@ -45,6 +46,10 @@ STATIC_FILES = {
     "assets/workflow-monthly-governance.svg": "image/svg+xml",
 }
 MAX_BODY = 256 * 1024
+WINDOW_WAIT_SECONDS = 45.0  # time for a freshly opened window to start the helper
+WINDOW_COOLDOWN_SECONDS = 90.0  # at most one window launch per cooldown
+RECENT_CONNECT_SECONDS = 120.0  # a helper seen this recently gets a reconnect grace first
+RECONNECT_GRACE_SECONDS = 8.0  # wait for a reconnect (e.g. window reload) before launching
 RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{6}")
 AGENT_NAME = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 CSP = (
@@ -60,6 +65,12 @@ SECURITY_HEADERS = {
     "Cross-Origin-Resource-Policy": "same-origin",
     "Cross-Origin-Opener-Policy": "same-origin",
 }
+
+
+# Shareable client-side routes (history.pushState): the page itself renders the right view.
+APP_ROUTE = re.compile(
+    r"^/(workflow/[\w-]+(/[\w-]+){0,2}|run/[\w-]+|dashboard|history|in-progress)/?$"
+)
 
 
 class ConsoleApp:
@@ -78,26 +89,111 @@ class ConsoleApp:
         self.config = config
         self.allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        self._ensure_lock = threading.Lock()
+        self._connecting = False
+        self._clock = time.monotonic
+        self._last_launch: float | None = None
+        self.helper_problem = ""
 
     def ensure_helper(self) -> bool:
-        """Install and wait for the helper when a user submits a run."""
+        """Get a helper connected for this workspace without manual steps; single-flight.
+
+        Order: already connected -> install only when this version is not registered -> open a
+        standard VS Code window for the workspace (``code -n``; the Agents window never loads
+        user extensions), at most one per cooldown; a helper seen within the last 120 s first gets
+        a short reconnect grace (window reload) -> wait. When everything fails the concrete reason
+        is kept in ``manager.helper_note``;
+        with the ``code chat`` fallback allowed the run goes on through it (False), otherwise a
+        RunError names the reason.
+        """
         workspace = str(self.config.resolved_workspace())
         if self._wait_for_helper(workspace, 3.0):
             return True
-        from . import helper
-
-        out = Path.home() / ".wizexpert-console" / "wizexpert-console-helper.vsix"
+        if not self._ensure_lock.acquire(blocking=False):
+            # Another request is already recovering the helper: wait for it, never start a second.
+            if self._wait_for_helper(workspace, 25.0):
+                return True
+            return self._helper_failed("The helper recovery already in progress did not connect.")
+        self._connecting = True
         try:
-            if helper.install(out, self.config.code_command) != 0:
-                raise RunError("The VS Code helper could not be installed.")
-        except (OSError, subprocess.SubprocessError) as error:
-            raise RunError(f"Could not automate the VS Code helper setup: {error}") from error
-        if self._wait_for_helper(workspace, 20.0):
-            return True
-        raise RunError(
-            "The VS Code helper was installed but has not connected. In VS Code run "
-            "\"Developer: Reload Window\" once, then try again."
-        )
+            if self._wait_for_helper(workspace, 0.0):
+                return True
+            from . import helper
+
+            out = Path.home() / ".wizexpert-console" / "wizexpert-console-helper.vsix"
+            launched = False
+            skipped = ""
+            try:
+                if helper.install(out, self.config.code_command) != 0:
+                    return self._helper_failed("The VS Code helper could not be installed.")
+                if self.bridge.helper_seen_within(
+                    workspace, RECENT_CONNECT_SECONDS
+                ) and self._wait_for_helper(workspace, RECONNECT_GRACE_SECONDS):
+                    return True  # e.g. a window reload: the helper came back on its own
+                skipped = self._launch_skip_reason(workspace)
+                if not skipped:
+                    self._last_launch = self._clock()
+                    code = helper.open_workspace_window(self.config.code_command, workspace)
+                    if code != 0:
+                        return self._helper_failed(
+                            f"The VS Code CLI could not open a standard window for the workspace "
+                            f"(exit {code})."
+                        )
+                    launched = True
+            except (OSError, subprocess.SubprocessError) as error:
+                return self._helper_failed(f"Could not automate the VS Code helper setup: {error}")
+            if self._wait_for_helper(workspace, WINDOW_WAIT_SECONDS if launched else 20.0):
+                return True
+            if launched:
+                return self._helper_failed(
+                    "A standard VS Code window for this workspace was opened automatically, but "
+                    "the helper did not connect. The helper must run in a standard VS Code "
+                    "window, not the Agents window; check that the helper extension is enabled "
+                    "and the workspace is trusted there."
+                )
+            return self._helper_failed(
+                "The VS Code helper did not connect (" + skipped + "). The helper must run in "
+                "a standard VS Code window for this workspace, not the Agents window."
+            )
+        finally:
+            self._connecting = False
+            self._ensure_lock.release()
+
+    def _launch_skip_reason(self, workspace: str) -> str:
+        """Why a new window must not be opened now ('' when one may be opened)."""
+        if (
+            self._last_launch is not None
+            and self._clock() - self._last_launch < WINDOW_COOLDOWN_SECONDS
+        ):
+            return "a standard window was already opened a moment ago, so none was opened again"
+        return ""
+
+    def _helper_failed(self, reason: str) -> bool:
+        self.manager_note(reason)
+        if self.config.allow_cli_fallback:
+            return False
+        raise RunError(reason + " Open the workspace in a standard VS Code window, then retry.")
+
+    def manager_note(self, text: str) -> None:
+        self.helper_problem = text
+        with contextlib.suppress(AttributeError):
+            self.manager.helper_note = text
+
+    def connect_async(self) -> dict[str, Any]:
+        """Start recovery in the background unless it is already running (page auto-connect)."""
+        workspace = str(self.config.resolved_workspace())
+        if not self.bridge.helper_connected(workspace) and not self._connecting:
+
+            def work() -> None:
+                with contextlib.suppress(RunError):
+                    self.ensure_helper()
+
+            threading.Thread(target=work, daemon=True).start()
+        return {
+            "connected": self.bridge.helper_connected(workspace),
+            "connecting": self._connecting,
+            "problem": self.helper_problem,
+        }
 
     def _wait_for_helper(self, workspace: str, seconds: float) -> bool:
         deadline = time.monotonic() + seconds
@@ -220,7 +316,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "Unexpected Host header.")
         parts = urlsplit(self.path)
         path = parts.path
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html") or APP_ROUTE.match(path):
             return self._index()
         if path.startswith("/static/"):
             return self._static(path[len("/static/") :])
@@ -330,6 +426,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "categories": manager.categories(),
                     "helper": manager.helper_state(),
                     "history": manager.history(),
+                    "active": manager.active(),
                 },
             )
         if path == "/api/weekly-progress/previous-reports":
@@ -345,6 +442,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "deliverables folders; choose first report or enter a folder name.",
                 },
             )
+        if path == "/api/runs/active":
+            return self._json(HTTPStatus.OK, {"runs": manager.active()})
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
         if match and RUN_ID.fullmatch(match.group(1)):
             try:
@@ -366,6 +465,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
             run = manager.start(category, inputs, action, ensure_helper=ensure_helper)
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/history/reset":
+            if body.get("confirm") != "reset-console-history":
+                raise RunError('Send {"confirm": "reset-console-history"} to reset history.')
+            return self._json(HTTPStatus.OK, manager.reset_history())
+        if path == "/api/helper/connect":
+            return self._json(HTTPStatus.OK, self.app.connect_async())
         if path == "/api/helper/probe":
             return self._json(HTTPStatus.OK, manager.probe())
         match = re.fullmatch(r"/api/runs/([^/]+)/(decide|open|stop|open-output)", path)
@@ -426,7 +531,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--cli-fallback",
         action="store_true",
-        help="If the helper cannot start the chat, try `code chat -m <agent> -r <prompt>`.",
+        help="Accepted for compatibility; the `code chat` fallback is on by default.",
+    )
+    parser.add_argument(
+        "--no-cli-fallback",
+        action="store_true",
+        help="Never fall back to `code chat -m <agent> -r <prompt>` when the helper is down.",
     )
     parser.add_argument(
         "--code", default="code", help="VS Code command-line launcher (for --cli-fallback)."
@@ -449,7 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--workspace must be an existing folder")
     config = ConsoleConfig(
         workspace=args.workspace,
-        allow_cli_fallback=args.cli_fallback,
+        allow_cli_fallback=not args.no_cli_fallback,
         code_command=args.code,
         auto_install_helper=not args.no_auto_helper,
     )
@@ -481,7 +591,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "Run with --no-browser after resolving the VS Code CLI issue.\n",
             )
         print(
-            "VS Code helper installed. Reload the VS Code window once to activate it.",
+            "VS Code helper installed. The console opens a standard VS Code window for the "
+            "workspace automatically when the helper is not connected.",
             flush=True,
         )
     try:
@@ -511,6 +622,7 @@ def install_helper(argv: list[str]) -> int:
         default=Path.home() / ".wizexpert-console" / "wizexpert-console-helper.vsix",
     )
     parser.add_argument("--code", default="code", help="VS Code command-line launcher.")
+    parser.add_argument("--force", action="store_true", help="Reinstall even if up to date.")
     parser.add_argument(
         "--build-only", action="store_true", help="Only write the .vsix; do not install it."
     )
@@ -518,9 +630,10 @@ def install_helper(argv: list[str]) -> int:
     if args.build_only:
         print(helper.build_vsix(args.out))
         return 0
-    code = helper.install(args.out, args.code)
+    code = helper.install(args.out, args.code, force=args.force)
     print(
-        "Installed. Reload the VS Code window (Developer: Reload Window) to activate it."
+        "Installed. The console opens a standard VS Code window for the workspace "
+        "automatically when the helper is not connected."
         if code == 0
         else f"Install failed (exit {code}). Try --build-only and install the .vsix manually."
     )

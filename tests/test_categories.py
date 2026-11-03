@@ -81,11 +81,14 @@ def test_weekly_progress_category():
     c = cat.WEEKLY_PROGRESS
     assert cat.CATEGORIES["weekly-progress-reporting"] is c
     assert [s.slot_id for s in c.slots] == [
-        "weekly-progress-workbook", "weekly-progress-slide-deck", "weekly-progress-html",
-        "weekly-progress-pdf", "weekly-progress-email",
+        "weekly-progress-slide-deck", "weekly-progress-pdf", "weekly-progress-email",
     ]
     text = " ".join(c.manifest()["category_rules"])
     assert "Monday" in text and "IN_PROGRESS" in text and "no-send" in text
+    assert c.version == 3
+    for term in ("owner-requested redesign", "thank-you note", "executive summary", "assigned team",
+                 "snow ticket number", "blockers", "absent from the previous report count as new"):
+        assert term in text.lower(), term
     assert c.depends_on == ("risk-issues", "daily-progress-reporting")
     assert all(d in cat.CATEGORIES for d in c.depends_on)
     assert c.manifest()["depends_on"] == list(c.depends_on)

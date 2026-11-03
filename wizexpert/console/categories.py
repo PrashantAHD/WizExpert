@@ -18,7 +18,7 @@ ISSUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}")
 ISO_DATE = re.compile(r"20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
 MONTH = re.compile(r"(20[2-9][0-9])-(0[1-9]|1[0-2])")
 NOTE_CHARS = re.compile(r"[A-Za-z0-9 ._-]{1,80}")
-SAFE_PROMPT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,3400}")
+SAFE_PROMPT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,4200}")
 SNOW_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,39}")
 WORK_ITEM_TEXT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,120}")
 CVE_TEXT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,300}")
@@ -304,14 +304,15 @@ CATEGORIES: dict[str, Category] = {
     "weekly-progress-reporting": Category(
         "weekly-progress-reporting",
         "Weekly Progress Reporting",
-        "Prepare the Monday weekly progress report for the previous week covering current "
-        "in-progress Wiz items assigned to Prashant, Syed or Kimrah.",
+        "Prepare the Tuesday weekly progress report covering all current in-progress Wiz items "
+        "assigned to Prashant, Syed or Kimrah plus items resolved since the previous Monday "
+        "(same owners).",
         (
             FieldSpec(
                 "reporting_monday",
-                "Reporting Monday (YYYY-MM-DD)",
-                "The Monday the report is delivered; it must be a Monday. The covered period "
-                "is the preceding Monday to Sunday.",
+                "Reporting Tuesday (YYYY-MM-DD)",
+                "The Tuesday the report is delivered; it must be a Tuesday. Resolved items are "
+                "included from the preceding Monday through the report-week Monday.",
                 required=True,
                 max_length=10,
                 placeholder="YYYY-MM-DD",
@@ -350,25 +351,37 @@ CATEGORIES: dict[str, Category] = {
                 max_length=80,
             ),
         ),
-        "Weekly Progress Reporting category: the reporting Monday is {reporting_monday}; "
-        "prepare the report for the covered prior week, Monday {covered_start} to Sunday "
-        "{covered_end}, for current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah. "
+        "Weekly Progress Reporting category: the reporting Tuesday is {reporting_monday}; "
+        "prepare the report for the complete current set of Wiz items in IN_PROGRESS assigned "
+        "to Prashant, Syed or Kimrah as of that day, plus RESOLVED items assigned to the same "
+        "owners whose resolved_at is "
+        "from Monday {covered_start} 00:00 through Monday {covered_end} 00:00 "
+        "(date-only values: both Mondays inclusive). "
         "{snow_reference}Fetch and map the SNOW ticket from Wiz read-only{previous_report}"
         "{snow_response}. "
         "This category depends on the Risk Issues and Daily Progress Reporting categories. "
-        "Update the previous weekly report instead of recreating the inventory. Reuse the "
-        "latest local Risk Issues and Daily Progress records and outputs for status, "
-        "remediation progress, SNOW ticket responses and email responses, and do not "
-        "re-collect them unnecessarily. Fetch only the current Wiz status read-only and "
-        "reconcile new responses. Never infer closure from an owner message. "
+        "Update the previous weekly report instead of recreating the inventory. Follow "
+        "retain-first evidence reuse: before any Wiz fetch, inspect the selected previous "
+        "weekly folder and the retained local Risk Issues and Daily Progress evidence for "
+        "rule, status, count, remediation progress, SNOW ticket response and email response "
+        "data, and do not re-collect them unnecessarily or re-fetch already retained rule, "
+        "status or count data. "
+        "Fetch from Wiz read-only only missing or conflicting details, then reconcile new "
+        "responses. Assignee optimization: when a Wiz issue rule ID has multiple underlying "
+        "IN_PROGRESS issues and assignee evidence is absent or conflicting, inspect one "
+        "representative underlying issue only, and apply its assignee to that rule grouped "
+        "rows only when the evidence is clearly rule consistent; otherwise retain the "
+        "ambiguity and do not guess. Never infer closure from an owner message. "
         "Items resolved during the covered period stay in this report with resolution and "
         "current-status evidence; drop them from the active carry-forward list of the next "
         "period unless they return to IN_PROGRESS, and keep the prior report unchanged as "
         "the historical record. "
-        "Initial deliverables: Excel, slide deck, HTML, PDF and email draft; the user may "
-        "remove one later. Work locally only: make no change in Wiz, ServiceNow or cloud and "
+        "Primary deliverable: one editable branded slide deck using the approved governance "
+        "template. Optionally export that deck to PDF and prepare the private email draft. "
+        "Excel and standalone report HTML are retired. Work locally only: make no change "
+        "in Wiz, ServiceNow or cloud and "
         "do not send email{note}",
-        max_prompt=3400,
+        max_prompt=4200,
     ),
     "monthly-governance-reporting": Category(
         "monthly-governance-reporting",
@@ -504,8 +517,8 @@ def _reporting_monday(raw: Any) -> str:
         day = dt.date.fromisoformat(text) if ISO_DATE.fullmatch(text) else None
     except ValueError:
         day = None
-    if day is None or day.weekday() != 0:
-        raise InputError("Enter the Reporting Monday as YYYY-MM-DD; the date must be a Monday.")
+    if day is None or day.weekday() != 1:
+        raise InputError("Enter the Reporting Tuesday as YYYY-MM-DD; the date must be a Tuesday.")
     return text
 
 
@@ -555,7 +568,7 @@ def _covered(monday: str) -> tuple[str, str]:
     if not monday:
         return "", ""
     day = dt.date.fromisoformat(monday)
-    return (day - dt.timedelta(days=7)).isoformat(), (day - dt.timedelta(days=1)).isoformat()
+    return (day - dt.timedelta(days=8)).isoformat(), (day - dt.timedelta(days=1)).isoformat()
 
 
 def validate(
