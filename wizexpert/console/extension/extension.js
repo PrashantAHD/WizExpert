@@ -214,15 +214,20 @@ async function runJobUnbounded(job) {
       if (!g || g.ok !== true) {
         info.guard = (g && g.reason) || 'refused';
       } else {
+        // Some URI forms are expected to fail; report failures only if no form succeeded.
+        const attempts = [];
+        let succeeded = false;
         for (const r of job.resources || []) {
           if (!RESOURCE.test(String(r))) continue;
           // A session without a waiting prompt ignores this, so trying every URI form is safe.
           try {
             const t = await settleWithin(vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }), 5000);
-            if (t.error) errors.push(String(t.error.message || t.error).slice(0, 120));
-            else if (t.timedOut) errors.push('timed out');
-          } catch (e) { errors.push(String(e.message).slice(0, 120)); }
+            if (t.error) attempts.push(String(t.error.message || t.error).slice(0, 120));
+            else if (t.timedOut) attempts.push('timed out');
+            else succeeded = true;
+          } catch (e) { attempts.push(String(e.message).slice(0, 120)); }
         }
+        if (!succeeded) errors.push(...attempts);
       }
     } else {
       errors.push('unknown job kind');
