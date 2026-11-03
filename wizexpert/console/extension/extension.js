@@ -16,7 +16,7 @@ const INSTANCE = crypto.randomBytes(8).toString('hex'); // one per VS Code windo
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RESOURCE = /^(ahp-session|agent-host-copilotcli|copilotcli):\/[0-9a-f-]{36}$/;
 const AGENT = /^[A-Za-z0-9 ._-]{1,60}$/;
-const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,3400}$/;
+const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,4200}$/;
 // The only commands this helper will ever execute.
 const COMMANDS = {
   newChat: 'workbench.action.chat.newChat',

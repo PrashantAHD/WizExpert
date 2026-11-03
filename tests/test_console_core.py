@@ -617,18 +617,28 @@ def test_weekly_progress_category_prompt_and_validation():
     )
     assert values["snow_reference"] == "ref-1234"
     prompt = categories.build_prompt("weekly-progress-reporting", values)
-    for term in ("reporting Tuesday is 2026-11-03", "from Monday 2026-10-26 00:00 through Monday 2026-11-02 00:00",
+    for term in ("reporting Tuesday is 2026-11-03",
+                 "from Monday 2026-10-26 00:00 through Monday 2026-11-02 00:00",
                  "IN_PROGRESS", "Prashant", "Syed", "Kimrah",
                  "ref-1234", "Weekly/2026-W44", "Excel", "slide deck", "HTML", "PDF",
                  "email draft", "make no change in Wiz, ServiceNow or cloud",
                  "do not send email", "Note: keep short",
                  "depends on the Risk Issues and Daily Progress Reporting categories",
                  "Update the previous weekly report instead of recreating the inventory",
-                 "re-collect them unnecessarily", "Fetch only the current Wiz status read-only",
+                 "re-collect them unnecessarily",
+                 "Fetch from Wiz read-only only missing or conflicting details",
                  "reconcile new responses", "Never infer closure from an owner message",
                  "Items resolved during the covered period stay in this report",
                  "resolution and current-status evidence", "active carry-forward list",
-                 "unless they return to IN_PROGRESS", "keep the prior report unchanged"):
+                 "unless they return to IN_PROGRESS", "keep the prior report unchanged",
+                 "retain-first evidence reuse", "before any Wiz fetch",
+                 "selected previous weekly folder",
+                 "retained local Risk Issues and Daily Progress evidence",
+                 "re-fetch already retained rule, status or count data",
+                 "only missing or conflicting details", "multiple underlying IN_PROGRESS issues",
+                 "assignee evidence is absent or conflicting",
+                 "one representative underlying issue only",
+                 "clearly rule consistent", "retain the ambiguity and do not guess"):
         assert term in prompt, term
     minimal = categories.validate(
         "weekly-progress-reporting", {"reporting_monday": "2026-11-03", "snow_reference": "ab"}
