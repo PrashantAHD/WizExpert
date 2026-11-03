@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "WizExpert: Workflow console (auto-reload)",
+      "type": "process",
+      "dependsOn": "WizExpert: Stop workflow console",
+      "dependsOrder": "sequence",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\start-console.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}\\WizExpert"
+      },
+      "presentation": {
+        "panel": "new",
+        "reveal": "always",
+        "focus": false,
+        "clear": true,
+        "close": false
+      },
+      "isBackground": true,
+      "problemMatcher": []
+      ,
+      "runOptions": {
+        "instanceLimit": 1,
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "WizExpert: Stop workflow console",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\stop-console.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "never",
+        "focus": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}
