@@ -23,6 +23,7 @@ PUBLIC_FILES = {
     ".github/copilot-instructions.md",
     ".vscode/stop-workflow-console.ps1",
     ".vscode/tasks.json",
+    "scripts/console-workspace/tasks.json",
     "wizexpert/console/static/assets/logo.svg",
     "wizexpert/console/static/assets/workflow-daily-progress.svg",
     "wizexpert/console/static/assets/workflow-monthly-governance.svg",
