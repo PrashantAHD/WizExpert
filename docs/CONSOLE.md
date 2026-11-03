@@ -159,11 +159,16 @@ never from this repository:
 
 - Outer root (canonical `--workspace`): `<outer root>` (example `C:\Users\<you>\WizExpert`)
 - Package, tests and `.venv`: `<outer root>\WizExpert` (this public repository)
-- Launch: in VS Code opened on `<outer root>`, run **Tasks: Run Task** →
-  **WizExpert: Workflow console (auto-reload)**. It runs
+- Launch: the task **WizExpert: Workflow console (auto-reload)** in `<outer root>\.vscode\tasks.json`
+  runs on folder open (`"runOptions": {"runOn": "folderOpen"}`; set
+  `"task.allowAutomaticTasks": "on"` in workspace and user settings so it is not blocked; the user
+  setting is machine-wide, so every trusted workspace's folder-open tasks then run too), or
+  manually via **Tasks: Run Task**. It runs `<outer root>\.vscode\start-console.ps1`, which starts
   `<outer root>\WizExpert\.venv\Scripts\python.exe -m wizexpert.console.dev --workspace <outer root> --port 8765`
-  in a fresh terminal. The task first stops an existing console belonging to the
-  same canonical workspace, so there is a single backend on port 8765.
+  and stops that whole process tree once the owning VS Code process exits (checked every 3 s), so
+  the console lives exactly as long as the standard VS Code window session. The task first stops an
+  existing console belonging to the same canonical workspace, so there is a single backend on port 8765.
+  Tasks run only in a standard window; the Agents window starts neither the task nor the helper.
 - Stop: **WizExpert: Stop workflow console** (outer root) stops that process.
 
 The task in this repository's `.vscode/tasks.json` deliberately does not start a console;
