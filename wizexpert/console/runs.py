@@ -7,6 +7,7 @@ configured agent (through the helper extension) and then follows the real sessio
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import shutil
 import subprocess  # nosec B404
@@ -29,8 +30,13 @@ from .sessions import (
 )
 
 ATTEMPT_SECONDS = 30.0
+PROBE_SECONDS = 10.0  # quick liveness probe before a start_chat job
+START_SECONDS = 40.0  # wait for the helper's answer to start_chat
 FILES_REFRESH = 6.0
 MAX_RUNS = 50
+ACTIVE = ("starting", "running", "input_needed", "handed_off")
+HANDOFF_WAIT_SECONDS = 1800.0
+INACTIVE = ("completed", "stopped", "interrupted", "not_started")
 
 
 class RunError(Exception):
@@ -53,6 +59,10 @@ class Run:
     files: list[dict[str, Any]] = field(default_factory=list)
     files_at: float = 0.0
     files_n: int = -1
+    chain: list[dict[str, Any]] = field(default_factory=list)  # earlier chats of this run
+    handoff: dict[str, Any] | None = None  # handed off, new chat not resolved yet
+    handoff_try: float = 0.0
+    carried: dict[str, str] = field(default_factory=dict)  # files written by earlier chats
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -76,7 +86,8 @@ class RunManager:
         self._sleep = sleep
         self._cli = cli or _run_cli
         self._runs: dict[str, Run] = {}
-        self._lock = threading.Lock()
+        self.helper_note = ""  # why the helper could not connect (set by the server)
+        self._lock = threading.RLock()
         self._load()
 
     # -- persistence (prompt and ids only) ---
@@ -98,14 +109,105 @@ class RunManager:
                     item.get("session_id", ""),
                     item.get("ahp_id", ""),
                 )
-                if run.status == "starting":
+                run.chain = [c for c in item.get("chain", []) if isinstance(c, dict)][:50]
+                handoff = item.get("handoff")
+                run.handoff = handoff if isinstance(handoff, dict) else None
+                carried = item.get("carried")
+                run.carried = (
+                    {str(k): str(v) for k, v in carried.items()}
+                    if isinstance(carried, dict)
+                    else {}
+                )
+                self._runs[run.id] = run
+        except (OSError, ValueError, KeyError, TypeError):
+            return
+        # A restart is not evidence that a chat ended: runs that were active stay active and are
+        # re-bound to their session log (the log is the source of pending approvals/questions).
+        for run in list(self._runs.values()):
+            if run.status == "starting" and not run.session_id:
+                try:
+                    sid = self.finder.find(run.prompt, run.created, self._claimed())
+                except Exception:  # noqa: BLE001 - recovery is best effort
+                    sid = None
+                if sid:
+                    run.session_id, run.status, run.message = sid, "running", ""
+                else:
                     run.status, run.message = (
                         "not_started",
                         "The console stopped before this run started.",
                     )
-                self._runs[run.id] = run
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
+            if run.status in ACTIVE and run.session_id:
+                run.view = self._make_view(run, seed=True)
+
+    def _make_view(self, run: Run, *, seed: bool = False, base_seq: int = 0) -> SessionView:
+        """A log reader for the run's current chat; after a restart it replays the chain."""
+        view = SessionView(self.config.session_state / run.session_id / "events.jsonl")
+        if seed:
+            for link in run.chain:
+                view._add(
+                    "handoff",
+                    "Handed off to a new chat"
+                    + (f": {link['title']}" if link.get("title") else "")
+                    + ".",
+                    float(link.get("time") or 0.0),
+                )
+        else:
+            view.seq = base_seq
+        return view
+
+    def _follow(self, run: Run) -> None:
+        """Re-bind the run to the new chat once the current chat handed off to it."""
+        sv = run.view
+        if sv is None or run.status in INACTIVE:
+            return
+        sv.poll()
+        found = sv.handoff
+        with run.lock:
+            if found is not None and run.handoff is None:
+                if found["ahp"] == run.ahp_id:
+                    return
+                run.handoff = {**found, "from": run.session_id, "from_ahp": run.ahp_id}
+                run.ahp_id = found["ahp"]  # Open chat / Stop already point at the new chat
+                run.status = "handed_off"
+                self._save()
+            pending = run.handoff
+            if pending is None:
+                return
+            now = self._clock()
+            if now - run.handoff_try < 2.0:
+                return
+            run.handoff_try = now
+        sid = self.finder.sdk_session(pending["ahp"]) or self.finder.find_handoff(
+            str(pending.get("prompt") or ""),
+            float(pending.get("since") or 0.0),
+            self._claimed() | {str(pending.get("from") or "")},
+        )
+        if not sid or sid == pending.get("from") or not (
+            self.config.session_state / sid / "events.jsonl"
+        ).exists():
+            if now - float(pending.get("since") or now) > HANDOFF_WAIT_SECONDS:
+                with run.lock:
+                    run.status, run.handoff = "interrupted", None
+                    run.message = "The handoff chat never appeared; open VS Code to continue."
+                    self._save()
+            return
+        with run.lock:
+            run.carried.update(sv.written)
+            run.chain.append(
+                {
+                    "session_id": pending.get("from", ""),
+                    "ahp_id": pending.get("from_ahp", ""),
+                    "next_ahp": pending["ahp"],
+                    "title": pending.get("title", ""),
+                    "time": pending.get("since", now),
+                }
+            )
+            del run.chain[:-50]
+            run.session_id, run.ahp_id, run.handoff = sid, pending["ahp"], None
+            run.status, run.message = "running", ""
+            run.view = self._make_view(run, base_seq=sv.seq)
+            run.files_n = -1
+            self._save()
 
     def _save(self) -> None:
         items = sorted(self._runs.values(), key=lambda r: r.created)[-MAX_RUNS:]
@@ -120,12 +222,17 @@ class RunManager:
                 "message": r.message,
                 "session_id": r.session_id,
                 "ahp_id": r.ahp_id,
+                "chain": r.chain,
+                "handoff": r.handoff,
+                "carried": dict(list(r.carried.items())[:200]),
             }
             for r in items
         ]
         try:
             self.config.state_dir.mkdir(parents=True, exist_ok=True)
-            self._index.write_text(json.dumps(data), encoding="utf-8")
+            tmp = self._index.with_name(f"runs.json.{secrets.token_hex(3)}.tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, self._index)  # atomic: a crash never leaves a half-written index
         except OSError:
             pass
 
@@ -140,7 +247,46 @@ class RunManager:
             "any": self.bridge.helper_connected(None),
             "workspace": Path(workspace).name,
             "agent": self.config.agent,
+            "problem": self.helper_note,
         }
+
+    def _refuse_if_starting(self, category_id: str | None = None) -> None:
+        with self._lock:
+            runs = list(self._runs.values())
+        if any(r.status == "starting" for r in runs):
+            raise RunError("Another run is still starting; wait for it to appear first.")
+        for r in runs:
+            if category_id and r.category_id == category_id and self._still_active(r):
+                raise RunError(
+                    "A run of this workflow is already active (run "
+                    + r.id
+                    + "). Open it from Recent activity instead of starting a duplicate."
+                )
+
+    def _still_active(self, run: Run) -> bool:
+        """True while the run is non-terminal, after re-reading its session log."""
+        if run.status not in ACTIVE:
+            return False
+        self._follow(run)
+        sv = run.view
+        if sv is not None:
+            sv.poll()
+            state = sv.status(self._clock())
+            with run.lock:
+                if run.status in ("running", "input_needed", "handed_off") and run.status != state:
+                    run.status = state
+                    self._save()
+        return run.status in ACTIVE
+
+    def active(self) -> list[dict[str, Any]]:
+        """Non-terminal runs (newest first) so a refreshed page or new tab can re-attach."""
+        with self._lock:
+            runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)
+        return [
+            {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
+            for r in runs
+            if self._still_active(r)
+        ]
 
     def start(
         self,
@@ -154,17 +300,22 @@ class RunManager:
             prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
         except InputError as error:
             raise RunError(str(error)) from None
+        workspace = str(self.config.resolved_workspace())
+        self._refuse_if_starting(category_id)
+        helper_ready = self.bridge.helper_connected(workspace)
+        if not helper_ready and ensure_helper is not None:
+            # Slow (install / wake / wait): never hold the manager lock, so status polling and
+            # other requests keep answering; the starting check is repeated below.
+            helper_ready = ensure_helper()
         with self._lock:
-            if any(r.status == "starting" for r in self._runs.values()):
-                raise RunError("Another run is still starting; wait for it to appear first.")
-            helper_ready = self.bridge.helper_connected(str(self.config.resolved_workspace()))
-            if not helper_ready and ensure_helper is not None:
-                helper_ready = ensure_helper()
+            self._refuse_if_starting(category_id)
+            helper_ready = helper_ready or self.bridge.helper_connected(workspace)
             if not helper_ready and not self.config.allow_cli_fallback:
                 raise RunError(
                     "The VS Code helper is not connected for this workspace. Install it "
-                    "(wizexpert console install-helper), reload the VS Code window with the "
-                    "workspace open, and try again."
+                    "(wizexpert console install-helper); the console opens a standard VS Code "
+                    "window for the workspace automatically, or open one yourself (the Agents "
+                    "window cannot run the helper), and try again."
                 )
             run_id = (
                 time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock()))
@@ -175,15 +326,41 @@ class RunManager:
             self._runs[run_id] = run
             self._save()
         if self._async:
-            threading.Thread(target=self._launch, args=(run,), daemon=True).start()
+            threading.Thread(target=self._launch, args=(run, ensure_helper), daemon=True).start()
         else:
-            self._launch(run)
+            self._launch(run, ensure_helper)
         return run
 
     def _claimed(self) -> set[str]:
         return {r.session_id for r in self._runs.values() if r.session_id}
 
-    def _launch(self, run: Run) -> None:
+    def _healthy_target(
+        self, run: Run, workspace: str, ensure_helper: Callable[[], bool] | None
+    ) -> str | None:
+        """An instance that just answered a quick probe, recovering (new window) when needed."""
+        instance = self.bridge.healthy_instance(workspace)
+        if instance:
+            probe = self.bridge.wait_result(
+                self.bridge.post_job({"kind": "probe", "workspace": workspace, "target": instance}),
+                PROBE_SECONDS,
+            )
+            if probe is not None and not probe.get("errors"):
+                return instance
+            run.attempts.append("helper probe: " + _result_text(probe) + " (marked unhealthy)")
+            self.bridge.mark_unhealthy(instance)
+        return self._recover_helper(run, workspace, ensure_helper)
+
+    def _recover_helper(
+        self, run: Run, workspace: str, ensure_helper: Callable[[], bool] | None
+    ) -> str | None:
+        if ensure_helper is not None:
+            try:
+                ensure_helper()
+            except RunError as error:
+                run.attempts.append("helper recovery: " + short(str(error), 200))
+        return self.bridge.healthy_instance(workspace)
+
+    def _launch(self, run: Run, ensure_helper: Callable[[], bool] | None = None) -> None:
         workspace = str(self.config.resolved_workspace())
         job = {
             "kind": "start_chat",
@@ -193,13 +370,25 @@ class RunManager:
             "newChatWait": self.config.new_chat_wait_ms,
         }
         try:
-            if self.bridge.helper_connected(workspace):
-                # One helper attempt only: a second "start" could create a duplicate chat (and run).
-                result = self.bridge.wait_result(self.bridge.post_job(job), 40.0)
+            target = self._healthy_target(run, workspace, ensure_helper)
+            for attempt in range(2 if target else 0):
+                # The retry only happens after a recovery and only when no chat for this prompt
+                # appeared (_await_session), so a duplicate chat (and run) cannot be created.
+                result = self.bridge.wait_result(
+                    self.bridge.post_job({**job, "target": target}), START_SECONDS
+                )
                 run.attempts.append("helper: " + _result_text(result))
                 if self._await_session(run, ATTEMPT_SECONDS):
                     return
+                if result is not None and not result.get("errors"):
+                    break  # the helper reported success: do not start another chat
+                self.bridge.mark_unhealthy(target)
+                target = None if attempt else self._recover_helper(run, workspace, ensure_helper)
+                if target is None:
+                    break
             if self.config.allow_cli_fallback:
+                if self.helper_note and not self.bridge.helper_connected(workspace):
+                    run.attempts.append("helper unavailable: " + short(self.helper_note, 160))
                 run.attempts.append("code chat fallback")
                 command = shutil.which(self.config.code_command) or self.config.code_command
                 code = self._cli(
@@ -210,9 +399,8 @@ class RunManager:
             with run.lock:
                 run.status = "not_started"
                 run.message = (
-                    "VS Code did not start the chat. Check that the workspace window has the "
-                    "helper "
-                    "active (reload the window after installing it). Attempts: "
+                    "VS Code did not start the chat. The helper must run in a standard VS Code "
+                    "window for the workspace (not the Agents window). Attempts: "
                     + "; ".join(run.attempts)
                 )
         finally:
@@ -248,11 +436,35 @@ class RunManager:
             for r in runs
         ]
 
+    def reset_history(self) -> dict[str, Any]:
+        """Forget the console's own run index so Dashboard/History start empty.
+
+        Only runs.json (the website's index) is touched: it is moved aside to a timestamped
+        backup next to it, never deleted. Deliverables, work-item folders, VS Code session logs
+        and workflow configuration are not read or changed. Refused while any run is active.
+        """
+        with self._lock:
+            runs = list(self._runs.values())
+            if any(r.status in ACTIVE or r.status == "starting" for r in runs):
+                raise RunError("A run is still active; stop or finish it before resetting history.")
+            backup = ""
+            if self._index.is_file():
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                name = f"runs.json.reset-{stamp}-{secrets.token_hex(2)}.bak"
+                try:
+                    os.replace(self._index, self._index.with_name(name))
+                except OSError:
+                    raise RunError("Could not back up the run index; nothing was reset.") from None
+                backup = name
+            self._runs.clear()
+        return {"cleared": len(runs), "backup": backup}
+
     def view(self, run_id: str, since: int = 0) -> dict[str, Any]:
         run = self.get(run_id)
+        self._follow(run)
         with run.lock:
             if run.session_id and run.view is None:
-                run.view = SessionView(self.config.session_state / run.session_id / "events.jsonl")
+                run.view = self._make_view(run, seed=True)
             sv, status = run.view, run.status
         data: dict[str, Any] = {
             "id": run.id,
@@ -275,15 +487,22 @@ class RunManager:
             now = self._clock()
             state = sv.status(now)
             with run.lock:
-                if run.status in ("running", "input_needed", "completed", "stopped"):
+                if run.status in ("running", "input_needed", "handed_off", "completed", "stopped"):
                     changed = run.status != state
                     run.status = state
                     if changed:
                         self._save()
                 status = run.status
+                if status == "handed_off" and run.handoff:
+                    run.message = (
+                        "Handed off to a new chat"
+                        + (f" '{run.handoff.get('title')}'" if run.handoff.get("title") else "")
+                        + " \u2013 waiting for it to appear."
+                    )
                 if not run.ahp_id:
                     run.ahp_id = self.finder.ahp_id(run.session_id) or ""
                 ahp = run.ahp_id
+            data["message"] = run.message
             pending = sv.pending(now)
             with sv.lock:
                 items = [i for i in sv.progress if i["seq"] > since]
@@ -295,6 +514,7 @@ class RunManager:
                 {
                     "kind": pending.kind,
                     "text": pending.text,
+                    "detail": pending.detail,
                     "key": pending.key,
                     "can_decide": pending.kind == "permission" and bool(ahp),
                 }
@@ -313,7 +533,9 @@ class RunManager:
         with run.lock:
             stale = now - run.files_at >= FILES_REFRESH or run.files_n != len(sv.written)
             if stale or status in ("completed", "stopped") and not run.files:
-                run.files = collect_files(self.config, dict(sv.written), run.created)
+                run.files = collect_files(
+                    self.config, {**run.carried, **dict(sv.written)}, run.created
+                )
                 run.files_at, run.files_n = now, len(sv.written)
             files = list(run.files)
         return [{**{k: v for k, v in f.items()}, "index": i} for i, f in enumerate(files)]
@@ -328,6 +550,8 @@ class RunManager:
             self.bridge.post_job({"kind": "probe", "workspace": workspace}), 20.0
         )
         if result is None or result.get("errors"):
+            if result is None:
+                self.bridge.mark_workspace_unhealthy(workspace)  # lets connect recovery open one
             raise RunError("The probe failed: " + _result_text(result))
         info = result.get("info") or {}
         names = [str(c) for c in info.get("commands", [])][:400]
@@ -400,9 +624,7 @@ class RunManager:
         if not path.is_file() or self.config.resolved_workspace() not in path.parents:
             raise RunError("The latest output path is no longer available.")
         workspace = str(self.config.resolved_workspace())
-        job = self.bridge.post_job(
-            {"kind": "open_file", "workspace": workspace, "path": str(path)}
-        )
+        job = self.bridge.post_job({"kind": "open_file", "workspace": workspace, "path": str(path)})
         result = self.bridge.wait_result(job, 20.0)
         if result is None or result.get("errors"):
             raise RunError("VS Code did not open the latest output: " + _result_text(result))

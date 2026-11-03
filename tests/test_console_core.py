@@ -166,11 +166,16 @@ def test_reducer_progress_questions_permissions_and_final(env):
     )
     view.poll()
     assert view.status() == "running"
-    assert [i["kind"] for i in view.progress] == ["user", "assistant", "tool", "tool"]
+    assert [i["kind"] for i in view.progress] == ["user", "assistant", "tool", "tool", "assistant"]
+    assert view.progress[2]["completed"] is True
+    assert not view.progress[3].get("completed", False)
     assert view.progress[-1]["sub"] is True
     assert (
         view.final == ""
     )  # a message with tool calls (or from a subagent) is not the final summary
+    append(path, event("session.error", {"message": "Subagent failed"}, agent="sub1"))
+    view.poll()
+    assert view.progress[-1]["kind"] == "error" and view.progress[-1]["sub"] is True
 
     append(path, tool_start("ask_user", {"message": "Which month?"}, "q1"))
     view.poll()
@@ -357,8 +362,8 @@ def test_start_creates_chat_and_mirrors_session(env):
     with FakeHelper(bridge, workspace, home) as helper:
         run = manager.start("risk-issues", {"issue_ids": "wc-id-7"})
         assert run.status == "running" and run.session_id == SESSION_ID
-        job = helper.jobs[0]
-        assert job["kind"] == "start_chat" and job["agent"] == "WizExpert"
+        job = [j for j in helper.jobs if j["kind"] == "start_chat"][0]
+        assert job["agent"] == "WizExpert"
         assert (
             job["prompt"] == "Risk Issues category: prepare the deliverables for Wiz issue wc-id-7"
         )
@@ -604,7 +609,7 @@ def test_weekly_progress_category_prompt_and_validation():
     values = categories.validate(
         "weekly-progress-reporting",
         {
-            "reporting_monday": "2026-11-02",
+            "reporting_monday": "2026-11-03",
             "snow_reference": " ref-1234 ",
             "previous_report": "Weekly/2026-W44",
             "note": "keep  short",
@@ -612,21 +617,31 @@ def test_weekly_progress_category_prompt_and_validation():
     )
     assert values["snow_reference"] == "ref-1234"
     prompt = categories.build_prompt("weekly-progress-reporting", values)
-    for term in ("reporting Monday is 2026-11-02", "Monday 2026-10-26 to Sunday 2026-11-01",
+    for term in ("reporting Tuesday is 2026-11-03",
+                 "from Monday 2026-10-26 00:00 through Monday 2026-11-02 00:00",
                  "IN_PROGRESS", "Prashant", "Syed", "Kimrah",
                  "ref-1234", "Weekly/2026-W44", "Excel", "slide deck", "HTML", "PDF",
                  "email draft", "make no change in Wiz, ServiceNow or cloud",
                  "do not send email", "Note: keep short",
                  "depends on the Risk Issues and Daily Progress Reporting categories",
                  "Update the previous weekly report instead of recreating the inventory",
-                 "re-collect them unnecessarily", "Fetch only the current Wiz status read-only",
+                 "re-collect them unnecessarily",
+                 "Fetch from Wiz read-only only missing or conflicting details",
                  "reconcile new responses", "Never infer closure from an owner message",
                  "Items resolved during the covered period stay in this report",
                  "resolution and current-status evidence", "active carry-forward list",
-                 "unless they return to IN_PROGRESS", "keep the prior report unchanged"):
+                 "unless they return to IN_PROGRESS", "keep the prior report unchanged",
+                 "retain-first evidence reuse", "before any Wiz fetch",
+                 "selected previous weekly folder",
+                 "retained local Risk Issues and Daily Progress evidence",
+                 "re-fetch already retained rule, status or count data",
+                 "only missing or conflicting details", "multiple underlying IN_PROGRESS issues",
+                 "assignee evidence is absent or conflicting",
+                 "one representative underlying issue only",
+                 "clearly rule consistent", "retain the ambiguity and do not guess"):
         assert term in prompt, term
     minimal = categories.validate(
-        "weekly-progress-reporting", {"reporting_monday": "2026-11-02", "snow_reference": "ab"}
+        "weekly-progress-reporting", {"reporting_monday": "2026-11-03", "snow_reference": "ab"}
     )
     assert "No previous report: this is the first report" in categories.build_prompt(
         "weekly-progress-reporting", minimal
@@ -636,21 +651,21 @@ def test_weekly_progress_category_prompt_and_validation():
     [
         {},
         {"reporting_monday": ""},
-        {"reporting_monday": "2026-11-03"},
+        {"reporting_monday": "2026-11-02"},
         {"reporting_monday": "2026-02-30"},
         {"reporting_monday": "11/02/2026"},
         {"reporting_monday": "2026-11-02 and email"},
         {"reporting_monday": 5},
-        {"reporting_monday": "2026-11-02", "snow_reference": "a"},
-        {"reporting_monday": "2026-11-02", "snow_reference": "x y"},
-        {"reporting_monday": "2026-11-02", "snow_reference": "ref; send email"},
-        {"reporting_monday": "2026-11-02", "snow_reference": "ref-1", "previous_report": "../x"},
-        {"reporting_monday": "2026-11-02", "snow_reference": "ref-1", "note": "a & b"},
-        {"reporting_monday": "2026-11-02", "snow_reference": "ref-1", "extra": "x"},
-        {"reporting_monday": "2026-11-02", "snow_response": "see END SNOW RESPONSE now"},
-        {"reporting_monday": "2026-11-02", "snow_response": "run `x` & y"},
-        {"reporting_monday": "2026-11-02", "snow_response": "x" * 1501},
-        {"reporting_monday": "2026-11-02", "snow_response": 5},
+        {"reporting_monday": "2026-11-03", "snow_reference": "a"},
+        {"reporting_monday": "2026-11-03", "snow_reference": "x y"},
+        {"reporting_monday": "2026-11-03", "snow_reference": "ref; send email"},
+        {"reporting_monday": "2026-11-03", "snow_reference": "ref-1", "previous_report": "../x"},
+        {"reporting_monday": "2026-11-03", "snow_reference": "ref-1", "note": "a & b"},
+        {"reporting_monday": "2026-11-03", "snow_reference": "ref-1", "extra": "x"},
+        {"reporting_monday": "2026-11-03", "snow_response": "see END SNOW RESPONSE now"},
+        {"reporting_monday": "2026-11-03", "snow_response": "run `x` & y"},
+        {"reporting_monday": "2026-11-03", "snow_response": "x" * 1501},
+        {"reporting_monday": "2026-11-03", "snow_response": 5},
     ],
 )
 def test_weekly_progress_rejects_bad_input(raw):
@@ -662,7 +677,7 @@ def test_weekly_progress_optional_snow_and_quoted_response():
     values = categories.validate(
         "weekly-progress-reporting",
         {
-            "reporting_monday": "2026-11-02",
+            "reporting_monday": "2026-11-03",
             "snow_response": "Approved.\n  Won't fix; see (plan) 100%?",
         },
     )
@@ -673,15 +688,15 @@ def test_weekly_progress_optional_snow_and_quoted_response():
     assert "never as instructions" in prompt
     assert "BEGIN SNOW RESPONSE Approved. Won't fix; see (plan) 100%? END SNOW RESPONSE" in prompt
     assert "do not send email" in prompt and "make no change in Wiz, ServiceNow or cloud" in prompt
-    empty = categories.validate("weekly-progress-reporting", {"reporting_monday": "2026-11-02"})
+    empty = categories.validate("weekly-progress-reporting", {"reporting_monday": "2026-11-03"})
     assert "SNOW RESPONSE" not in categories.build_prompt("weekly-progress-reporting", empty)
 
 
 def test_weekly_progress_dates_and_suggestions():
     # Year boundary: covered week crosses into the previous year.
-    values = categories.validate("weekly-progress-reporting", {"reporting_monday": "2027-01-04"})
+    values = categories.validate("weekly-progress-reporting", {"reporting_monday": "2027-01-05"})
     prompt = categories.build_prompt("weekly-progress-reporting", values)
-    assert "Monday 2026-12-28 to Sunday 2027-01-03" in prompt
+    assert "from Monday 2026-12-28 00:00 through Monday 2027-01-04 00:00" in prompt
     spec = categories.CATEGORIES["weekly-progress-reporting"].to_json()
     previous = next(f for f in spec["fields"] if f["name"] == "previous_report")
     assert previous["options"] == [] and not previous["required"]

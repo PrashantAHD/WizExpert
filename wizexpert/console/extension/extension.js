@@ -16,14 +16,17 @@ const INSTANCE = crypto.randomBytes(8).toString('hex'); // one per VS Code windo
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RESOURCE = /^(ahp-session|agent-host-copilotcli|copilotcli):\/[0-9a-f-]{36}$/;
 const AGENT = /^[A-Za-z0-9 ._-]{1,60}$/;
-const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,3400}$/;
+const PROMPT = /^[A-Za-z0-9 .,;:()/_'?!@%-]{1,4200}$/;
 // The only commands this helper will ever execute.
 const COMMANDS = {
   newChat: 'workbench.action.chat.newChat',
   open: 'workbench.action.chat.open',
-  stop: 'workbench.action.chat.stop',
+  // Cancel command for the current chat request: 'cancel' in current VS Code (1.144 has no
+  // '...chat.stop'); the first candidate that exists at runtime is used.
+  stopCandidates: ['workbench.action.chat.cancel', 'workbench.action.chat.stop'],
   accept: 'workbench.action.chat.acceptTool',
   skip: 'workbench.action.chat.skipTool',
+  trust: 'workbench.trust.manage',
 };
 let stopped = false;
 let output = null;
@@ -96,20 +99,69 @@ function settleWithin(thenable, ms) {
   });
 }
 
+function log(text) {
+  if (output) output.appendLine(new Date().toISOString() + ' ' + text);
+}
+
+// getCommands(true) can hang in a wedged window: always bound it.
+async function commandsWithin(ms) {
+  const r = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ timedOut: true }), ms);
+    Promise.resolve(vscode.commands.getCommands(true)).then(
+      (list) => { clearTimeout(timer); resolve({ list }); },
+      (error) => { clearTimeout(timer); resolve({ error }); },
+    );
+  });
+  if (r.timedOut) throw new Error('VS Code did not list its commands within ' + Math.round(ms / 1000) + ' seconds; this window is unresponsive.');
+  if (r.error) throw new Error('VS Code could not list its commands: ' + String(r.error.message || r.error));
+  return r.list;
+}
+
+// Explicit permission check: the workspace must be trusted and the chat commands present.
+// Returns a concrete problem text, or '' when chat creation can proceed. With request=true an
+// untrusted workspace opens VS Code's Workspace Trust editor so the user can grant it.
+async function chatGate(request) {
+  if (vscode.workspace.isTrusted === false) {
+    if (request) await settleWithin(vscode.commands.executeCommand(COMMANDS.trust), 3000);
+    return 'This workspace is not trusted, so VS Code blocks chat creation. Trust the workspace (Workspace Trust editor), then retry.';
+  }
+  const all = await commandsWithin(5000);
+  const missing = [COMMANDS.newChat, COMMANDS.open].filter((c) => !all.includes(c));
+  return missing.length ? 'VS Code chat commands unavailable: ' + missing.join(', ') + '. Enable Copilot Chat and reload the window.' : '';
+}
+
 async function openChat(ahp, wait) {
   if (!UUID.test(String(ahp))) throw new Error('bad session id');
-  await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp));
+  const o = await settleWithin(vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp)), 8000);
+  if (o.error) throw new Error('VS Code could not open the chat: ' + String(o.error.message || o.error));
   await sleep(Math.min(Number(wait) || 2500, 15000));
 }
 
+const JOB_LIMIT_MS = 60000;
+
+// Never hangs: the whole job is bounded, so a result is always produced.
 async function runJob(job) {
+  let timer;
+  const limit = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ errors: ['job ' + job.kind + ' did not finish within ' + JOB_LIMIT_MS / 1000 + ' seconds'], info: {} }), JOB_LIMIT_MS);
+  });
+  try {
+    return await Promise.race([runJobUnbounded(job), limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runJobUnbounded(job) {
   const errors = [];
   const info = {};
   try {
     if (job.kind === 'probe') {
-      const all = await vscode.commands.getCommands(true);
+      const all = await commandsWithin(5000);
       info.version = vscode.version;
       info.folders = folders().map((f) => path.basename(f));
+      info.trusted = vscode.workspace.isTrusted !== false;
+      info.chatGate = await chatGate(false);
       info.commands = all.filter((c) => /chat|agent/i.test(c)).slice(0, 400);
     } else if (job.kind === 'start_chat') {
       if (!AGENT.test(String(job.agent)) || !PROMPT.test(String(job.prompt))) throw new Error('rejected input');
@@ -117,8 +169,11 @@ async function runJob(job) {
       // then submit the prompt in the requested custom agent mode.
       // A chat command promise can stay pending, so never wait on it indefinitely: the
       // result must always reach the console.
+      const gate = await chatGate(true);
+      if (gate) throw new Error(gate);
       const nc = await settleWithin(vscode.commands.executeCommand(COMMANDS.newChat), 8000);
-      if (nc.error) throw new Error('VS Code refused to create a chat (allow the one-time prompt, then reload): ' + String(nc.error.message || nc.error));
+      if (nc.error) throw new Error('VS Code refused to create a chat: ' + String(nc.error.message || nc.error));
+      if (nc.timedOut) throw new Error('VS Code did not answer the new-chat request within 8 seconds; a permission prompt may be waiting in this window. Check VS Code notifications, then reload the window.');
       await sleep(Math.min(Number(job.newChatWait) || 1500, 10000));
       const op = await settleWithin(vscode.commands.executeCommand(COMMANDS.open, { mode: String(job.agent), query: String(job.prompt), isPartialQuery: false }), 8000);
       if (op.error) throw new Error('VS Code refused to open the chat prompt: ' + String(op.error.message || op.error));
@@ -132,8 +187,13 @@ async function runJob(job) {
       if (!g || g.ok !== true) {
         info.guard = (g && g.reason) || 'refused';
       } else {
-        await vscode.commands.executeCommand(COMMANDS.stop);
+        const available = await commandsWithin(5000);
+        const stopCommand = COMMANDS.stopCandidates.find((c) => available.includes(c));
+        if (!stopCommand) throw new Error('No VS Code chat cancel command is available (looked for ' + COMMANDS.stopCandidates.join(', ') + ').');
+        const st = await settleWithin(vscode.commands.executeCommand(stopCommand), 8000);
+        if (st.error) throw new Error('VS Code refused to stop the chat: ' + String(st.error.message || st.error));
         info.note = 'stopped';
+        info.command = stopCommand;
       }
     } else if (job.kind === 'open_file') {
       const target = String(job.path || '');
@@ -143,7 +203,8 @@ async function runJob(job) {
         return candidate === base || candidate.startsWith(base + '/');
       });
       if (!allowed) throw new Error('rejected file path');
-      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
+      const o = await settleWithin(vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target)), 8000);
+      if (o.error) throw new Error('VS Code could not open the file: ' + String(o.error.message || o.error));
       info.note = 'opened';
     } else if (job.kind === 'tool') {
       const command = job.action === 'accept' ? COMMANDS.accept : job.action === 'skip' ? COMMANDS.skip : null;
@@ -156,7 +217,7 @@ async function runJob(job) {
         for (const r of job.resources || []) {
           if (!RESOURCE.test(String(r))) continue;
           // A session without a waiting prompt ignores this, so trying every URI form is safe.
-          try { await vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }); } catch (e) { errors.push(String(e.message).slice(0, 120)); }
+          try { await settleWithin(vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }), 5000); } catch (e) { errors.push(String(e.message).slice(0, 120)); }
         }
       }
     } else {
@@ -180,8 +241,11 @@ async function loop() {
         if (job.id <= after) continue;
         after = job.id;
         if (!folders().some((x) => norm(x) === norm(job.workspace))) continue; // another window's job
+        if (job.target && job.target !== INSTANCE) continue; // targeted at another window's helper
+        log('job ' + job.id + ' ' + job.kind + ' start');
         const { errors, info } = await runJob(job);
-        call('POST', '/vscode/result', { id: job.id, errors, info }, 5000).catch(() => {});
+        log('job ' + job.id + ' ' + job.kind + (errors.length ? ' failed: ' + errors.join('; ') : ' ok'));
+        call('POST', '/vscode/result', { id: job.id, errors, info }, 5000).catch((e) => log('job ' + job.id + ' result not delivered: ' + String(e && e.message).slice(0, 100)));
       }
     } catch (e) {
       report('waiting', String(e && e.message).slice(0, 120));
@@ -191,11 +255,26 @@ async function loop() {
 }
 
 function activate(context) {
+  if (output) return; // already active in this window
   stopped = false;
   output = vscode.window.createOutputChannel('WizExpert Console Helper');
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   context.subscriptions.push(output, status);
+  context.subscriptions.push(vscode.commands.registerCommand('wizexpertConsoleHelper.status', () => {
+    output.show(true);
+    vscode.window.showInformationMessage('WizExpert helper ' + lastState);
+  }));
+  // The console opens a standard VS Code window for the workspace (`code -n`), where this helper
+  // activates (the Agents window never loads user extensions). The URI handler is only a no-op
+  // activation hook kept for manual use.
+  if (vscode.window.registerUriHandler) {
+    context.subscriptions.push(vscode.window.registerUriHandler({
+      handleUri(uri) { output.appendLine(new Date().toISOString() + ' woken by console (' + String(uri.path).slice(0, 20) + ')'); },
+    }));
+  }
+  output.appendLine(new Date().toISOString() + ' activated v' + (context.extension && context.extension.packageJSON.version) + ' instance ' + INSTANCE);
   report('starting', folders().join(', ') || 'no workspace folder open');
+  chatGate(false).then((g) => { if (g) report('blocked', g); }, () => {});
   loop().catch((e) => report('stopped', String(e && e.message).slice(0, 120)));
   context.subscriptions.push({ dispose: () => { stopped = true; } });
 }
