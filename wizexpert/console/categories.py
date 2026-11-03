@@ -304,14 +304,14 @@ CATEGORIES: dict[str, Category] = {
     "weekly-progress-reporting": Category(
         "weekly-progress-reporting",
         "Weekly Progress Reporting",
-        "Prepare the Monday weekly progress report for the previous week covering current "
-        "in-progress Wiz items assigned to Prashant, Syed or Kimrah.",
+        "Prepare the Tuesday weekly progress report covering all current in-progress Wiz items "
+        "assigned to Prashant, Syed or Kimrah plus items resolved since the previous Monday (same owners).",
         (
             FieldSpec(
                 "reporting_monday",
-                "Reporting Monday (YYYY-MM-DD)",
-                "The Monday the report is delivered; it must be a Monday. The covered period "
-                "is the preceding Monday to Sunday.",
+                "Reporting Tuesday (YYYY-MM-DD)",
+                "The Tuesday the report is delivered; it must be a Tuesday. Resolved items are "
+                "included from the preceding Monday through the report-week Monday.",
                 required=True,
                 max_length=10,
                 placeholder="YYYY-MM-DD",
@@ -350,9 +350,11 @@ CATEGORIES: dict[str, Category] = {
                 max_length=80,
             ),
         ),
-        "Weekly Progress Reporting category: the reporting Monday is {reporting_monday}; "
-        "prepare the report for the covered prior week, Monday {covered_start} to Sunday "
-        "{covered_end}, for current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah. "
+        "Weekly Progress Reporting category: the reporting Tuesday is {reporting_monday}; "
+        "prepare the report for the complete current set of Wiz items in IN_PROGRESS assigned "
+        "to Prashant, Syed or Kimrah as of that day, plus RESOLVED items assigned to the same owners whose resolved_at is "
+        "from Monday {covered_start} 00:00 through Monday {covered_end} 00:00 "
+        "(date-only values: both Mondays inclusive). "
         "{snow_reference}Fetch and map the SNOW ticket from Wiz read-only{previous_report}"
         "{snow_response}. "
         "This category depends on the Risk Issues and Daily Progress Reporting categories. "
@@ -365,8 +367,10 @@ CATEGORIES: dict[str, Category] = {
         "current-status evidence; drop them from the active carry-forward list of the next "
         "period unless they return to IN_PROGRESS, and keep the prior report unchanged as "
         "the historical record. "
-        "Initial deliverables: Excel, slide deck, HTML, PDF and email draft; the user may "
-        "remove one later. Work locally only: make no change in Wiz, ServiceNow or cloud and "
+        "Primary deliverable: one editable branded slide deck using the approved governance "
+        "template. Optionally export that deck to PDF and prepare the private email draft. "
+        "Excel and standalone report HTML are retired. Work locally only: make no change "
+        "in Wiz, ServiceNow or cloud and "
         "do not send email{note}",
         max_prompt=3400,
     ),
@@ -504,8 +508,8 @@ def _reporting_monday(raw: Any) -> str:
         day = dt.date.fromisoformat(text) if ISO_DATE.fullmatch(text) else None
     except ValueError:
         day = None
-    if day is None or day.weekday() != 0:
-        raise InputError("Enter the Reporting Monday as YYYY-MM-DD; the date must be a Monday.")
+    if day is None or day.weekday() != 1:
+        raise InputError("Enter the Reporting Tuesday as YYYY-MM-DD; the date must be a Tuesday.")
     return text
 
 
@@ -555,7 +559,7 @@ def _covered(monday: str) -> tuple[str, str]:
     if not monday:
         return "", ""
     day = dt.date.fromisoformat(monday)
-    return (day - dt.timedelta(days=7)).isoformat(), (day - dt.timedelta(days=1)).isoformat()
+    return (day - dt.timedelta(days=8)).isoformat(), (day - dt.timedelta(days=1)).isoformat()
 
 
 def validate(

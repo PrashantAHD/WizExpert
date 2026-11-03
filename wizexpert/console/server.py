@@ -67,6 +67,12 @@ SECURITY_HEADERS = {
 }
 
 
+# Shareable client-side routes (history.pushState): the page itself renders the right view.
+APP_ROUTE = re.compile(
+    r"^/(workflow/[\w-]+(/[\w-]+){0,2}|run/[\w-]+|dashboard|history|in-progress)/?$"
+)
+
+
 class ConsoleApp:
     def __init__(
         self,
@@ -310,7 +316,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.MISDIRECTED_REQUEST, "Unexpected Host header.")
         parts = urlsplit(self.path)
         path = parts.path
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html") or APP_ROUTE.match(path):
             return self._index()
         if path.startswith("/static/"):
             return self._static(path[len("/static/") :])
@@ -459,6 +465,10 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
             run = manager.start(category, inputs, action, ensure_helper=ensure_helper)
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/history/reset":
+            if body.get("confirm") != "reset-console-history":
+                raise RunError('Send {"confirm": "reset-console-history"} to reset history.')
+            return self._json(HTTPStatus.OK, manager.reset_history())
         if path == "/api/helper/connect":
             return self._json(HTTPStatus.OK, self.app.connect_async())
         if path == "/api/helper/probe":

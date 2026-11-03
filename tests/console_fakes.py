@@ -81,8 +81,18 @@ def append(path: Path, *lines: str) -> None:
 class FakeHelper:
     """Stands in for the VS Code helper: polls the bridge and 'creates' the chat for a start job."""
 
-    def __init__(self, bridge: Any, workspace: Path, home: Path, *, create: bool = True) -> None:
+    def __init__(
+        self,
+        bridge: Any,
+        workspace: Path,
+        home: Path,
+        *,
+        create: bool = True,
+        name: str = "fakehelper",
+        answer: bool = True,
+    ) -> None:
         self.bridge, self.workspace, self.home, self.create = bridge, workspace, home, create
+        self.name, self.answer = name, answer
         self.jobs: list[dict[str, Any]] = []
         self._stop = threading.Event()
         self.events_path: Path | None = None
@@ -102,13 +112,15 @@ class FakeHelper:
     def _run(self) -> None:
         after = -1
         while not self._stop.is_set():
-            res = self.bridge.poll(after, "fakehelper", [str(self.workspace)], wait=0.1)
+            res = self.bridge.poll(after, self.name, [str(self.workspace)], wait=0.1)
             if after < 0:
                 after = res["last"]
                 continue
             for job in res["jobs"]:
                 after = job["id"]
                 self.jobs.append(job)
+                if not self.answer:
+                    continue  # a wedged window: still polling, never answers
                 info: dict[str, Any] = {"note": "sent"}
                 if job["kind"] == "start_chat" and self.create:
                     self.events_path = make_session(self.home, self.workspace, prompt=job["prompt"])

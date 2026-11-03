@@ -5,34 +5,46 @@ ServiceNow, sends email or reads client data; private builders (kept outside thi
 repository) render the five weekly slots from the dataset this module produces.
 
 Rules enforced here:
-* Reporting day is a Monday; the covered period is the prior Monday-Sunday.
+* Reporting day is a Tuesday (owner-requested rule). The window runs from the preceding
+  Monday 00:00 (inclusive) to the report-week Monday 00:00 boundary. Date-only values:
+  start = report day - 8 days (previous Monday, inclusive), end = report day - 1 day
+  (report-week Monday, inclusive). Timestamps on the report-week Monday are also included:
+  the window is [start Monday 00:00, report Tuesday 00:00), i.e. resolved_at_before
+  <report day>T00:00:00Z. A resolution on the boundary Monday can appear in two consecutive reports.
+* The full owner-scoped IN_PROGRESS population as of report day is always included;
+  RESOLVED items are included only when resolved_at falls inside the window AND they are
+  assigned to the same approved owners (Prashant, Syed, Kimrah); other owners are excluded.
 * The previous weekly report is the baseline; the inventory is updated, not rebuilt.
-* Items whose current Wiz status is IN_PROGRESS carry forward.
-* Items resolved inside the covered period stay in that period's report with
-  resolution evidence, then drop from the next period's active list.
+* Items whose current Wiz status is IN_PROGRESS are included whether or not they appear
+  in the previous report: those in it are 'carried'; historical IN_PROGRESS rows absent
+  from it are 'new'. Both count toward counts['in_progress'].
+  Counts are issue-weighted (rule-aggregated rows contribute issue_count); tables stay one
+  row per rule, and counts['rows'] holds the row total.
+* Items resolved inside the window stay in that report with resolution evidence, then
+  drop from the next window's active list.
 * Closure is never inferred from an owner message; only current Wiz status counts.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 IN_PROGRESS = "IN_PROGRESS"
 RESOLVED = "RESOLVED"
 DEFAULT_OWNERS = ("Prashant", "Syed", "Kimrah")
 DEPENDENCIES = ("risk-issues", "daily-progress-reporting")
-SECTIONS = (
+SECTIONS = (  # weekly deck structure (owner-requested redesign, category version 3)
+    "Cover",
     "Executive Summary",
-    "Reporting Period and Baseline",
-    "Active Carry-Forward Items",
-    "Newly In Progress",
-    "Resolved During Period",
-    "Remediation Progress",
-    "SNOW and Email Responses",
-    "Next Steps",
+    "In-Progress Items",
+    "Thank you",
+)
+IN_PROGRESS_COLUMNS = (
+    "Issue / title", "Severity", "SNOW ticket number", "Assigned Team", "Current Status", "Blockers",
 )
 FORBIDDEN_PHRASES = (
     "assessment basis and limitations",
@@ -41,7 +53,54 @@ FORBIDDEN_PHRASES = (
     "close wiz",
     "update wiz issue",
 )
+UNNAMED_RULE = "Rule name not retained in available evidence"
 ITEM_STATES = ("carried", "new", "resolved", "dropped", "needs-status")
+
+
+def weight(item: Mapping[str, Any]) -> int:
+    """Issues an item represents: issue_count for rule-aggregated rows, else 1."""
+    count = item.get("issue_count")
+    if item.get("rule_id") and isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        return count
+    return 1
+
+
+def _counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Issue-weighted counts; counts['rows'] is the number of (grouped) table rows."""
+    counts = {s: sum(weight(i) for i in items if i["state"] == s) for s in ITEM_STATES}
+    counts["in_progress"] = counts["carried"] + counts["new"]
+    counts["rows"] = len(items)
+    return counts
+
+
+_RULE_ID = re.compile(
+    r"^(?:wc-id-\d+|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+)
+
+
+_UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_NOISE = re.compile(rf"\$wiz\w*|\(\s*{_UUID}\s*\)|{_UUID}")
+
+
+def clean_title(text: Any) -> str:
+    """Remove only raw UUIDs and literal $wiz... template tokens (e.g. $wizassignee)."""
+    return " ".join(_NOISE.sub(" ", str(text or "")).split())
+
+
+def display_title(item: Mapping[str, Any]) -> str:
+    """Rendered row title. Rule rows read "Rule name (K issues)", with "(wc-id-N)" after the
+    name when the rule id is a wc-id; raw source UUIDs are never shown (they stay in data)."""
+    if not item.get("rule_id"):
+        return clean_title(item.get("title", ""))
+    name = clean_title(item.get("rule_name") or item.get("title") or "")
+    if not name or name.startswith("Wiz source rule"):
+        name = UNNAMED_RULE
+    rule_id = str(item["rule_id"])
+    if rule_id.startswith("wc-id-"):
+        name = f"{name} ({rule_id})"
+    count = item.get("issue_count")
+    noun = "issue" if count == 1 else "issues"
+    return f"{name} ({count} {noun})"
 
 
 class WeeklyDataError(ValueError):
@@ -51,19 +110,19 @@ class WeeklyDataError(ValueError):
 @dataclass(frozen=True)
 class WeeklyPeriod:
     reporting_date: date
-    start: date  # prior Monday
-    end: date  # prior Sunday
+    start: date  # preceding Monday (inclusive)
+    end: date  # report-week Monday boundary (inclusive for dates and timestamps on that day)
 
     def label(self) -> str:
         return f"{self.start.isoformat()} to {self.end.isoformat()}"
 
 
 def period_for(reporting_date: date) -> WeeklyPeriod:
-    """Reporting Monday -> prior Monday-Sunday period."""
-    if reporting_date.weekday() != 0:
-        raise WeeklyDataError("reporting date must be a Monday")
+    """Reporting Tuesday -> previous Monday .. report-week Monday boundary window."""
+    if reporting_date.weekday() != 1:
+        raise WeeklyDataError("reporting date must be a Tuesday")
     return WeeklyPeriod(
-        reporting_date, reporting_date - timedelta(days=7), reporting_date - timedelta(days=1)
+        reporting_date, reporting_date - timedelta(days=8), reporting_date - timedelta(days=1)
     )
 
 
@@ -73,6 +132,22 @@ def _day(value: Any) -> date | None:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value)[:10])
+
+
+def _in_window(value: Any, period: WeeklyPeriod) -> str:
+    """Return "in", "before" or "after" the window; timestamps on the report-week Monday are included (end is Tuesday 00:00, exclusive)."""
+    text = str(value).strip()
+    if len(text) > 10 and text[10] in "T ":
+        stamp = datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+        start = datetime.combine(period.start, time.min)
+        end = datetime.combine(period.end + timedelta(days=1), time.min)  # boundary Monday included
+        return "before" if stamp < start else "after" if stamp >= end else "in"
+    day = _day(text)
+    return "before" if day < period.start else "after" if day > period.end else "in"
+
+
+def _count_ok(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _owner_ok(owner: str, allowed: Iterable[str]) -> bool:
@@ -102,8 +177,8 @@ def build_weekly_dataset(
         raise WeeklyDataError(f"missing dependency records: {', '.join(missing)}")
     if "items" not in previous_report or not previous_report.get("period_end"):
         raise WeeklyDataError("previous weekly report baseline is required")
-    if _day(previous_report["period_end"]) != period.start - timedelta(days=1):
-        raise WeeklyDataError("previous report must cover the Monday-Sunday period before this one")
+    if _day(previous_report["period_end"]) != period.start:
+        raise WeeklyDataError("previous report window must end on this window's start Monday")
     rows = {str(r["item_id"]): dict(r) for r in current_status}
     baseline = {str(i["item_id"]): dict(i) for i in previous_report["items"]}
     allowed = tuple(allowed_owners)
@@ -125,20 +200,31 @@ def build_weekly_dataset(
                 continue  # out-of-scope owner
             entry["state"] = "carried" if prior else "new"
         elif status == RESOLVED:
-            resolved = _day(row.get("resolved_at"))
-            if resolved is None or not row.get("resolution_evidence"):
+            if not _owner_ok(row.get("owner", ""), allowed):
+                continue  # out-of-scope owner (same approved owners as IN_PROGRESS)
+            if _day(row.get("resolved_at")) is None or not row.get("resolution_evidence"):
                 raise WeeklyDataError(f"{item_id}: resolved needs resolved_at and evidence")
-            if period.start <= resolved <= period.end:
+            where = _in_window(row["resolved_at"], period)
+            if where == "in":
                 entry["state"] = "resolved"
-            elif resolved < period.start:
+            elif where == "before":
                 entry["state"] = "dropped"
+            elif prior:
+                entry["state"] = "needs-status"
+                entry["note"] = "Resolved after the reporting window; reported next week"
             else:
-                raise WeeklyDataError(f"{item_id}: resolution date after the covered period")
+                continue  # resolved after the window and never reported
         elif prior:
             entry["state"] = "needs-status"
             entry["note"] = f"Current Wiz status {status or 'unknown'}; not closed"
         else:
             continue
+        if entry.get("rule_id"):
+            count = entry.get("issue_count")
+            if not _RULE_ID.match(str(entry["rule_id"])) or not _count_ok(count):
+                raise WeeklyDataError(f"{item_id}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0")
+            entry["issue_count"] = int(count)
+            entry["display_title"] = display_title(entry)
         if status != RESOLVED and row.get("owner_claims_closed"):
             entry["note"] = "Owner message reports completion; not closed until Wiz status confirms"
         items.append(entry)
@@ -148,7 +234,7 @@ def build_weekly_dataset(
         "baseline_period_end": str(previous_report["period_end"])[:10],
         "dependencies": dict(dependencies),
         "items": items,
-        "counts": {s: sum(1 for i in items if i["state"] == s) for s in ITEM_STATES},
+        "counts": _counts(items),
     }
 
 
@@ -162,9 +248,9 @@ def validate_weekly_dataset(data: Mapping[str, Any], *, placeholder: bool = Fals
         try:
             period = period_for(date.fromisoformat(data["reporting_date"]))
         except (KeyError, TypeError, ValueError):
-            return ["reporting_date must be a Monday ISO date"]
+            return ["reporting_date must be a Tuesday ISO date"]
         if data.get("period") != {"start": period.start.isoformat(), "end": period.end.isoformat()}:
-            errs.append("period must be the prior Monday-Sunday")
+            errs.append("period must be previous Monday to report-week Monday")
     if not data.get("baseline_period_end"):
         errs.append("previous report baseline missing")
     for dep in DEPENDENCIES:
@@ -177,6 +263,10 @@ def validate_weekly_dataset(data: Mapping[str, Any], *, placeholder: bool = Fals
             errs.append(f"{iid}: unknown state")
         if state in ("carried", "new") and item.get("status") != IN_PROGRESS:
             errs.append(f"{iid}: carried/new items must be IN_PROGRESS in current Wiz status")
+        if item.get("rule_id") and (
+            not _RULE_ID.match(str(item["rule_id"])) or not _count_ok(item.get("issue_count"))
+        ):
+            errs.append(f"{iid}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0")
         if state == "resolved" and not (
             item.get("status") == RESOLVED and item.get("resolution_evidence")
         ):
@@ -203,10 +293,10 @@ def placeholder_dataset() -> dict[str, Any]:
         item(3, "resolved", RESOLVED),
     ]
     return {
-        "reporting_date": "[reporting Monday]",
+        "reporting_date": "[reporting Tuesday]",
         "period": {"start": "[period start]", "end": "[period end]"},
         "baseline_period_end": "[previous period end]",
         "dependencies": {d: f"[{d} record]" for d in DEPENDENCIES},
         "items": items,
-        "counts": {s: sum(1 for i in items if i["state"] == s) for s in ITEM_STATES},
+        "counts": _counts(items),
     }

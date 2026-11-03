@@ -107,21 +107,29 @@ DAILY_PROGRESS = Category(
 )
 WEEKLY_PROGRESS = Category(
     "weekly-progress-reporting",
-    1,
+    3,
     "Weekly Progress Reporting",
     (
-        Slot("weekly-progress-workbook", "Weekly progress Excel workbook", "workbook"),
-        Slot("weekly-progress-slide-deck", "Weekly progress slide deck", "deck"),
-        Slot("weekly-progress-html", "Weekly progress HTML report", "document"),
-        Slot("weekly-progress-pdf", "Weekly progress PDF report", "document"),
+        Slot("weekly-progress-slide-deck", "Weekly progress slide deck (primary report)", "deck"),
+        Slot("weekly-progress-pdf", "Weekly progress deck PDF export (optional)", "document"),
         Slot("weekly-progress-email", "Weekly progress email draft (not sent)", "email-draft"),
     ),
     ("collection", "generation", "handoff"),
     (
-        "Deliver on Mondays, covering the previous week.",
-        "Scope is current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah.",
-        "The five slots are the initial deliverables; the owner may remove one later "
-        "through a recorded owner change that bumps the category version.",
+        "Deliver on Tuesdays (owner-requested rule).",
+        "Scope is all current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah, plus resolved items in the window.",
+        "Owner-requested redesign (category version 3): the primary editable deck no longer "
+        "retains the monthly operational slides. Slide 1 is the approved cover, slide 2 the "
+        "executive summary (carried-forward, new and resolved-this-period counts plus key "
+        "messages), slide 3 onward editable in-progress tables for every current IN_PROGRESS "
+        "item (issue/title, severity, SNOW ticket number, Assigned Team, current status, "
+        "blockers; historical IN_PROGRESS rows absent from the previous report count as new) "
+        "and the final slide a thank-you note; the approved branding and footer, the "
+        "current-status timestamp and period-end limitation stay.",
+        "The editable operational slide deck is the primary report; the workbook and "
+        "standalone report HTML are retired. The PDF is an optional export of the deck "
+        "and the email draft keeps its private HTML wrapper. The owner may change "
+        "slots later through a recorded owner change that bumps the category version.",
         "Read-only and no-send: local files only, never send email or change Wiz, "
         "ticketing or cloud records.",
         "Update the previous weekly report rather than recreating the inventory; items "
@@ -132,7 +140,10 @@ WEEKLY_PROGRESS = Category(
         "Fetch only the current read-only Wiz status and reconcile any new responses "
         "against the reused records.",
         "Never infer closure from an owner message; closure needs current Wiz status.",
-        "Items resolved during the covered Monday-Sunday period stay in that period's "
+        "Weekly reports are issued Tuesday: all current owner-scoped IN_PROGRESS items are included, "
+        "plus RESOLVED items assigned to the same owners with resolved_at from the preceding Monday 00:00 through the "
+        "report-week Monday 00:00 boundary (date-only: both Mondays inclusive). "
+        "Items resolved during the covered window stay in that "
         "report with resolution and current-status evidence; the next period drops them "
         "from the active carry-forward list unless they return to IN_PROGRESS, and the "
         "prior report keeps the historical record unchanged.",

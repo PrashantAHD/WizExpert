@@ -60,9 +60,42 @@ class Bridge:
         self._jobs: deque[dict[str, Any]] = deque(maxlen=MAX_JOBS)
         self._results: dict[int, dict[str, Any]] = {}
         self._guards: dict[int, Callable[[], tuple[bool, str]]] = {}
-        self._next = 1
+        # Job ids start from the wall clock (ms) so they always exceed the cursor a helper kept
+        # from a previous console process (helpers skip ids <= their cursor; counting from 1 after
+        # a console restart made every job invisible to an already-connected helper).
+        self._next = int(time.time() * 1000)
         self._nonces: OrderedDict[str, float] = OrderedDict()
         self.instances: dict[str, dict[str, Any]] = {}
+        self._unhealthy: set[str] = set()
+        self._targets: dict[int, str] = {}
+
+    # -- helper health ---
+    def mark_unhealthy(self, instance: str) -> None:
+        """Exclude a helper instance (polling but not answering) until it answers a job."""
+        with self._cond:
+            self._unhealthy.add(instance)
+
+    def mark_workspace_unhealthy(self, workspace: str) -> None:
+        """Exclude every live helper for this workspace (an untargeted job got no answer)."""
+        with self._cond:
+            for name, info in self.instances.items():
+                if any(norm(f) == norm(workspace) for f in info["folders"]):
+                    self._unhealthy.add(name)
+
+    def healthy_instance(self, workspace: str | None = None) -> str | None:
+        """The most recently seen responsive helper instance for this workspace, if any."""
+        now = self._clock()
+        best: tuple[float, str] | None = None
+        with self._cond:
+            for name, info in self.instances.items():
+                if name in self._unhealthy or now - info["seen"] > HELPER_ALIVE:
+                    continue
+                is_ws = workspace is None or any(
+                    norm(f) == norm(workspace) for f in info["folders"]
+                )
+                if is_ws and (best is None or info["seen"] >= best[0]):
+                    best = (info["seen"], name)
+        return best[1] if best else None
 
     # -- request signing ---
     def verify(self, method: str, path: str, headers: Any, body: bytes) -> str | None:
@@ -98,7 +131,11 @@ class Bridge:
             self.instances[instance] = {"seen": self._clock(), "folders": folders}
             while True:
                 last = self._jobs[-1]["id"] if self._jobs else 0
-                jobs = [j for j in self._jobs if j["id"] > after]
+                jobs = [
+                    j
+                    for j in self._jobs
+                    if j["id"] > after and j.get("target") in (None, "", instance)
+                ]
                 if after < 0 or jobs or self._clock() >= deadline:
                     break
                 self._cond.wait(timeout=min(1.0, max(0.05, deadline - self._clock())))
@@ -108,6 +145,9 @@ class Bridge:
     def record_result(self, job_id: int, result: dict[str, Any]) -> None:
         with self._cond:
             self._results[job_id] = result
+            target = self._targets.pop(job_id, None)
+            if target and not result.get("errors"):
+                self._unhealthy.discard(target)  # it answered: healthy again
             self._cond.notify_all()
 
     def guard(self, job_id: int) -> tuple[bool, str]:
@@ -124,6 +164,8 @@ class Bridge:
             job_id = self._next
             self._next += 1
             self._jobs.append({**job, "id": job_id})
+            if job.get("target"):
+                self._targets[job_id] = str(job["target"])
             if guard:
                 self._guards[job_id] = guard
             self._cond.notify_all()
@@ -147,8 +189,8 @@ class Bridge:
         """A helper for this workspace polled within ``seconds`` (longer than the alive limit)."""
         now = self._clock()
         with self._cond:
-            for info in self.instances.values():
-                if now - info["seen"] > seconds:
+            for name, info in self.instances.items():
+                if name in self._unhealthy or now - info["seen"] > seconds:
                     continue
                 if workspace is None or any(norm(f) == norm(workspace) for f in info["folders"]):
                     return True

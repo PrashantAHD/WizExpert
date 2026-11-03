@@ -99,6 +99,24 @@ function settleWithin(thenable, ms) {
   });
 }
 
+function log(text) {
+  if (output) output.appendLine(new Date().toISOString() + ' ' + text);
+}
+
+// getCommands(true) can hang in a wedged window: always bound it.
+async function commandsWithin(ms) {
+  const r = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ timedOut: true }), ms);
+    Promise.resolve(vscode.commands.getCommands(true)).then(
+      (list) => { clearTimeout(timer); resolve({ list }); },
+      (error) => { clearTimeout(timer); resolve({ error }); },
+    );
+  });
+  if (r.timedOut) throw new Error('VS Code did not list its commands within ' + Math.round(ms / 1000) + ' seconds; this window is unresponsive.');
+  if (r.error) throw new Error('VS Code could not list its commands: ' + String(r.error.message || r.error));
+  return r.list;
+}
+
 // Explicit permission check: the workspace must be trusted and the chat commands present.
 // Returns a concrete problem text, or '' when chat creation can proceed. With request=true an
 // untrusted workspace opens VS Code's Workspace Trust editor so the user can grant it.
@@ -107,23 +125,39 @@ async function chatGate(request) {
     if (request) await settleWithin(vscode.commands.executeCommand(COMMANDS.trust), 3000);
     return 'This workspace is not trusted, so VS Code blocks chat creation. Trust the workspace (Workspace Trust editor), then retry.';
   }
-  const all = await vscode.commands.getCommands(true);
+  const all = await commandsWithin(5000);
   const missing = [COMMANDS.newChat, COMMANDS.open].filter((c) => !all.includes(c));
   return missing.length ? 'VS Code chat commands unavailable: ' + missing.join(', ') + '. Enable Copilot Chat and reload the window.' : '';
 }
 
 async function openChat(ahp, wait) {
   if (!UUID.test(String(ahp))) throw new Error('bad session id');
-  await vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp));
+  const o = await settleWithin(vscode.commands.executeCommand('vscode.open', vscode.Uri.parse('agent-host-session://ahp-session/' + ahp)), 8000);
+  if (o.error) throw new Error('VS Code could not open the chat: ' + String(o.error.message || o.error));
   await sleep(Math.min(Number(wait) || 2500, 15000));
 }
 
+const JOB_LIMIT_MS = 60000;
+
+// Never hangs: the whole job is bounded, so a result is always produced.
 async function runJob(job) {
+  let timer;
+  const limit = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ errors: ['job ' + job.kind + ' did not finish within ' + JOB_LIMIT_MS / 1000 + ' seconds'], info: {} }), JOB_LIMIT_MS);
+  });
+  try {
+    return await Promise.race([runJobUnbounded(job), limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runJobUnbounded(job) {
   const errors = [];
   const info = {};
   try {
     if (job.kind === 'probe') {
-      const all = await vscode.commands.getCommands(true);
+      const all = await commandsWithin(5000);
       info.version = vscode.version;
       info.folders = folders().map((f) => path.basename(f));
       info.trusted = vscode.workspace.isTrusted !== false;
@@ -153,10 +187,11 @@ async function runJob(job) {
       if (!g || g.ok !== true) {
         info.guard = (g && g.reason) || 'refused';
       } else {
-        const available = await vscode.commands.getCommands(true);
+        const available = await commandsWithin(5000);
         const stopCommand = COMMANDS.stopCandidates.find((c) => available.includes(c));
         if (!stopCommand) throw new Error('No VS Code chat cancel command is available (looked for ' + COMMANDS.stopCandidates.join(', ') + ').');
-        await vscode.commands.executeCommand(stopCommand);
+        const st = await settleWithin(vscode.commands.executeCommand(stopCommand), 8000);
+        if (st.error) throw new Error('VS Code refused to stop the chat: ' + String(st.error.message || st.error));
         info.note = 'stopped';
         info.command = stopCommand;
       }
@@ -168,7 +203,8 @@ async function runJob(job) {
         return candidate === base || candidate.startsWith(base + '/');
       });
       if (!allowed) throw new Error('rejected file path');
-      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
+      const o = await settleWithin(vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target)), 8000);
+      if (o.error) throw new Error('VS Code could not open the file: ' + String(o.error.message || o.error));
       info.note = 'opened';
     } else if (job.kind === 'tool') {
       const command = job.action === 'accept' ? COMMANDS.accept : job.action === 'skip' ? COMMANDS.skip : null;
@@ -181,7 +217,7 @@ async function runJob(job) {
         for (const r of job.resources || []) {
           if (!RESOURCE.test(String(r))) continue;
           // A session without a waiting prompt ignores this, so trying every URI form is safe.
-          try { await vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }); } catch (e) { errors.push(String(e.message).slice(0, 120)); }
+          try { await settleWithin(vscode.commands.executeCommand(command, { sessionResource: vscode.Uri.parse(r) }), 5000); } catch (e) { errors.push(String(e.message).slice(0, 120)); }
         }
       }
     } else {
@@ -205,8 +241,11 @@ async function loop() {
         if (job.id <= after) continue;
         after = job.id;
         if (!folders().some((x) => norm(x) === norm(job.workspace))) continue; // another window's job
+        if (job.target && job.target !== INSTANCE) continue; // targeted at another window's helper
+        log('job ' + job.id + ' ' + job.kind + ' start');
         const { errors, info } = await runJob(job);
-        call('POST', '/vscode/result', { id: job.id, errors, info }, 5000).catch(() => {});
+        log('job ' + job.id + ' ' + job.kind + (errors.length ? ' failed: ' + errors.join('; ') : ' ok'));
+        call('POST', '/vscode/result', { id: job.id, errors, info }, 5000).catch((e) => log('job ' + job.id + ' result not delivered: ' + String(e && e.message).slice(0, 100)));
       }
     } catch (e) {
       report('waiting', String(e && e.message).slice(0, 120));

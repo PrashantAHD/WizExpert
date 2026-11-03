@@ -30,6 +30,8 @@ from .sessions import (
 )
 
 ATTEMPT_SECONDS = 30.0
+PROBE_SECONDS = 10.0  # quick liveness probe before a start_chat job
+START_SECONDS = 40.0  # wait for the helper's answer to start_chat
 FILES_REFRESH = 6.0
 MAX_RUNS = 50
 ACTIVE = ("starting", "running", "input_needed", "handed_off")
@@ -324,15 +326,41 @@ class RunManager:
             self._runs[run_id] = run
             self._save()
         if self._async:
-            threading.Thread(target=self._launch, args=(run,), daemon=True).start()
+            threading.Thread(target=self._launch, args=(run, ensure_helper), daemon=True).start()
         else:
-            self._launch(run)
+            self._launch(run, ensure_helper)
         return run
 
     def _claimed(self) -> set[str]:
         return {r.session_id for r in self._runs.values() if r.session_id}
 
-    def _launch(self, run: Run) -> None:
+    def _healthy_target(
+        self, run: Run, workspace: str, ensure_helper: Callable[[], bool] | None
+    ) -> str | None:
+        """An instance that just answered a quick probe, recovering (new window) when needed."""
+        instance = self.bridge.healthy_instance(workspace)
+        if instance:
+            probe = self.bridge.wait_result(
+                self.bridge.post_job({"kind": "probe", "workspace": workspace, "target": instance}),
+                PROBE_SECONDS,
+            )
+            if probe is not None and not probe.get("errors"):
+                return instance
+            run.attempts.append("helper probe: " + _result_text(probe) + " (marked unhealthy)")
+            self.bridge.mark_unhealthy(instance)
+        return self._recover_helper(run, workspace, ensure_helper)
+
+    def _recover_helper(
+        self, run: Run, workspace: str, ensure_helper: Callable[[], bool] | None
+    ) -> str | None:
+        if ensure_helper is not None:
+            try:
+                ensure_helper()
+            except RunError as error:
+                run.attempts.append("helper recovery: " + short(str(error), 200))
+        return self.bridge.healthy_instance(workspace)
+
+    def _launch(self, run: Run, ensure_helper: Callable[[], bool] | None = None) -> None:
         workspace = str(self.config.resolved_workspace())
         job = {
             "kind": "start_chat",
@@ -342,12 +370,22 @@ class RunManager:
             "newChatWait": self.config.new_chat_wait_ms,
         }
         try:
-            if self.bridge.helper_connected(workspace):
-                # One helper attempt only: a second "start" could create a duplicate chat (and run).
-                result = self.bridge.wait_result(self.bridge.post_job(job), 40.0)
+            target = self._healthy_target(run, workspace, ensure_helper)
+            for attempt in range(2 if target else 0):
+                # The retry only happens after a recovery and only when no chat for this prompt
+                # appeared (_await_session), so a duplicate chat (and run) cannot be created.
+                result = self.bridge.wait_result(
+                    self.bridge.post_job({**job, "target": target}), START_SECONDS
+                )
                 run.attempts.append("helper: " + _result_text(result))
                 if self._await_session(run, ATTEMPT_SECONDS):
                     return
+                if result is not None and not result.get("errors"):
+                    break  # the helper reported success: do not start another chat
+                self.bridge.mark_unhealthy(target)
+                target = None if attempt else self._recover_helper(run, workspace, ensure_helper)
+                if target is None:
+                    break
             if self.config.allow_cli_fallback:
                 if self.helper_note and not self.bridge.helper_connected(workspace):
                     run.attempts.append("helper unavailable: " + short(self.helper_note, 160))
@@ -397,6 +435,29 @@ class RunManager:
             {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
             for r in runs
         ]
+
+    def reset_history(self) -> dict[str, Any]:
+        """Forget the console's own run index so Dashboard/History start empty.
+
+        Only runs.json (the website's index) is touched: it is moved aside to a timestamped
+        backup next to it, never deleted. Deliverables, work-item folders, VS Code session logs
+        and workflow configuration are not read or changed. Refused while any run is active.
+        """
+        with self._lock:
+            runs = list(self._runs.values())
+            if any(r.status in ACTIVE or r.status == "starting" for r in runs):
+                raise RunError("A run is still active; stop or finish it before resetting history.")
+            backup = ""
+            if self._index.is_file():
+                stamp = time.strftime("%Y%m%d-%H%M%S")
+                name = f"runs.json.reset-{stamp}-{secrets.token_hex(2)}.bak"
+                try:
+                    os.replace(self._index, self._index.with_name(name))
+                except OSError:
+                    raise RunError("Could not back up the run index; nothing was reset.") from None
+                backup = name
+            self._runs.clear()
+        return {"cleared": len(runs), "backup": backup}
 
     def view(self, run_id: str, since: int = 0) -> dict[str, Any]:
         run = self.get(run_id)
@@ -489,6 +550,8 @@ class RunManager:
             self.bridge.post_job({"kind": "probe", "workspace": workspace}), 20.0
         )
         if result is None or result.get("errors"):
+            if result is None:
+                self.bridge.mark_workspace_unhealthy(workspace)  # lets connect recovery open one
             raise RunError("The probe failed: " + _result_text(result))
         info = result.get("info") or {}
         names = [str(c) for c in info.get("commands", [])][:400]
