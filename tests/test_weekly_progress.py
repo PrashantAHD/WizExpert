@@ -59,7 +59,8 @@ def test_resolved_in_period_stays_then_drops_next_period():
 
 
 @pytest.mark.parametrize("stamp,state", [
-    ("2026-10-26", "resolved"), ("2026-11-02", "resolved"),          # date-only, both ends inclusive
+    ("2026-10-26", "resolved"),
+    ("2026-11-02", "resolved"),  # date-only, both ends inclusive
     ("2026-10-25", "dropped"),
     ("2026-10-26T00:00:00Z", "resolved"), ("2026-11-01T23:59:59Z", "resolved"),
     ("2026-10-25T23:59:59Z", "dropped"), ("2026-11-02T00:00:00Z", "resolved"),
@@ -74,8 +75,10 @@ def test_resolved_window_boundaries(stamp, state):
 
 def test_resolved_in_scope_owner_included_out_of_scope_excluded():
     ok = row("a", "RESOLVED", owner="Kimrah B", resolved_at="2026-10-30", resolution_evidence="[e]")
-    other = row("b", "RESOLVED", owner="Someone Else", resolved_at="2026-10-30", resolution_evidence="[e]")
-    no_ev = row("c", "RESOLVED", owner="Someone Else", resolved_at="2026-10-30")  # out of scope: ignored
+    other = row("b", "RESOLVED", owner="Someone Else", resolved_at="2026-10-30",
+                resolution_evidence="[e]")
+    # out of scope: ignored
+    no_ev = row("c", "RESOLVED", owner="Someone Else", resolved_at="2026-10-30")
     data = build(prev({"item_id": "b", "state": "carried"}), [ok, other, no_ev])
     assert states(data) == {"a": "resolved"}
     with pytest.raises(wp.WeeklyDataError):  # in-scope owner still needs evidence
@@ -151,7 +154,8 @@ def test_rule_aggregated_rows_contribute_weighted_counts():
     rows = [row("r1", rule_id="wc-id-1", issue_count=2700, rule_name="[n1]"),
             row("r2", rule_id=uuid, issue_count=17, rule_name="[n2]"),
             row("p1"), row("p2")]  # plain rows weigh 1
-    res = [row(f"x{n}", "RESOLVED", owner="Syed", resolved_at="2026-10-30", resolution_evidence="[e]")
+    res = [row(f"x{n}", "RESOLVED", owner="Syed", resolved_at="2026-10-30",
+               resolution_evidence="[e]")
            for n in range(30)]
     data = build(prev({"item_id": "r1", "state": "carried"}), rows + res)
     c = data["counts"]
@@ -169,8 +173,9 @@ def test_rule_aggregated_row_renders_rule_id_and_count():
     assert "display_title" not in plain and wp.display_title(plain) == "[t plain]"
     one = {"rule_id": "wc-id-2", "rule_name": "[R]", "issue_count": 1}
     assert wp.display_title(one) == "[R] (wc-id-2) (1 issue)"
-    uid = "0cb0c36b-f8a1-4d3c-8849-2903ce7e71e3"
-    for bare in ({"rule_id": uid, "rule_name": uid}, {"rule_id": uid, "title": f"Wiz source rule {uid}"}):
+    uid = "00000000-0000-4000-8000-00000000abcd"
+    for bare in ({"rule_id": uid, "rule_name": uid},
+                 {"rule_id": uid, "title": f"Wiz source rule {uid}"}):
         title = wp.display_title({**bare, "issue_count": 2})
         assert title == f"{wp.UNNAMED_RULE} (2 issues)"
     assert wp.IN_PROGRESS_COLUMNS[-2:] == ("Current Status", "Blockers")

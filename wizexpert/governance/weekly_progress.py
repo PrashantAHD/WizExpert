@@ -44,7 +44,8 @@ SECTIONS = (  # weekly deck structure (owner-requested redesign, category versio
     "Thank you",
 )
 IN_PROGRESS_COLUMNS = (
-    "Issue / title", "Severity", "SNOW ticket number", "Assigned Team", "Current Status", "Blockers",
+    "Issue / title", "Severity", "SNOW ticket number", "Assigned Team", "Current Status",
+    "Blockers",
 )
 FORBIDDEN_PHRASES = (
     "assessment basis and limitations",
@@ -60,7 +61,8 @@ ITEM_STATES = ("carried", "new", "resolved", "dropped", "needs-status")
 def weight(item: Mapping[str, Any]) -> int:
     """Issues an item represents: issue_count for rule-aggregated rows, else 1."""
     count = item.get("issue_count")
-    if item.get("rule_id") and isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+    if (item.get("rule_id") and isinstance(count, int)
+            and not isinstance(count, bool) and count >= 0):
         return count
     return 1
 
@@ -135,7 +137,10 @@ def _day(value: Any) -> date | None:
 
 
 def _in_window(value: Any, period: WeeklyPeriod) -> str:
-    """Return "in", "before" or "after" the window; timestamps on the report-week Monday are included (end is Tuesday 00:00, exclusive)."""
+    """Return "in", "before" or "after" the window.
+
+    Timestamps on the report-week Monday are included (end is Tuesday 00:00, exclusive).
+    """
     text = str(value).strip()
     if len(text) > 10 and text[10] in "T ":
         stamp = datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -222,7 +227,8 @@ def build_weekly_dataset(
         if entry.get("rule_id"):
             count = entry.get("issue_count")
             if not _RULE_ID.match(str(entry["rule_id"])) or not _count_ok(count):
-                raise WeeklyDataError(f"{item_id}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0")
+                raise WeeklyDataError(
+                    f"{item_id}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0")
             entry["issue_count"] = int(count)
             entry["display_title"] = display_title(entry)
         if status != RESOLVED and row.get("owner_claims_closed"):

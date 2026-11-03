@@ -18,7 +18,7 @@ ISSUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}")
 ISO_DATE = re.compile(r"20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
 MONTH = re.compile(r"(20[2-9][0-9])-(0[1-9]|1[0-2])")
 NOTE_CHARS = re.compile(r"[A-Za-z0-9 ._-]{1,80}")
-SAFE_PROMPT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,3400}")
+SAFE_PROMPT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,4200}")
 SNOW_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,39}")
 WORK_ITEM_TEXT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,120}")
 CVE_TEXT = re.compile(r"[A-Za-z0-9 .,;:()/_-]{1,300}")
@@ -305,7 +305,8 @@ CATEGORIES: dict[str, Category] = {
         "weekly-progress-reporting",
         "Weekly Progress Reporting",
         "Prepare the Tuesday weekly progress report covering all current in-progress Wiz items "
-        "assigned to Prashant, Syed or Kimrah plus items resolved since the previous Monday (same owners).",
+        "assigned to Prashant, Syed or Kimrah plus items resolved since the previous Monday "
+        "(same owners).",
         (
             FieldSpec(
                 "reporting_monday",
@@ -352,17 +353,25 @@ CATEGORIES: dict[str, Category] = {
         ),
         "Weekly Progress Reporting category: the reporting Tuesday is {reporting_monday}; "
         "prepare the report for the complete current set of Wiz items in IN_PROGRESS assigned "
-        "to Prashant, Syed or Kimrah as of that day, plus RESOLVED items assigned to the same owners whose resolved_at is "
+        "to Prashant, Syed or Kimrah as of that day, plus RESOLVED items assigned to the same "
+        "owners whose resolved_at is "
         "from Monday {covered_start} 00:00 through Monday {covered_end} 00:00 "
         "(date-only values: both Mondays inclusive). "
         "{snow_reference}Fetch and map the SNOW ticket from Wiz read-only{previous_report}"
         "{snow_response}. "
         "This category depends on the Risk Issues and Daily Progress Reporting categories. "
-        "Update the previous weekly report instead of recreating the inventory. Reuse the "
-        "latest local Risk Issues and Daily Progress records and outputs for status, "
-        "remediation progress, SNOW ticket responses and email responses, and do not "
-        "re-collect them unnecessarily. Fetch only the current Wiz status read-only and "
-        "reconcile new responses. Never infer closure from an owner message. "
+        "Update the previous weekly report instead of recreating the inventory. Follow "
+        "retain-first evidence reuse: before any Wiz fetch, inspect the selected previous "
+        "weekly folder and the retained local Risk Issues and Daily Progress evidence for "
+        "rule, status, count, remediation progress, SNOW ticket response and email response "
+        "data, and do not re-collect them unnecessarily or re-fetch already retained rule, "
+        "status or count data. "
+        "Fetch from Wiz read-only only missing or conflicting details, then reconcile new "
+        "responses. Assignee optimization: when a Wiz issue rule ID has multiple underlying "
+        "IN_PROGRESS issues and assignee evidence is absent or conflicting, inspect one "
+        "representative underlying issue only, and apply its assignee to that rule grouped "
+        "rows only when the evidence is clearly rule consistent; otherwise retain the "
+        "ambiguity and do not guess. Never infer closure from an owner message. "
         "Items resolved during the covered period stay in this report with resolution and "
         "current-status evidence; drop them from the active carry-forward list of the next "
         "period unless they return to IN_PROGRESS, and keep the prior report unchanged as "
@@ -372,7 +381,7 @@ CATEGORIES: dict[str, Category] = {
         "Excel and standalone report HTML are retired. Work locally only: make no change "
         "in Wiz, ServiceNow or cloud and "
         "do not send email{note}",
-        max_prompt=3400,
+        max_prompt=4200,
     ),
     "monthly-governance-reporting": Category(
         "monthly-governance-reporting",

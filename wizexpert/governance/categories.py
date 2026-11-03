@@ -117,7 +117,8 @@ WEEKLY_PROGRESS = Category(
     ("collection", "generation", "handoff"),
     (
         "Deliver on Tuesdays (owner-requested rule).",
-        "Scope is all current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah, plus resolved items in the window.",
+        "Scope is all current Wiz items in IN_PROGRESS assigned to Prashant, Syed or Kimrah, "
+        "plus resolved items in the window.",
         "Owner-requested redesign (category version 3): the primary editable deck no longer "
         "retains the monthly operational slides. Slide 1 is the approved cover, slide 2 the "
         "executive summary (carried-forward, new and resolved-this-period counts plus key "
@@ -140,8 +141,10 @@ WEEKLY_PROGRESS = Category(
         "Fetch only the current read-only Wiz status and reconcile any new responses "
         "against the reused records.",
         "Never infer closure from an owner message; closure needs current Wiz status.",
-        "Weekly reports are issued Tuesday: all current owner-scoped IN_PROGRESS items are included, "
-        "plus RESOLVED items assigned to the same owners with resolved_at from the preceding Monday 00:00 through the "
+        "Weekly reports are issued Tuesday: all current owner-scoped IN_PROGRESS items are "
+        "included, "
+        "plus RESOLVED items assigned to the same owners with resolved_at from the preceding "
+        "Monday 00:00 through the "
         "report-week Monday 00:00 boundary (date-only: both Mondays inclusive). "
         "Items resolved during the covered window stay in that "
         "report with resolution and current-status evidence; the next period drops them "
