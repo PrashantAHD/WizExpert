@@ -463,6 +463,30 @@ def test_weekly_update_rejects_injection_and_missing_attachment(env):  # noqa: F
         )
 
 
+def test_stakeholder_response_saved_and_reply_draft_is_local(env):  # noqa: F811
+    from wizexpert.console import stakeholder
+
+    config, _workspace, _ = env
+    body = {
+        "work_item": "PHP2SHELL Campaign",
+        "sender": "Alex Smith",
+        "received_date": "2026-11-04",
+        "email_text": "Thanks, please confirm the remaining hosts",
+    }
+    stakeholder.save_response(config, body)
+    got = stakeholder.list_responses(config, "PHP2SHELL Campaign")
+    assert got[0]["sender"] == "Alex Smith" and got[0]["report_date"] == "2026-11-04"
+    for bad in ({**body, "received_date": "2026-13-40"}, {**body, "sender": "<x>"}):
+        with pytest.raises(ValueError):
+            stakeholder.save_response(config, bad)
+    values = categories.validate("daily-progress-reporting", {
+        "work_item": body["work_item"], "sender": body["sender"],
+        "received_date": body["received_date"], "email_text": body["email_text"],
+    }, "reply-stakeholder")
+    prompt = categories.build_prompt("daily-progress-reporting", values, None, "reply-stakeholder")
+    assert "Do not send it" in prompt and "BEGIN EMAIL TEXT" in prompt
+
+
 def test_weekly_diff_shows_week_over_week_changes(env):  # noqa: F811
     config, workspace, _ = env
     _weekly(workspace)

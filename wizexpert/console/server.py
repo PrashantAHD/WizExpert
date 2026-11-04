@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import imports, sessions
+from . import imports, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
 from .runs import RunError, RunManager
@@ -465,6 +465,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/stakeholder-response":
+                return self._json(
+                    HTTPStatus.OK,
+                    {"responses": stakeholder.list_responses(config, arg("work_item"))},
+                )
             if path == "/api/imports/weekly":
                 return self._json(HTTPStatus.OK, {"reports": imports.scan_weekly(config)})
             if path == "/api/imports/monthly":
@@ -515,6 +520,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 raise RunError(str(exc)) from None
             return self._json(HTTPStatus.OK, {"ok": True, "manual_milestones": saved})
+        if path == "/api/imports/stakeholder-response":
+            try:
+                saved = stakeholder.save_response(self.app.config, body)
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "response": saved})
         if path == "/api/imports/open":
             manager.open_deliverable(str(body.get("path", "")))
             return self._json(HTTPStatus.OK, {"ok": True})

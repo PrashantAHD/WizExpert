@@ -168,14 +168,29 @@ class RunManager:
             view.seq = base_seq
         return view
 
+    def _recover_orphan_handoff(self, run: Run) -> None:
+        """A handed_off run with no pending handoff can never resolve: mark it interrupted."""
+        with run.lock:
+            if run.status != "handed_off" or run.handoff is not None:
+                return
+            run.status = "interrupted"
+            run.message = "The handoff chat was not recorded; open VS Code to continue."
+            self._save()
+
     def _follow(self, run: Run) -> None:
         """Re-bind the run to the new chat once the current chat handed off to it."""
         sv = run.view
-        if sv is None or run.status in INACTIVE:
+        if run.status in INACTIVE:
+            return
+        if sv is None:
+            self._recover_orphan_handoff(run)
             return
         sv.poll()
         found = sv.handoff
         with run.lock:
+            if found is None and run.handoff is None and run.status == "handed_off":
+                self._recover_orphan_handoff(run)
+                return
             if found is not None and run.handoff is None:
                 if found["ahp"] == run.ahp_id:
                     return
@@ -558,6 +573,8 @@ class RunManager:
             now = self._clock()
             state = sv.status(now)
             with run.lock:
+                if run.status in ("completed", "stopped") and state == "handed_off":
+                    state = run.status  # a stale handoff in an old log never reopens a finished run
                 if run.status in ("running", "input_needed", "handed_off", "completed", "stopped"):
                     changed = run.status != state
                     run.status = state

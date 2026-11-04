@@ -46,7 +46,11 @@ it keeps the old behavior. Template overrides use `risk-issues` (New) or
 `risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`, `follow-up-email`, `reply-response`, `update-case`). Daily Progress
 also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
 name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
-work-item list and uses a single **Refresh** button for the selected item. Monthly Governance
+work-item list and uses a single **Refresh** button for the selected item. Each work-item card also has
+**Record Response**: enter the stakeholder's sender name, received date and response text (saved
+locally in the console state folder, one entry per work item and received date), then
+**Generate Reply Draft (not sent)** starts a run that drafts a reply locally from today's report and
+saved evidence. Nothing is sent and no Wiz, ServiceNow or cloud change is made. Monthly Governance
 remains a single-form category.
 
 ### Weekly Progress Reporting inputs
@@ -390,6 +394,9 @@ status "Handed off - waiting for new chat", and is re-bound to the new chat (fou
 agent-host database, else by the handoff prompt as the first message of a session created after
 the handoff). Status, progress, approvals, Stop, Open chat and output files then follow the new
 chat; successive handoffs chain. The chain (and an unresolved handoff) is saved in `runs.json`.
+A run marked `handed_off` with no recorded handoff (for example a damaged or hand-edited
+`runs.json`) cannot resolve, so the next refresh marks it `interrupted` and saves that atomically;
+it never stays active forever.
 If the new chat never appears within 30 minutes the run becomes "Interrupted".
 
 ## Safety properties
