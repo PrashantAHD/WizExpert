@@ -1,0 +1,25 @@
+{
+  "chat.tools.terminal.enableAutoApprove": true,
+  "chat.tools.terminal.blockDetectedFileWrites": "all",
+  "chat.tools.terminal.autoApprove": {
+    "/^git (status|diff|log|show|branch --show-current)\\b/": true,
+    "/^(Get-ChildItem|Get-Content|Select-String|Test-Path|Get-Location)\\b/": true,
+    "/^git\\b.*output/": false,
+    "/[<>|;&`]/": false,
+    "/\\\\\\\\/": false,
+    "/^git (push|reset|clean|checkout --|rebase|commit --amend)\\b/": false,
+    "/^(Remove-Item|rm|del|rmdir|rd|Move-Item|Set-Content|Out-File)\\b/": false,
+    "/^(Send-MailMessage|Invoke-RestMethod|Invoke-WebRequest|curl|wget)\\b/": false,
+    "/^(az|aws|gcloud|kubectl|terraform|gh)\\b/": false
+  },
+  "chat.tools.edits.autoApprove": {
+    "**/.env*": false,
+    "**/*.pem": false,
+    "**/*.key": false,
+    "**/.vscode/**": false,
+    "**/.github/**": false,
+    "**/*.py": false,
+    "**/*.pth": false,
+    "**/{pyproject.toml,setup.cfg,pytest.ini,tox.ini}": false
+  }
+}

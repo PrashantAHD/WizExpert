@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import sessions
+from . import imports, sessions
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
 from .runs import RunError, RunManager
@@ -442,6 +442,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "deliverables folders; choose first report or enter a folder name.",
                 },
             )
+        if path.startswith("/api/imports/") or path == "/api/helper/mcp":
+            return self._api_imports(path, query)
         if path == "/api/runs/active":
             return self._json(HTTPStatus.OK, {"runs": manager.active()})
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
@@ -451,6 +453,39 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, manager.view(match.group(1), since))
             except (RunError, ValueError):
                 return self._error(HTTPStatus.NOT_FOUND, "Unknown run.")
+        self._error(HTTPStatus.NOT_FOUND, "Not found.")
+
+    def _api_imports(self, path: str, query: dict[str, list[str]]) -> None:
+        """Read-only listings of existing local deliverables plus the Wiz MCP status."""
+        config = self.app.config
+        arg = lambda name: (query.get(name) or [""])[0]  # noqa: E731
+        try:
+            if path == "/api/helper/mcp":
+                return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
+            if path == "/api/imports/risk-issues":
+                return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/weekly":
+                return self._json(HTTPStatus.OK, {"reports": imports.scan_weekly(config)})
+            if path == "/api/imports/monthly":
+                return self._json(HTTPStatus.OK, {"months": imports.scan_monthly(config)})
+            if path == "/api/imports/weekly-diff":
+                reports = imports.scan_weekly(config)
+                current = arg("current") or (reports[0]["name"] if reports else "")
+                previous = arg("previous")
+                if not previous:
+                    names = [r["name"] for r in reports]
+                    older = names[names.index(current) + 1 :] if current in names else []
+                    previous = older[0] if older else ""
+                if not previous:
+                    raise ValueError("There is no earlier weekly report to compare with.")
+                return self._json(HTTPStatus.OK, imports.weekly_diff(config, current, previous))
+            if path == "/api/imports/monthly-compare":
+                return self._json(
+                    HTTPStatus.OK,
+                    imports.compare_months(config, arg("month"), arg("other") or None),
+                )
+        except ValueError as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._error(HTTPStatus.NOT_FOUND, "Not found.")
 
     def _api_post(self, path: str, body: dict[str, Any]) -> None:
@@ -463,8 +498,36 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
-            run = manager.start(category, inputs, action, ensure_helper=ensure_helper)
+            run = manager.start(
+                category,
+                inputs,
+                action,
+                ensure_helper=ensure_helper,
+                gated=body.get("gated") is True,
+            )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/open":
+            manager.open_deliverable(str(body.get("path", "")))
+            return self._json(HTTPStatus.OK, {"ok": True})
+        if path == "/api/helper/mcp":
+            return self._json(
+                HTTPStatus.OK, manager.mcp_action(str(body.get("action", "")), body.get("server"))
+            )
+        if path == "/api/helper/focus":
+            run_id = body.get("run_id")
+            if run_id is not None and not (isinstance(run_id, str) and RUN_ID.fullmatch(run_id)):
+                raise RunError("Unknown run.")
+            return self._json(HTTPStatus.OK, {"ok": True, "note": manager.focus(run_id)})
+        match = re.fullmatch(r"/api/runs/([^/]+)/gate", path)
+        if match and RUN_ID.fullmatch(match.group(1)):
+            ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
+            result = manager.decide_gate(
+                match.group(1),
+                str(body.get("gate", "")),
+                str(body.get("decision", "")),
+                ensure_helper,
+            )
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/history/reset":
             if body.get("confirm") != "reset-console-history":
                 raise RunError('Send {"confirm": "reset-console-history"} to reset history.')

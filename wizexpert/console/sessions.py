@@ -58,6 +58,7 @@ MAX_PROGRESS = 400
 MAX_TEXT = 1500
 PERMISSION_FLICKER_SECONDS = 2.5  # auto-approved prompts resolve at once; do not flash them
 IDLE_COMPLETE_SECONDS = 45.0
+STALL_SECONDS = 60.0  # silent log with an open tool call: probably awaiting a confirmation
 SCAN_LIMIT = 500
 
 
@@ -469,6 +470,17 @@ class SessionView:
         ):
             return "completed"
         return "running"
+
+    def stalled(self, now: float | None = None, seconds: float = STALL_SECONDS) -> bool:
+        """Heuristic: a tool call has been open with no log activity for ``seconds``.
+
+        VS Code does not write every approval prompt to the session log, so a run that is still
+        "running" but silent while a tool call is open is probably waiting for a confirmation.
+        """
+        now = now or time.time()
+        if self.finished or self.pending(now) or not self.open_tools:
+            return False
+        return now - max(self.last_event, _mtime(self.path)) >= seconds
 
 
 def tool_summary(name: str, args: dict[str, Any]) -> str:

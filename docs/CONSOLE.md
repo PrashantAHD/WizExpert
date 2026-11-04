@@ -71,6 +71,94 @@ the response says so explicitly and the selector offers "None: this is the first
 (the prompt then states it is the first report). "Enter a folder name manually" remains as a
 fallback, also used when the listing fails; the agent confirms a typed folder exists.
 
+## Approvals, imports, Wiz MCP and reporting views
+
+All of these only read local files or ask the helper to run an allow-listed VS Code command.
+The console sends no email, changes nothing in Wiz, ServiceNow or cloud, and never handles
+passwords, MFA codes or tokens.
+
+### Approvals
+
+- **Settings template.** `scripts/console-workspace/settings.template.json` is a workspace
+  `.vscode/settings.json` template that auto-approves only read-only terminal commands
+  (`git status/diff/log/show` and read-only listing cmdlets) and keeps prompting for anything
+  that runs workspace code (any Python script, pytest, `verify.py`, `python -m wizexpert`),
+  redirects or chains commands, mentions `--output`, uses network-share paths, pushes, resets,
+  deletes, moves, writes files from the shell, sends
+  mail, calls the network or runs cloud CLIs. Edits to Python and build-config files, `.env`,
+  keys, `.vscode` and `.github` also keep prompting, so the agent cannot write code and run it
+  unprompted. Copy it into `<outer root>\.vscode\settings.json` (merge the
+  keys if the file exists). VS Code has no per-tool setting for MCP tools, so approve the
+  read-only Wiz MCP `discover` tool with **Always Allow** in VS Code once; leave `execute`
+  prompting because it can run mutations in principle (the agent rules keep it read-only).
+- **Waiting for approval in VS Code.** The run page shows the banner *Waiting for approval in
+  VS Code* with a **Focus VS Code** button when a tool-approval prompt is read from the session
+  log, or (heuristic) when a tool call has been open and the log silent for 60 seconds, because
+  VS Code does not log every prompt. **Focus VS Code** (`POST /api/helper/focus`) reveals the run's
+  chat through the helper and runs `code --reuse-window <workspace>` to raise the window, since
+  an extension cannot raise the OS window itself. Approving inside VS Code stays the only way to
+  answer prompts the console cannot press (see Allow / Skip above).
+- **Approval gates.** Weekly and Monthly runs, Weekly *Update* and Risk Issues *Resume* are created
+  *waiting for your approval*: nothing is handed to the agent yet. The run page shows the gates
+  *Collection plan* then *Generation* (the catalog also defines *Push*, for flows that publish;
+  no current flow uses it, and the console never pushes itself). **Approve** hands that stage's
+  prompt (the request plus a short stage instruction) to a new VS Code chat; **Reject** ends the
+  flow. Stage 1 runs in the same run; later gates start a follow-up run (`parent` / `child`) once
+  the earlier stage finished, so each chat has its own log. Every decision (gate, decision, time)
+  is saved in `runs.json` with the run (`gates`, `decisions`). API: `POST /api/runs` accepts
+  `"gated": true` (always on for actions flagged gated), `POST /api/runs/<id>/gate` with
+  `{"gate", "decision": "approve"|"reject"}`.
+
+### Wiz MCP status
+
+The sidebar shows **Wiz MCP connected / needs sign-in / stopped / not configured** with Start,
+Stop, Authenticate and Refresh. The server finds MCP server *names* containing "wiz" in the
+workspace `.vscode/mcp.json` and the user `mcp.json` (names only; settings, headers and
+environment are never read into a response or job). The helper reports whether Wiz tools are
+registered in `vscode.lm.tools` (connected) and runs VS Code's own `workbench.mcp.startServer` /
+`stopServer` / `restartServer` commands for the buttons. Authenticate restarts the server so
+VS Code opens the SSO page in your browser; finish sign-in there. `GET /api/helper/mcp`,
+`POST /api/helper/mcp {"action": "start|stop|auth|list"}`.
+Limitation: VS Code exposes no public API for MCP server state, so *needs sign-in* is inferred
+(no tools yet within 10 minutes of a Start/Authenticate from the console) and the MCP command
+arguments may differ between VS Code versions; if a button has no effect, use the `list`
+action (MCP: List Servers) in VS Code.
+
+### Imported work and previous reports
+
+Read-only scans of local folders under the workspace's `deliverables\` folder (configured with
+`--workspace`); source files are never modified, evidence and archive folders are not listed, and
+only names, dates and counts are returned (plus the small `weekly-progress-data.json` and
+`*.governance.json` snapshots for the comparisons). **View** opens the file in the system
+viewer through the helper (`open_external`; `.pdf .pptx .docx .xlsx .html .eml .msg .md .csv .txt`
+only, confined to `deliverables`).
+
+- **Risk Issues** (*In-progress* stage): each folder under `deliverables\Risk-Issues` is a card
+  with status *In-Progress*, rule/issue IDs (from `issue_ids` in the case record, else from the
+  folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
+  client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
+  **legacy** tag when the case has no rebuilt-workflow record (`*.workflow.json` or
+  `case-gate-plan*`). **Resume** (action `resume-case`, gated) starts from the retained evidence
+  using the `templates/risk-issues` logic; it is disabled when the case has no `evidence` folder.
+  `GET /api/imports/risk-issues`.
+- **Weekly Progress** (*Previous reports* and *New report*): lists `deliverables\Weekly-Progress-Reporting`
+  (newest first) with Open PDF / PPTX / email draft. **Update** exists for the latest report only
+  (enforced by the backend): paste the internal and/or client response (quoted data between
+  BEGIN/END RESPONSES, up to 1500 characters each) or name a local file under `deliverables`;
+  the agent archives the prior version first, regenerates from retained evidence, writes a change
+  log and runs the validators; the email stays a draft. **New report** is the existing form
+  behind the approval gates: the previous report is the baseline, collection is reuse-first, then
+  the post-collection check, generation and validators. **Compare with <previous week>** (and the
+  *Week-over-week diff* button on a finished run) shows count changes and added / removed /
+  changed items from the retained `weekly-progress-data.json` files
+  (`GET /api/imports/weekly-diff?current=&previous=`).
+- **Monthly Governance** (*Previous months* and *New month*): lists months from the workbook,
+  executive dashboard / deck and `*.governance.json` names; a month is **PRELIMINARY** unless a
+  non-preliminary workbook, dashboard or deck exists, otherwise *final*. **Compare vs previous
+  month** shows parity (workbook, dashboard and governance.json present in both) and snapshot
+  count deltas (`GET /api/imports/monthly-compare?month=YYYY-MM`). **New month** is gated and its
+  stage prompts follow the governance runbook (`docs/GOVERNANCE-RUNBOOK.md`).
+
 ## Navigation, drafts and accessibility
 
 - Real, shareable URLs (`history.pushState`): `/`, `/workflow/<id>[/<stage>[/<action>]]`, `/run/<id>`. Back and Forward work; old `#workflow=` / `#run=` links are upgraded in place.
