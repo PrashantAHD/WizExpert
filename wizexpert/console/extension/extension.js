@@ -27,7 +27,17 @@ const COMMANDS = {
   accept: 'workbench.action.chat.acceptTool',
   skip: 'workbench.action.chat.skipTool',
   trust: 'workbench.trust.manage',
+  // Revealing the chat view (first that exists is used).
+  focusCandidates: ['workbench.panel.chat.view.copilot.focus', 'workbench.action.chat.focusInput'],
+  // VS Code's own MCP commands; they take the configured server name.
+  mcp: {
+    start: 'workbench.mcp.startServer',
+    stop: 'workbench.mcp.stopServer',
+    auth: 'workbench.mcp.restartServer',
+    list: 'workbench.mcp.listServer',
+  },
 };
+const EXTERNAL_EXT = ['.pdf', '.pptx', '.docx', '.xlsx', '.html', '.eml', '.msg', '.md', '.csv', '.txt'];
 let stopped = false;
 let output = null;
 let status = null;
@@ -205,6 +215,45 @@ async function runJobUnbounded(job) {
       if (!allowed) throw new Error('rejected file path');
       const o = await settleWithin(vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target)), 8000);
       if (o.error) throw new Error('VS Code could not open the file: ' + String(o.error.message || o.error));
+      info.note = 'opened';
+    } else if (job.kind === 'focus') {
+      // Reveal the run's chat (when known) and the chat view in this window. The extension API
+      // cannot raise the OS window itself; the console also runs `code --reuse-window` for that.
+      if (job.ahp) await openChat(job.ahp, job.openWait);
+      const all = await commandsWithin(5000);
+      const cmd = COMMANDS.focusCandidates.find((c) => all.includes(c));
+      if (cmd) await settleWithin(vscode.commands.executeCommand(cmd), 5000);
+      info.note = 'focused';
+    } else if (job.kind === 'mcp_status') {
+      // Wiz MCP tools registered in this window mean the server is running and signed in.
+      const tools = (vscode.lm && vscode.lm.tools) || [];
+      const re = /wiz/i;
+      info.toolCount = tools.filter((t) => re.test(String(t.name || ''))).length;
+      info.commands = (await commandsWithin(5000)).filter((c) => /^workbench\.mcp\./.test(c)).slice(0, 40);
+    } else if (job.kind === 'mcp_action') {
+      const server = String(job.server || '');
+      if (!AGENT.test(server)) throw new Error('rejected server name');
+      const all = await commandsWithin(5000);
+      const wanted = COMMANDS.mcp[job.action];
+      if (!wanted) throw new Error('bad MCP action');
+      const cmd = [wanted].concat(job.action === 'auth' ? [COMMANDS.mcp.start] : []).find((c) => all.includes(c));
+      if (!cmd) throw new Error('VS Code has no MCP command ' + wanted + ' (update VS Code or use the MCP: List Servers command).');
+      // Authentication happens in the user's SSO browser window; no credential passes through here.
+      const r = await settleWithin(job.action === 'list' ? vscode.commands.executeCommand(cmd) : vscode.commands.executeCommand(cmd, server), 8000);
+      if (r.error) throw new Error('VS Code refused the MCP command: ' + String(r.error.message || r.error));
+      info.note = job.action + ' sent' + (r.timedOut ? ' (command still pending)' : '');
+      info.command = cmd;
+    } else if (job.kind === 'open_external') {
+      const target = String(job.path || '');
+      const ext = path.extname(target).toLowerCase();
+      const allowed = folders().some((folder) => {
+        const base = norm(folder);
+        const candidate = norm(target);
+        return candidate.startsWith(base + '/');
+      });
+      if (!allowed || !EXTERNAL_EXT.includes(ext)) throw new Error('rejected file path');
+      const ok = await vscode.env.openExternal(vscode.Uri.file(target));
+      if (!ok) throw new Error('The system viewer did not open the file.');
       info.note = 'opened';
     } else if (job.kind === 'tool') {
       const command = job.action === 'accept' ? COMMANDS.accept : job.action === 'skip' ? COMMANDS.skip : null;

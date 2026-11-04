@@ -500,13 +500,18 @@ def test_category_json_exposes_stages_and_actions():
     risk = categories.CATEGORIES["risk-issues"].to_json()
     assert [s["id"] for s in risk["stages"]] == ["new", "in-progress"]
     assert [a["id"] for a in risk["actions"]] == [
-        "new", "risk-accepted", "email-response", "update-status",
+        "new", "risk-accepted", "email-response", "update-status", "resume-case",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
     assert [s["id"] for s in daily["stages"]] == ["new", "in-progress"]
     assert [a["id"] for a in daily["actions"]] == ["new-work-item", "continue-work-item"]
     assert daily["work_items"] == ["PHP2SHELL Campaign"]
-    assert categories.CATEGORIES["monthly-governance-reporting"].to_json()["actions"] == []
+    monthly = categories.CATEGORIES["monthly-governance-reporting"].to_json()
+    assert [a["id"] for a in monthly["actions"]] == ["new"]
+    assert [s["id"] for s in monthly["stages"]] == ["new", "previous"]
+    weekly = categories.CATEGORIES["weekly-progress-reporting"].to_json()
+    assert [a["id"] for a in weekly["actions"]] == ["new", "update"]
+    assert monthly["imports"] == "monthly" and weekly["imports"] == "weekly"
 
 
 def test_risk_accepted_pasted_items_or_folder():

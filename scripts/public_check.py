@@ -24,6 +24,7 @@ PUBLIC_FILES = {
     ".vscode/stop-workflow-console.ps1",
     ".vscode/tasks.json",
     "scripts/console-workspace/tasks.json",
+    "scripts/console-workspace/settings.template.json",
     "wizexpert/console/static/assets/logo.svg",
     "wizexpert/console/static/assets/workflow-daily-progress.svg",
     "wizexpert/console/static/assets/workflow-monthly-governance.svg",

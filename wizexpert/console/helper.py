@@ -15,7 +15,7 @@ from pathlib import Path
 
 NAME = "wizexpert-console-helper"
 PUBLISHER = "local"
-VERSION = "0.1.9"
+VERSION = "0.2.0"
 SOURCE = Path(__file__).resolve().parent / "extension" / "extension.js"
 
 PACKAGE = {
