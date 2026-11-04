@@ -11,7 +11,9 @@ snapshots used for the comparison views).
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -147,7 +149,9 @@ def _artifacts(folder: Path, config: ConsoleConfig) -> dict[str, Any]:
     for entry in _children(folder, config):
         low = entry.name.lower()
         if entry.is_dir():
-            if low == "evidence":
+            # Legacy "evidence" or the "<case/rule-id>-evidence" convention (direct child only;
+            # symlinks are already excluded by _children).
+            if low == "evidence" or re.fullmatch(r"[a-z0-9][a-z0-9._-]*-evidence", low):
                 kinds["evidence"] = True
             elif low in ("archive", "archives"):
                 kinds["archives"] = True
@@ -176,6 +180,149 @@ def _artifacts(folder: Path, config: ConsoleConfig) -> dict[str, Any]:
     return {"present": [k for k, v in kinds.items() if v], "kinds": kinds, "files": files}
 
 
+_NEGATION = re.compile(
+    r"(?i)\b(no|not|never|without|unsent|none|nor|pending|awaiting|unconfirmed|before|until|"
+    r"if|draft|drafts|cannot|unable|n't)\b|n't"
+)
+_RESUME_PHRASE = re.compile(r"(?i)\bresume (collection|case)\b")
+MAX_SUMMARY = 240
+
+
+def _clauses(text: str) -> list[str]:
+    return [
+        c.strip()
+        for c in re.split(r"(?i)[.;]\s|\s+but\s+|\s+and then\s+|[.;]$", text)
+        if c and c.strip()
+    ]
+
+
+_CLIENT_RESPONSE = re.compile(
+    r"\b(client|customer)\s+response\b.*\b(received|logged|recorded)\b|"
+    r"\b(received|logged|recorded)\b.*\b(client|customer)\s+response\b|"
+    r"\bclient\s+response\s*:"
+)
+
+
+def _workflow_status(folder: Path, art: dict[str, Any]) -> dict[str, Any]:
+    """Status/milestones from the small ``*.workflow.json`` event text plus artifact presence.
+
+    A milestone is asserted only when a non-negated clause of an event summary says so;
+    otherwise neutral labels ("Reports present", "Email draft present") are used. Evidence
+    contents are never read and malformed or missing records fall back to a neutral label.
+    """
+    out: dict[str, Any] = {
+        "resumed": False,
+        "summary": "",
+        "current_status": "",
+        "milestones": [],
+        "client_response": False,
+        "record": "missing",
+    }
+    labels: list[str] = []
+    records = sorted(folder.glob("*.workflow.json"))
+    data = _load_json(records[0]) if records else None
+    out["manual"] = _manual_milestones(data)
+    events = data.get("events") if isinstance(data, dict) else None
+    if isinstance(events, list) and all(isinstance(e, dict) for e in events):
+        out["record"] = "ok"
+        for event in events:
+            summary = event.get("summary") if isinstance(event.get("summary"), str) else ""
+            stage = event.get("stage")
+            if (isinstance(stage, int) and not isinstance(stage, bool) and stage >= 2) or (
+                _RESUME_PHRASE.search(summary)
+            ):
+                out["resumed"] = True
+            for clause in _clauses(summary):
+                if _NEGATION.search(clause):
+                    continue
+                low = clause.lower()
+                if _CLIENT_RESPONSE.search(low):
+                    out["client_response"] = True
+                if re.search(r"\bticket\b.*\b(created|opened|raised|logged)\b|"
+                             r"\b(created|opened|raised|logged)\b.*\bticket\b", low):
+                    labels.append("Ticket created")
+                if re.search(r"\bemail\b.*\b(sent|delivered)\b", low):
+                    labels.append("Email sent")
+                if re.search(r"\b(reports?|workbook|deliverables?)\b.*\b(sent|delivered)\b", low):
+                    labels.append("Reports sent")
+                elif re.search(
+                    r"\b(reports?|workbook|deliverables?)\b.*\b(prepared|generated|updated)\b",
+                    low,
+                ):
+                    labels.append("Reports prepared")
+        if events:
+            last = events[-1]
+            text = last.get("summary") if isinstance(last.get("summary"), str) else ""
+            status = last.get("status") if isinstance(last.get("status"), str) else ""
+            out["summary"] = " ".join(text.split())[:MAX_SUMMARY]
+            out["current_status"] = re.sub(r"[^A-Za-z0-9 _-]", "", status)[:30].replace("_", " ")
+    kinds = art["kinds"]
+    if "Reports prepared" not in labels and "Reports sent" not in labels and kinds["report"]:
+        labels.append("Reports present")
+    if "Email sent" not in labels and (kinds["stakeholder_email"] or kinds["follow_up_email"]):
+        labels.append("Email draft present")
+    if out["record"] != "ok":
+        out["summary"] = "Workflow record missing or unreadable; status not available."
+    out["milestones"] = list(dict.fromkeys(labels))
+    return out
+
+
+MANUAL_MILESTONES = ("ticket_created", "email_sent", "reports_sent", "follow_up_sent")
+
+
+def _manual_milestones(data: Any) -> dict[str, bool]:
+    """User-confirmed milestones from the workflow record; unchecked when absent/malformed."""
+    raw = data.get("manual_milestones") if isinstance(data, dict) else None
+    raw = raw if isinstance(raw, dict) else {}
+    return {key: raw.get(key) is True for key in MANUAL_MILESTONES}
+
+
+def set_manual_milestone(
+    config: ConsoleConfig, name: Any, milestone: Any, checked: Any
+) -> dict[str, bool]:
+    """Persist one user-confirmed milestone in the case's existing ``*.workflow.json``.
+
+    Local file edit only: other fields (events, issue ids, ...) are preserved; the write is
+    atomic (temp file + replace), UTF-8 without BOM. Raises ValueError for every problem.
+    """
+    if not isinstance(name, str) or not SAFE_NAME.fullmatch(name):
+        raise ValueError("Invalid case folder name.")
+    if not isinstance(milestone, str) or milestone not in MANUAL_MILESTONES:
+        raise ValueError("Unknown milestone; allowed: " + ", ".join(MANUAL_MILESTONES) + ".")
+    if not isinstance(checked, bool):
+        raise ValueError("checked must be true or false.")
+    if checked is not True:
+        raise ValueError("A saved confirmation is one-time and cannot be unticked.")
+    base = _base(config, RISK_DIR)
+    folder = confine(base / name, config.resolved_workspace()) if base is not None else None
+    if folder is None or not folder.is_dir() or folder.is_symlink() or folder.parent != base:
+        raise ValueError("No such Risk Issues case folder under the deliverables folder.")
+    records = sorted(folder.glob("*.workflow.json"))
+    if not records:
+        raise ValueError("This case has no workflow record; milestones cannot be saved.")
+    record = records[0]
+    data = _load_json(record)
+    if not isinstance(data, dict):
+        raise ValueError("The workflow record is unreadable; milestones cannot be saved.")
+    current = data.get("manual_milestones")
+    current = dict(current) if isinstance(current, dict) else {}
+    if current.get(milestone) is True:
+        raise ValueError("This confirmation is already saved and cannot be changed.")
+    current[milestone] = True
+    data["manual_milestones"] = current
+    payload = (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    tmp = record.with_name(record.name + ".tmp")
+    try:
+        tmp.write_bytes(payload)
+        os.replace(tmp, record)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        reason = exc.strerror or "I/O error"
+        raise ValueError(f"Could not save the workflow record: {reason}") from None
+    return _manual_milestones(data)
+
+
 def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
     """Existing Risk Issues case folders as dashboard cards (newest first, at most 100)."""
     base = _base(config, RISK_DIR)
@@ -191,6 +338,8 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         # "Legacy": created before the rebuilt case workflow, i.e. no workflow record / gate
         # plan and no retained evidence folder to resume from.
         legacy = not art["kinds"]["workflow_record"]
+        wf = _workflow_status(folder, art)
+        has_evidence = art["kinds"]["evidence"]
         cases.append(
             {
                 "name": folder.name,
@@ -201,19 +350,39 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
                 "modified": modified,
                 "artifacts": art["present"],
                 "files": art["files"][:12],
-                "can_resume": art["kinds"]["evidence"],
+                "can_resume": has_evidence and not wf["resumed"],
+                "can_update": has_evidence and wf["resumed"],
+                "resumed": wf["resumed"],
+                "milestones": wf["milestones"],
+                "manual_milestones": wf["manual"],
+                "manual_editable": wf["record"] == "ok",
+                "workflow_summary": wf["summary"],
+                "client_response": wf["client_response"],
+                "workflow_status": wf["current_status"],
             }
         )
     cases.sort(key=lambda c: (-c["modified"], c["name"]))
     return cases[:MAX_ITEMS]
 
 
-def require_case(config: ConsoleConfig, name: str) -> dict[str, Any]:
-    """The scanned case with this folder name, or ValueError (used before a Resume run)."""
+def require_case(config: ConsoleConfig, name: str, mode: str = "resume") -> dict[str, Any]:
+    """The scanned case with this folder name, or ValueError.
+
+    ``mode``: ``resume`` (one-time imported-case continuation), ``update`` (already resumed
+    case) or ``any`` (the case merely has to exist, e.g. for local email drafts).
+    """
     for case in scan_risk_cases(config):
         if case["name"] == name:
-            if not case["can_resume"]:
-                raise ValueError("This case has no retained evidence folder to resume from.")
+            if mode == "resume":
+                if case["resumed"]:
+                    raise ValueError("This case was already resumed; use Update instead.")
+                if not case["can_resume"]:
+                    raise ValueError("This case has no retained evidence folder to resume from.")
+            elif mode == "update":
+                if not case["resumed"]:
+                    raise ValueError("Resume this case first; Update applies after a resume.")
+                if not case["can_update"]:
+                    raise ValueError("This case has no retained evidence folder to update from.")
             return case
     raise ValueError("No such Risk Issues case folder under the deliverables folder.")
 

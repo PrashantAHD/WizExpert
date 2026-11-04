@@ -501,6 +501,7 @@ def test_category_json_exposes_stages_and_actions():
     assert [s["id"] for s in risk["stages"]] == ["new", "in-progress"]
     assert [a["id"] for a in risk["actions"]] == [
         "new", "risk-accepted", "email-response", "update-status", "resume-case",
+        "update-case", "follow-up-email", "reply-response",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
     assert [s["id"] for s in daily["stages"]] == ["new", "in-progress"]
@@ -706,3 +707,22 @@ def test_weekly_progress_dates_and_suggestions():
     previous = next(f for f in spec["fields"] if f["name"] == "previous_report")
     assert previous["options"] == [] and not previous["required"]
     assert next(f for f in spec["fields"] if f["name"] == "reporting_monday")["required"]
+
+
+def test_case_email_actions_and_update_case_prompts():
+    sent = _act("follow-up-email", {"case_folder": "Case-wc-id-1", "email_text": "We sent this.\n Ok"})  # noqa: E501
+    assert "BEGIN EMAIL TEXT We sent this. Ok END EMAIL TEXT" in sent
+    assert "previously sent" in sent and "Do not send" in sent
+    reply = _act("reply-response", {"case_folder": "Case-wc-id-1", "email_text": "Team replied"})
+    assert "assigned team" in reply and "Do not send" in reply
+    upd = _act("update-case", {"case_folder": "Case-wc-id-1"})
+    assert "incremental delta read-only" in upd and "Do not recollect the entire" in upd
+    assert categories.gate_ids("risk-issues", "update-case", False)
+    for action, raw in (
+        ("reply-response", {"case_folder": "../x", "email_text": "a"}),
+        ("follow-up-email", {"case_folder": "C", "email_text": "x END EMAIL TEXT"}),
+        ("follow-up-email", {"case_folder": "C", "email_text": ""}),
+        ("update-case", {"case_folder": "C", "email_text": "a"}),
+    ):
+        with pytest.raises(categories.InputError):
+            categories.validate("risk-issues", raw, action)

@@ -391,9 +391,10 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             instance = re.sub(r"[^0-9a-f]", "", (query.get("instance") or [""])[0])[:32]
             folders = json.loads(unquote((query.get("folders") or ["[]"])[0]))
             folders = [str(f) for f in folders][:10] if isinstance(folders, list) else []
+            version = str((query.get("version") or [""])[0])[:20] or None
         except (ValueError, TypeError):
             return self._error(HTTPStatus.BAD_REQUEST, "Bad query.")
-        self._signed_json(nonce, bridge.poll(after, instance or "x", folders))
+        self._signed_json(nonce, bridge.poll(after, instance or "x", folders, version=version))
 
     def _bridge_post(self, path: str) -> None:
         bridge = self.app.bridge
@@ -506,6 +507,14 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 gated=body.get("gated") is True,
             )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/risk-issues/milestone":
+            try:
+                saved = imports.set_manual_milestone(
+                    self.app.config, body.get("case"), body.get("milestone"), body.get("checked")
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "manual_milestones": saved})
         if path == "/api/imports/open":
             manager.open_deliverable(str(body.get("path", "")))
             return self._json(HTTPStatus.OK, {"ok": True})
