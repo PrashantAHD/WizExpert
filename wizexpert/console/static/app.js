@@ -821,8 +821,14 @@ function riskCasesPanel(category) {
           clear(draftBox);
           const text = h("textarea", { rows: 4, maxlength: 1500, "aria-label": prompt, placeholder: prompt });
           const go1 = h("button", { type: "button", class: "small" }, "Draft locally (not sent)");
-          go1.addEventListener("click", () => startCase(go1, actionId, { case_folder: c.name, email_text: text.value }, true));
-          draftBox.append(text, go1);
+          const status = h("p", { class: "help", role: "status" }, "Up to 1500 characters; unsupported symbols are replaced automatically.");
+          go1.addEventListener("click", async () => {
+            status.className = "help"; status.setAttribute("role", "status");
+            status.textContent = "Starting draft...";
+            await startCase(go1, actionId, { case_folder: c.name, email_text: text.value }, true);
+            if (message.textContent) { status.textContent = message.textContent; status.className = "bad"; status.setAttribute("role", "alert"); }
+          });
+          draftBox.append(text, go1, status);
         });
         return b;
       };

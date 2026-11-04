@@ -37,6 +37,7 @@ FILES_REFRESH = 6.0
 MAX_RUNS = 50
 ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
 HANDOFF_WAIT_SECONDS = 1800.0
+LATE_START_MESSAGE = "The console stopped before this run started."
 INACTIVE = ("completed", "stopped", "interrupted", "not_started", "rejected")
 MCP_HINT_SECONDS = 600.0
 MCP_ACTIONS = ("start", "stop", "auth", "list")
@@ -145,10 +146,7 @@ class RunManager:
                 if sid:
                     run.session_id, run.status, run.message = sid, "running", ""
                 else:
-                    run.status, run.message = (
-                        "not_started",
-                        "The console stopped before this run started.",
-                    )
+                    run.status, run.message = ("not_started", LATE_START_MESSAGE)
             if run.status in ACTIVE and run.session_id:
                 run.view = self._make_view(run, seed=True)
 
@@ -316,6 +314,8 @@ class RunManager:
         """Non-terminal runs (newest first) so a refreshed page or new tab can re-attach."""
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)
+        for r in runs:
+            self._rebind_late_session(r)
         return [
             {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
             for r in runs
@@ -409,6 +409,20 @@ class RunManager:
                 )
         except ValueError as error:
             raise RunError(str(error)) from None
+
+    def _rebind_late_session(self, run: Run) -> None:
+        """A chat can appear shortly after a restart; rebind only the exact restart-orphan case."""
+        if run.status != "not_started" or run.message != LATE_START_MESSAGE or run.session_id:
+            return
+        try:
+            sid = self.finder.find(run.prompt, run.created, self._claimed())
+        except Exception:  # noqa: BLE001 - recovery is best effort
+            return
+        if sid:
+            with run.lock:
+                run.session_id, run.status, run.message = sid, "running", ""
+                run.view = self._make_view(run, seed=True)
+            self._save()
 
     def _claimed(self) -> set[str]:
         return {r.session_id for r in self._runs.values() if r.session_id}
@@ -505,6 +519,7 @@ class RunManager:
             run = self._runs.get(run_id)
         if run is None:
             raise RunError("Unknown run.")
+        self._rebind_late_session(run)
         return run
 
     def history(self, limit: int = 20) -> list[dict[str, Any]]:

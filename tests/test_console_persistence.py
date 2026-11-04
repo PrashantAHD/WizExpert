@@ -121,3 +121,33 @@ def test_run_with_no_chat_found_after_restart_is_not_started(env):  # noqa: F811
     manager = _manager(config)
     assert manager.active() == []
     assert manager.get("20260101T000000Z-aaaaaa").status == "not_started"
+
+
+def test_not_started_run_is_rebound_when_its_session_appears_late(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager_with(config, bridge)
+    with FakeHelper(bridge, workspace, home):
+        run = manager.start("risk-issues", {"issue_ids": "wc-id-7"})
+        sid = run.session_id
+        # Persisted by an earlier restart that did not see the session yet.
+        run.status, run.session_id = "not_started", ""
+        run.message = "The console stopped before this run started."
+        manager._save()
+        again = _manager_with(config, Bridge("t" * 64))
+        assert again.get(run.id).status == "running"
+        assert again.get(run.id).session_id == sid
+        assert _manager_with(config, Bridge("t" * 64)).get(run.id).session_id == sid
+
+
+def test_other_not_started_runs_are_not_revived(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager_with(config, bridge)
+    with FakeHelper(bridge, workspace, home):
+        run = manager.start("risk-issues", {"issue_ids": "wc-id-7"})
+        run.status, run.session_id = "not_started", ""
+        run.message = "VS Code did not start the chat."
+        assert manager.get(run.id).status == "not_started"
+        run.status, run.message = "stopped", "The console stopped before this run started."
+        assert manager.get(run.id).status == "stopped"
