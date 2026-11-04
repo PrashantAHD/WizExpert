@@ -768,24 +768,65 @@ function riskCasesPanel(category) {
     clear(list);
     if (!res.cases.length) { list.append(h("p", { class: "help" }, "No existing case folders were found under deliverables/Risk-Issues.")); return; }
     for (const c of res.cases) {
-      const resume = h("button", { type: "button", disabled: !c.can_resume, title: c.can_resume ? "Start a run from the retained evidence" : "No retained evidence folder to resume from" }, "Resume");
-      resume.addEventListener("click", async () => {
-        resume.disabled = true; message.textContent = ""; message.className = "bad";
+      const startCase = async (button, actionId, inputs, enabled) => {
+        button.disabled = true; message.textContent = ""; message.className = "bad";
         try {
-          const run = await api("POST", "/api/runs", { category_id: category.id, action_id: "resume-case", inputs: { case_folder: c.name } });
+          const run = await api("POST", "/api/runs", { category_id: category.id, action_id: actionId, inputs });
           go(runPath(run.run_id));
-        } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); resume.disabled = !c.can_resume; }
+        } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); button.disabled = !enabled; }
+      };
+      const resume = h("button", { type: "button", disabled: !c.can_resume, title: c.resumed ? "Already resumed; use Update" : c.can_resume ? "One-time start from the retained evidence" : "No retained evidence folder to resume from" }, "Resume");
+      resume.addEventListener("click", () => startCase(resume, "resume-case", { case_folder: c.name }, c.can_resume));
+      const update = c.can_update ? h("button", { type: "button", title: "Incremental read-only refresh from the retained evidence" }, "Update Case") : null;
+      if (update) update.addEventListener("click", () => startCase(update, "update-case", { case_folder: c.name }, true));
+      const draftBox = h("div", { class: "draft-box" });
+      const draftButton = (label, actionId, prompt) => {
+        const b = h("button", { class: "secondary small", type: "button" }, label);
+        b.addEventListener("click", () => {
+          clear(draftBox);
+          const text = h("textarea", { rows: 4, maxlength: 1500, "aria-label": prompt, placeholder: prompt });
+          const go1 = h("button", { type: "button", class: "small" }, "Draft locally (not sent)");
+          go1.addEventListener("click", () => startCase(go1, actionId, { case_folder: c.name, email_text: text.value }, true));
+          draftBox.append(text, go1);
+        });
+        return b;
+      };
+      const followUp = draftButton("Follow-up Email", "follow-up-email", "Paste the email you previously sent");
+      const reply = draftButton("Reply to Response", "reply-response", "Paste the response received from the assigned team");
+      const manualBox = h("fieldset", { class: "manual-milestones", id: "status-form-" + c.name, hidden: true }, h("legend", { class: "meta" }, "Current Status"));
+      const statusButton = h("button", { class: "secondary small update-status", type: "button", "aria-expanded": "false", "aria-controls": manualBox.id, title: "Show or hide the one-time status confirmations" }, "Update Status");
+      statusButton.addEventListener("click", () => {
+        const open = manualBox.hidden;
+        manualBox.hidden = !open;
+        statusButton.setAttribute("aria-expanded", open ? "true" : "false");
       });
+      for (const [key, label, done] of [["ticket_created", "Ticket Created", "Ticket Created"], ["email_sent", "Email Sent", "Email Sent"], ["reports_sent", "Reports Sent", "Reports Sent"], ["follow_up_sent", "Follow-up Sent", "Follow-up Sent"]]) {
+        if (c.manual_milestones && c.manual_milestones[key]) { manualBox.append(h("span", { class: "badge done manual-status", id: "mm-" + c.name + "-" + key }, done)); continue; }
+        const box = h("input", { type: "checkbox", id: "mm-" + c.name + "-" + key, "aria-label": label + " for " + c.name });
+        box.checked = !!(c.manual_milestones && c.manual_milestones[key]);
+        box.disabled = !c.manual_editable;
+        box.addEventListener("change", async () => {
+          if (!box.checked) return; const wanted = true; box.disabled = true;
+          try {
+            await api("POST", "/api/imports/risk-issues/milestone", { case: c.name, milestone: key, checked: wanted });
+            const st = h("span", { class: "badge done manual-status", id: box.id }, done); box.parentNode.replaceWith(st);
+            message.textContent = done + " saved for " + c.name + "."; message.className = "help"; return;
+          } catch (e) { box.checked = false; message.textContent = "Could not save " + label + ": " + e.message; message.className = "bad"; }
+          box.disabled = !c.manual_editable;
+        });
+        manualBox.append(h("label", { for: box.id }, box, " " + label + " "));
+      }
       list.append(h("div", { class: "item-row case-card" },
         h("div", {}, h("strong", {}, c.name),
           h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
-          h("span", { class: "meta" }, "Artifacts: " + (c.artifacts.join(", ") || "none")),
+          h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
+          manualBox,
           h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
-        h("div", { class: "row-actions" }, resume, ...c.files.filter((f) => /\.(pdf|html|pptx|xlsx)$/i.test(f.name)).slice(0, 3).map((f) => fileButton("View " + f.name.slice(0, 28), f, message)))));
+        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, draftBox, ...c.files.filter((f) => /\.(pdf|html|pptx|xlsx)$/i.test(f.name)).slice(0, 3).map((f) => fileButton("View " + f.name.slice(0, 28), f, message)))));
     }
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
-    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Resume starts a run from the retained evidence; nothing is changed by this list."), list, message);
+    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Resume is one-time; Update refreshes a resumed case incrementally; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
 function weeklyPanel(category) {
   const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));

@@ -12,6 +12,7 @@ const crypto = require('crypto');
 
 const HOME = process.env.WIZEXPERT_CONSOLE_HOME || path.join(os.homedir(), '.wizexpert-console');
 const CONFIG_PATH = process.env.WIZEXPERT_CONSOLE_BRIDGE || path.join(HOME, 'bridge.json');
+let helperVersion = '';
 const INSTANCE = crypto.randomBytes(8).toString('hex'); // one per VS Code window
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RESOURCE = /^(ahp-session|agent-host-copilotcli|copilotcli):\/[0-9a-f-]{36}$/;
@@ -292,7 +293,8 @@ async function loop() {
   while (!stopped) {
     try {
       const f = encodeURIComponent(JSON.stringify(folders()));
-      const res = await call('GET', `/vscode/jobs?after=${after}&instance=${INSTANCE}&folders=${f}`, undefined, 40000);
+      const v = encodeURIComponent(helperVersion);
+      const res = await call('GET', `/vscode/jobs?after=${after}&instance=${INSTANCE}&version=${v}&folders=${f}`, undefined, 40000);
       report('connected', folders().map((x) => path.basename(x)).join(', '));
       if (after < 0) { after = typeof res.last === 'number' ? res.last : 0; continue; } // skip jobs from before we connected
       for (const job of res.jobs || []) {
@@ -315,6 +317,7 @@ async function loop() {
 function activate(context) {
   if (output) return; // already active in this window
   stopped = false;
+  helperVersion = String((context.extension && context.extension.packageJSON.version) || '');
   output = vscode.window.createOutputChannel('WizExpert Console Helper');
   status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   context.subscriptions.push(output, status);

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 from console_fakes import FakeHelper, append, event, tool_done, tool_start
@@ -109,6 +110,25 @@ def test_risk_cases_become_in_progress_cards_with_legacy_tag(env):  # noqa: F811
     assert new["modified"] > 0
 
 
+def test_risk_case_recognizes_case_prefixed_evidence_folder(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    ok = base / "Prefixed-wc-id-31"
+    _touch(ok / "wc-id-31-evidence" / "raw.json", "secret")
+    _touch(ok / "Analysis.html")
+    nested = base / "Nested-wc-id-32"
+    _touch(nested / "sub" / "wc-id-32-evidence" / "raw.json")
+    _touch(nested / "Analysis.html")
+    bare = base / "Bare-wc-id-33"
+    _touch(bare / "-evidence" / "raw.json")
+    _touch(bare / "my evidence" / "raw.json")
+    _touch(bare / "Analysis.html")
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases["Prefixed-wc-id-31"]["can_resume"]
+    assert "evidence" in cases["Prefixed-wc-id-31"]["artifacts"]
+    assert not cases["Nested-wc-id-32"]["can_resume"]
+    assert not cases["Bare-wc-id-33"]["can_resume"]
+
 def test_issue_ids_come_from_folder_name_when_no_metadata():
     assert imports.issue_ids_from_name("Synthetic-wc-id-11-12") == [
         "wc-id-11",
@@ -160,6 +180,46 @@ def test_resume_refuses_unknown_and_legacy_cases(env):  # noqa: F811
         manager.start("risk-issues", {"case_folder": "Old-Case-wc-id-7"}, "resume-case")
     with pytest.raises(RunError):
         manager.start("risk-issues", {"case_folder": "../x"}, "resume-case")
+
+
+def _workflow(folder, events):
+    _touch(folder / "x.workflow.json", json.dumps({"version": 1, "events": events}))
+
+
+def test_resume_is_one_time_then_update_and_status_milestones(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    fresh = base / "Fresh-wc-id-41"
+    _touch(fresh / "evidence" / "raw.json", "secret")
+    _workflow(fresh, [{"stage": 1, "status": "in_progress", "summary": "Collected."}])
+    done = base / "Done-wc-id-42"
+    _touch(done / "evidence" / "raw.json", "secret")
+    _touch(done / "Report.xlsx")
+    _touch(done / "Stakeholder-Email.html")
+    _workflow(done, [
+        {"stage": 1, "status": "blocked", "summary": "User-reported email sent but no ticket confirmation. No outreach by agent."},  # noqa: E501
+        {"stage": 2, "status": "generated", "summary": "Resume collection reused retained evidence and added a read-only refresh."},  # noqa: E501
+    ])
+    bad = base / "Bad-wc-id-43"
+    _touch(bad / "evidence" / "raw.json")
+    _touch(bad / "x.workflow.json", "{not json")
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases["Fresh-wc-id-41"]["can_resume"] and not cases["Fresh-wc-id-41"]["can_update"]
+    d = cases["Done-wc-id-42"]
+    assert d["resumed"] and not d["can_resume"] and d["can_update"]
+    assert "Email sent" in d["milestones"] and "Ticket created" not in d["milestones"]
+    assert "Reports present" in d["milestones"] and "Reports sent" not in d["milestones"]
+    assert d["workflow_status"] == "generated" and d["workflow_summary"].startswith("Resume collection")  # noqa: E501
+    b = cases["Bad-wc-id-43"]
+    assert "unreadable" in b["workflow_summary"] and b["can_resume"]
+    manager = _manager(config)
+    with pytest.raises(RunError, match="already resumed"):
+        manager.start("risk-issues", {"case_folder": "Done-wc-id-42"}, "resume-case")
+    with pytest.raises(RunError, match="Resume this case first"):
+        manager.start("risk-issues", {"case_folder": "Fresh-wc-id-41"}, "update-case")
+    run = manager.start("risk-issues", {"case_folder": "Done-wc-id-42"}, "update-case")
+    assert run.status == "awaiting_gate" and "delta" in run.prompt
+    assert imports.require_case(config, "Fresh-wc-id-41", "any")["name"] == "Fresh-wc-id-41"
 
 
 # -- approval gates ----------------------------------------------------------------------------
@@ -328,6 +388,19 @@ def test_mcp_action_validates_input(env):  # noqa: F811
             manager.mcp_action("delete")
         with pytest.raises(RunError, match="Unknown MCP server"):
             manager.mcp_action("start", "other")
+
+
+def test_mcp_refuses_stale_helper(env):  # noqa: F811
+    config, workspace, home = env
+    _mcp_config(workspace)
+    bridge = Bridge("t" * 64)
+    manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
+    with FakeHelper(bridge, workspace, home, version="0.2.0"):
+        status = manager.mcp_status()
+        assert status["state"] == "unknown"
+        assert "Reload" in status["detail"]
+        with pytest.raises(RunError, match="current VS Code helper"):
+            manager.mcp_action("start")
 
 
 # -- Weekly Progress -----------------------------------------------------------------------
@@ -588,7 +661,8 @@ def test_helper_new_jobs_are_allow_listed_and_version_bumped():
     assert "password" not in source.lower() and "token'" not in source.lower().replace(
         "mac(token", ""
     )
-    assert tuple(int(p) for p in helper.VERSION.split(".")) >= (0, 2, 0)
+    assert tuple(int(p) for p in helper.VERSION.split(".")) >= (0, 2, 1)
+    assert "&version=${v}" in source and "packageJSON.version" in source
 
 
 def test_workspace_settings_template_auto_approves_only_safe_actions():
@@ -678,3 +752,119 @@ def test_thread_safety_of_concurrent_gate_decisions(env):  # noqa: F811
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert results.count("ok") == 1 and len(manager.get(run.id).decisions) == 1
+
+
+# -- manually confirmed milestones ---------------------------------------------------------------
+
+
+def test_manual_milestones_persist_validate_and_preserve_record(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    case = base / "Manual-wc-id-51"
+    _touch(case / "evidence" / "raw.json", "secret")
+    record = case / "x.workflow.json"
+    original = {"version": 1, "issue_ids": ["wc-id-51"], "events": [{"stage": 1, "summary": "Collected."}]}  # noqa: E501
+    _touch(record, json.dumps(original))
+    card = lambda: {c["name"]: c for c in imports.scan_risk_cases(config)}["Manual-wc-id-51"]  # noqa: E731
+    assert card()["manual_milestones"] == {"ticket_created": False, "email_sent": False, "reports_sent": False, "follow_up_sent": False}  # noqa: E501
+    assert card()["manual_editable"] and card()["milestones"] == []
+    saved = imports.set_manual_milestone(config, "Manual-wc-id-51", "email_sent", True)
+    assert saved["email_sent"] and not saved["ticket_created"]
+    imports.set_manual_milestone(config, "Manual-wc-id-51", "ticket_created", True)
+    for again in (True, False):  # one-time: no second tick, no untick
+        with pytest.raises(ValueError):
+            imports.set_manual_milestone(config, "Manual-wc-id-51", "ticket_created", again)
+    with pytest.raises(ValueError, match="cannot be unticked"):
+        imports.set_manual_milestone(config, "Manual-wc-id-51", "reports_sent", False)
+    raw = record.read_bytes()
+    assert not raw.startswith(b"\xef\xbb\xbf")
+    data = json.loads(raw.decode("utf-8"))
+    assert data["events"] == original["events"] and data["issue_ids"] == original["issue_ids"]
+    assert data["manual_milestones"] == {"email_sent": True, "ticket_created": True}
+    assert card()["manual_milestones"]["email_sent"] and "Email sent" not in card()["milestones"]
+    assert not list(case.glob("*.tmp")) and (case / "evidence" / "raw.json").read_text() == "secret"
+    for args in [
+        ("../x", "email_sent", True), ("Missing-wc-id-1", "email_sent", True),
+        ("Manual-wc-id-51", "resumed", True), ("Manual-wc-id-51", "email_sent", "yes"),
+        ("Manual-wc-id-51", "email_sent", 1), (None, "email_sent", True),
+    ]:
+        with pytest.raises(ValueError):
+            imports.set_manual_milestone(config, *args)
+    norecord = base / "NoRecord-wc-id-52"
+    _touch(norecord / "Report.xlsx")
+    with pytest.raises(ValueError, match="no workflow record"):
+        imports.set_manual_milestone(config, "NoRecord-wc-id-52", "email_sent", True)
+    assert not list(norecord.glob("*.workflow.json"))
+
+
+def test_follow_up_milestone_client_response_and_ui_labels(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    cases = {"Resp-wc-id-71": "Client response received from the assigned team.",
+             "NoResp-wc-id-72": "Client response not received yet.",
+             "Btn-wc-id-73": "Drafted a reply; use Reply to Response when ready."}
+    for name, text in cases.items():
+        _touch(base / name / "x.workflow.json", json.dumps({"events": [{"stage": 1, "summary": text}]}))  # noqa: E501
+    got = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert got["Resp-wc-id-71"]["client_response"] is True
+    assert got["NoResp-wc-id-72"]["client_response"] is False
+    assert got["Btn-wc-id-73"]["client_response"] is False
+    assert imports.set_manual_milestone(config, "Resp-wc-id-71", "follow_up_sent", True)["follow_up_sent"]  # noqa: E501
+    for again in (True, False):
+        with pytest.raises(ValueError):
+            imports.set_manual_milestone(config, "Resp-wc-id-71", "follow_up_sent", again)
+    js = (Path(imports.__file__).parent / "static" / "app.js").read_text("utf-8")
+    assert '"Current Status"' in js and '"Follow-up Sent", "Follow-up Sent"' in js
+    for gone in ("Confirmed by you", "Status - ", '"Artifacts: "', "c.workflow_summary", "c.milestones"):  # noqa: E501
+        assert gone not in js
+    assert "Client response received" in js
+    # Status form is hidden by default and only toggled by the Update Status button.
+    assert 'class: "manual-milestones", id: "status-form-" + c.name, hidden: true' in js
+    assert '"Update Status"' in js and '"aria-controls": manualBox.id' in js
+    assert "manualBox.hidden = !open" in js and '"Update Case"' in js
+    assert js.index("statusButton, followUp") > js.index("manualBox,")
+    for label in ("Ticket Created", "Email Sent", "Reports Sent", "Follow-up Sent"):
+        assert f'"{label}", "{label}"' in js
+
+
+def test_manual_milestones_malformed_fallback_does_not_crash(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    for name, text in [("A-wc-id-61", "{bad"), ("B-wc-id-62", json.dumps({"events": [], "manual_milestones": "x"})),  # noqa: E501
+                       ("C-wc-id-63", json.dumps({"events": [], "manual_milestones": {"email_sent": "true", "bogus": True}}))]:  # noqa: E501
+        _touch(base / name / "x.workflow.json", text)
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    for name in ("A-wc-id-61", "B-wc-id-62", "C-wc-id-63"):
+        assert set(cases[name]["manual_milestones"]) == set(imports.MANUAL_MILESTONES)
+        assert not any(cases[name]["manual_milestones"].values())
+    assert not cases["A-wc-id-61"]["manual_editable"]
+    with pytest.raises(ValueError, match="unreadable"):
+        imports.set_manual_milestone(config, "A-wc-id-61", "email_sent", True)
+    assert (base / "A-wc-id-61" / "x.workflow.json").read_text() == "{bad"
+
+
+def test_manual_milestone_endpoint_and_ui_wiring(console):  # noqa: F811
+    server, config, _home = console
+    new, _old = _risk(config.workspace)
+    token = token_of(server)
+    url = "/api/imports/risk-issues/milestone"
+    from test_console_server import request
+
+    assert request(server, "POST", url)[0] in (403, 415)
+    ok = api(server, token, "POST", url, {"case": new.name, "milestone": "reports_sent", "checked": True})  # noqa: E501
+    assert ok[0] == 200 and json.loads(ok[2])["manual_milestones"]["reports_sent"] is True
+    assert json.loads((new / "wc-id-11.workflow.json").read_text("utf-8"))["issue_ids"] == ["wc-id-11", "wc-id-12"]  # noqa: E501
+    cards = json.loads(api(server, token, "GET", "/api/imports/risk-issues")[2])["cases"]
+    assert [c for c in cards if c["name"] == new.name][0]["manual_milestones"]["reports_sent"]
+    for body in ({"case": new.name, "milestone": "reports_sent", "checked": True},
+                 {"case": new.name, "milestone": "email_sent", "checked": False},
+                 {"case": new.name, "milestone": "x", "checked": True},
+                 {"case": new.name, "milestone": "email_sent", "checked": "true"},
+                 {"case": "../Old", "milestone": "email_sent", "checked": True},
+                 {"case": "Old-Case-wc-id-7", "milestone": "email_sent", "checked": True}):
+        status, _h, text = api(server, token, "POST", url, body)
+        assert status == 400 and json.loads(text).get("error")
+    js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
+    assert "/api/imports/risk-issues/milestone" in js and '"aria-label": label' in js
+    assert "Ticket Created" in js and "Email Sent" in js and "Reports Sent" in js and "Follow-up Sent" in js  # noqa: E501
+    assert "cleared" not in js

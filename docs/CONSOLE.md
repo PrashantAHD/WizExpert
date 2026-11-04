@@ -43,7 +43,7 @@ After selecting Risk Issues, two buttons appear:
 Model: a category may declare `stages` (button groups) and `actions` (fields, template,
 optional `exactly_one_of`). The API takes an optional `action_id` next to `category_id`; omitting
 it keeps the old behavior. Template overrides use `risk-issues` (New) or
-`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`). Daily Progress
+`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`, `follow-up-email`, `reply-response`, `update-case`). Daily Progress
 also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
 name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
 work-item list and uses a single **Refresh** button for the selected item. Monthly Governance
@@ -89,8 +89,12 @@ passwords, MFA codes or tokens.
   keys, `.vscode` and `.github` also keep prompting, so the agent cannot write code and run it
   unprompted. Copy it into `<outer root>\.vscode\settings.json` (merge the
   keys if the file exists). VS Code has no per-tool setting for MCP tools, so approve the
-  read-only Wiz MCP `discover` tool with **Always Allow** in VS Code once; leave `execute`
-  prompting because it can run mutations in principle (the agent rules keep it read-only).
+  read-only Wiz MCP `discover` tool with **Always Allow** in VS Code once. Pre-approve `execute`
+  (**Chat: Manage Tool Approval**) only together with a user-level `preToolUse` hook in
+  `~/.copilot/hooks/` that denies any `execute` call whose `tool_name` is not a known read
+  operation, because `execute` can run mutations in principle. Otherwise leave it prompting.
+  In Copilot harness sessions only *user* terminal approvals reach the Agent Host; workspace
+  `chat.tools.terminal.autoApprove` rules are not copied.
 - **Waiting for approval in VS Code.** The run page shows the banner *Waiting for approval in
   VS Code* with a **Focus VS Code** button when a tool-approval prompt is read from the session
   log, or (heuristic) when a tool call has been open and the log silent for 60 seconds, because
@@ -139,7 +143,29 @@ only, confined to `deliverables`).
   client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
   **legacy** tag when the case has no rebuilt-workflow record (`*.workflow.json` or
   `case-gate-plan*`). **Resume** (action `resume-case`, gated) starts from the retained evidence
-  using the `templates/risk-issues` logic; it is disabled when the case has no `evidence` folder.
+  using the `templates/risk-issues` logic; it is disabled when the case has no `evidence` folder and is
+  **one-time**: once the workflow record has a stage 2+ event (or a "Resume collection" summary) the
+  card offers **Update** instead (`update-case`, gated): reuse retained evidence, incremental
+  read-only Wiz delta refresh only (status changes, new detections/resources, changed counts), no
+  full historical recollection, archive before replacing, no Wiz/SNOW/cloud change, no email.
+  Cards also offer **Follow-up Email** (`follow-up-email`: paste the email you sent; a concise
+  status-update follow-up is drafted locally) and **Reply to Response** (`reply-response`: paste the
+  assigned team's response; a reply is drafted locally). Both use the quoted `BEGIN/END EMAIL TEXT`
+  delimiters and the same input limits, and never send. `email-response` (issue-ID form) remains as
+  the legacy equivalent of Reply to Response. Cards show a bounded status line and milestones
+  derived only from the small workflow JSON (latest event status/summary) and artifact names:
+  *Ticket created*, *Email sent*, *Reports prepared/sent* appear only when a non-negated event
+  clause says so; otherwise neutral *Reports present* / *Email draft present*. Malformed or missing
+  records show a neutral fallback; evidence contents are never read. These automatic milestones
+  are read-only and never imply external delivery. Each card also has three checkboxes you
+  confirm yourself: *Ticket created*, *Email sent*, *Reports sent*. A change is saved at once to
+  `manual_milestones` (`ticket_created` / `email_sent` / `reports_sent`, booleans) in the case's
+  existing `*.workflow.json` via `POST /api/imports/risk-issues/milestone`
+  (`{"case", "milestone", "checked"}`; same-origin + CSRF, local file edit only, no Wiz/SNOW/cloud
+  call). Only those three keys and true/false are accepted, the case folder must exist under
+  `deliverables\Risk-Issues` and have a readable workflow record, the write is atomic UTF-8 without
+  BOM, and events and other fields are preserved. Errors are shown on the card list; a missing
+  or malformed field shows the boxes unchecked, and the boxes are disabled without a record.
   `GET /api/imports/risk-issues`.
 - **Weekly Progress** (*Previous reports* and *New report*): lists `deliverables\Weekly-Progress-Reporting`
   (newest first) with Open PDF / PPTX / email draft. **Update** exists for the latest report only
@@ -277,7 +303,9 @@ per-process CSRF token is intentionally regenerated.
 
 The normal `wizexpert console` command remains available when auto-reload is not needed.
 Changes to the helper extension still require reinstalling it and reloading the VS Code
-window.
+window. The console requires helper version 0.2.1 or newer for Wiz MCP actions. If the MCP
+buttons report that the current helper is not connected, reload the standard VS Code window
+(not the Agents window) so it unloads any older installed helper copy.
 
 Options: `--agent` (custom agent name, default `WizExpert`), `--config` (private JSON:
 `agent`, `output_roots`, `exclude_dirs`, `deny_names`, `prompts`, `start_timeout`),

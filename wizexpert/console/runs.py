@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from . import categories, imports
-from .bridge import Bridge
+from .bridge import MIN_HELPER_VERSION, Bridge
 from .categories import InputError
 from .config import ConsoleConfig
 from .sessions import (
@@ -40,6 +40,7 @@ HANDOFF_WAIT_SECONDS = 1800.0
 INACTIVE = ("completed", "stopped", "interrupted", "not_started", "rejected")
 MCP_HINT_SECONDS = 600.0
 MCP_ACTIONS = ("start", "stop", "auth", "list")
+ACTION_CASE_MODES = {"update-case": "update", "follow-up-email": "any", "reply-response": "any"}
 MCP_SERVER = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 
 
@@ -322,7 +323,7 @@ class RunManager:
                 prompt = categories.stage_prompt(category_id, prompt, gate_list[0])
         except InputError as error:
             raise RunError(str(error)) from None
-        self._check_sources(values)
+        self._check_sources(values, action_id)
         if gate_list:
             self._refuse_if_starting(category_id)
             with self._lock:
@@ -369,11 +370,17 @@ class RunManager:
             time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock())) + "-" + secrets.token_hex(3)
         )
 
-    def _check_sources(self, values: dict[str, str]) -> None:
+    def _check_sources(self, values: dict[str, str], action_id: str | None = None) -> None:
         """Existing-source checks for imported items (read-only; the console never writes)."""
         try:
             if values.get("case_folder"):
-                imports.require_case(self.config, values["case_folder"])
+                imports.require_case(
+                    self.config,
+                    values["case_folder"],
+                    ACTION_CASE_MODES.get(
+                        action_id or "", "resume"
+                    ),
+                )
             if values.get("report_folder"):
                 latest = imports.latest_weekly(self.config)
                 if latest is None or latest["name"] != values["report_folder"]:
@@ -871,8 +878,11 @@ class RunManager:
         if not servers:
             out.update(state="not_configured", detail="No Wiz MCP server found in mcp.json.")
             return out
-        if not self.bridge.helper_connected(workspace):
-            out["detail"] = "The VS Code helper is not connected."
+        if not self.bridge.helper_connected(workspace, min_version=True):
+            out["detail"] = (
+                "The current VS Code helper is not connected. Reload the standard VS Code "
+                f"window so helper {'.'.join(map(str, MIN_HELPER_VERSION))} or newer is active."
+            )
             return out
         out["helper"] = True
         job = self.bridge.post_job(
@@ -910,8 +920,11 @@ class RunManager:
         if name not in definitions:
             raise RunError("Unknown MCP server.")
         workspace = str(self.config.resolved_workspace())
-        if not self.bridge.helper_connected(workspace):
-            raise RunError("The VS Code helper is not connected for this workspace.")
+        if not self.bridge.helper_connected(workspace, min_version=True):
+            raise RunError(
+                "The current VS Code helper is not connected for this workspace. Reload the "
+                "standard VS Code window so the latest helper is active."
+            )
         job = self.bridge.post_job(
             {
                 "kind": "mcp_action",

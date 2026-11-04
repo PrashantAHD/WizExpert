@@ -27,6 +27,7 @@ CLOCK_SKEW = 60
 LONG_POLL = 25.0
 HELPER_ALIVE = 45.0
 MAX_JOBS = 100
+MIN_HELPER_VERSION = (0, 2, 1)
 
 
 def mac(token: str, *parts: str) -> str:
@@ -35,6 +36,17 @@ def mac(token: str, *parts: str) -> str:
 
 def digest(body: bytes) -> str:
     return hashlib.sha256(body or b"").hexdigest()
+
+
+def helper_version_at_least(version: str | None) -> bool:
+    """Return whether a helper advertises the current bridge protocol."""
+    if not version:
+        return False
+    try:
+        parts = tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return False
+    return parts >= MIN_HELPER_VERSION
 
 
 def load_or_create_token(path: Path, port: int) -> str:
@@ -124,11 +136,20 @@ class Bridge:
 
     # -- helper side ---
     def poll(
-        self, after: int, instance: str, folders: list[str], wait: float = LONG_POLL
+        self,
+        after: int,
+        instance: str,
+        folders: list[str],
+        wait: float = LONG_POLL,
+        version: str | None = None,
     ) -> dict[str, Any]:
         deadline = self._clock() + wait
         with self._cond:
-            self.instances[instance] = {"seen": self._clock(), "folders": folders}
+            self.instances[instance] = {
+                "seen": self._clock(),
+                "folders": folders,
+                "version": version,
+            }
             while True:
                 last = self._jobs[-1]["id"] if self._jobs else 0
                 jobs = [
@@ -181,16 +202,22 @@ class Bridge:
                 self._cond.wait(timeout=min(1.0, remaining))
             return self._results.pop(job_id)
 
-    def helper_connected(self, workspace: str | None = None) -> bool:
+    def helper_connected(
+        self, workspace: str | None = None, min_version: bool = False
+    ) -> bool:
         """A helper window polled recently (and, if given, has this workspace folder open)."""
-        return self.helper_seen_within(workspace, HELPER_ALIVE)
+        return self.helper_seen_within(workspace, HELPER_ALIVE, min_version=min_version)
 
-    def helper_seen_within(self, workspace: str | None, seconds: float) -> bool:
+    def helper_seen_within(
+        self, workspace: str | None, seconds: float, min_version: bool = False
+    ) -> bool:
         """A helper for this workspace polled within ``seconds`` (longer than the alive limit)."""
         now = self._clock()
         with self._cond:
             for name, info in self.instances.items():
                 if name in self._unhealthy or now - info["seen"] > seconds:
+                    continue
+                if min_version and not helper_version_at_least(info.get("version")):
                     continue
                 if workspace is None or any(norm(f) == norm(workspace) for f in info["folders"]):
                     return True
