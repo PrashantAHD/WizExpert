@@ -314,7 +314,8 @@ def test_mcp_status_connected_needs_auth_and_stopped(env):  # noqa: F811
         helper.infos["mcp_status"] = {"toolCount": 0}
         assert manager.mcp_status()["state"] == "stopped"
         job = [j for j in helper.jobs if j["kind"] == "mcp_action"][0]
-        assert job["server"] == "wiz-demo" and "secret" not in json.dumps(helper.jobs)
+        assert job["server"] == "mcp.config.ws0.wiz-demo"
+        assert "secret" not in json.dumps(helper.jobs)
 
 
 def test_mcp_action_validates_input(env):  # noqa: F811

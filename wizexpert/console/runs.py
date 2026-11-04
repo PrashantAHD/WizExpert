@@ -829,10 +829,14 @@ class RunManager:
 
     def mcp_servers(self) -> list[str]:
         """Names of configured MCP servers that look like Wiz (names only, never settings)."""
-        names: list[str] = []
-        for path in (
-            self.config.resolved_workspace() / ".vscode" / "mcp.json",
-            self.config.vscode_user_dir / "mcp.json",
+        return list(self._mcp_definitions())
+
+    def _mcp_definitions(self) -> dict[str, str]:
+        """Wiz server name -> VS Code MCP definition ID (what the MCP commands match on)."""
+        found: dict[str, str] = {}
+        for path, collection in (
+            (self.config.resolved_workspace() / ".vscode" / "mcp.json", "mcp.config.ws0"),
+            (self.config.vscode_user_dir / "mcp.json", "mcp.config.usrlocal"),
         ):
             try:
                 text = path.read_text(encoding="utf-8")
@@ -847,10 +851,10 @@ class RunManager:
                     if (
                         "wiz" in str(name).lower()
                         and MCP_SERVER.fullmatch(str(name))
-                        and name not in names
+                        and name not in found
                     ):
-                        names.append(str(name))
-        return names[:5]
+                        found[str(name)] = f"{collection}.{name}"
+        return dict(list(found.items())[:5])
 
     _mcp_hint: dict[str, Any] | None = None
 
@@ -899,17 +903,22 @@ class RunManager:
         """Start, stop or authenticate via VS Code MCP commands (sign-in is in the browser)."""
         if action not in MCP_ACTIONS:
             raise RunError("Unknown MCP action.")
-        servers = self.mcp_servers()
-        if not servers:
+        definitions = self._mcp_definitions()
+        if not definitions:
             raise RunError("No Wiz MCP server found in mcp.json.")
-        name = server or servers[0]
-        if name not in servers:
+        name = server or next(iter(definitions))
+        if name not in definitions:
             raise RunError("Unknown MCP server.")
         workspace = str(self.config.resolved_workspace())
         if not self.bridge.helper_connected(workspace):
             raise RunError("The VS Code helper is not connected for this workspace.")
         job = self.bridge.post_job(
-            {"kind": "mcp_action", "workspace": workspace, "action": action, "server": name}
+            {
+                "kind": "mcp_action",
+                "workspace": workspace,
+                "action": action,
+                "server": definitions[name],
+            }
         )
         result = self.bridge.wait_result(job, 30.0)
         if result is None or result.get("errors"):
