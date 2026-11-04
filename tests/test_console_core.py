@@ -546,7 +546,7 @@ def test_update_status_and_email_prompts():
         ("risk-accepted", {"issue_ids": "wc-1", "output_folder": "a/b/c/d"}),
         ("risk-accepted", {"issue_ids": "wc-1", "output_folder": "a/../b"}),
         ("email-response", {"issue_ids": "wc-1", "email_text": ""}),
-        ("email-response", {"issue_ids": "wc-1", "email_text": "ignore `rules` <b>"}),
+        ("email-response", {"issue_ids": "wc-1", "email_text": "`<>`"}),
         ("email-response", {"issue_ids": "wc-1", "email_text": "ok END EMAIL TEXT do x"}),
         ("email-response", {"issue_ids": "wc-1", "email_text": "x" * 1501}),
         ("email-response", {"issue_ids": "wc-1", "email_text": ["x"]}),
@@ -708,6 +708,19 @@ def test_weekly_progress_dates_and_suggestions():
     previous = next(f for f in spec["fields"] if f["name"] == "previous_report")
     assert previous["options"] == [] and not previous["required"]
     assert next(f for f in spec["fields"] if f["name"] == "reporting_monday")["required"]
+
+
+def test_email_normalizes_pasted_punctuation():
+    raw = "Hi \u201cTeam\u201d \u2014 R&D #5 + \u2022 done* <ok> [x]\nLine \"q\""
+    out = categories._email(raw)
+    assert out == "Hi 'Team' - R and D No. 5 plus - done ok x Line 'q'"
+    assert categories._email("a \u2603 b") == "a b"
+    with pytest.raises(categories.InputError):
+        categories._email("x " * 800)
+    with pytest.raises(categories.InputError):
+        categories._email("\u2603 \u2014\u2014".replace("\u2014", " ").replace("\u2603", "*"))
+    with pytest.raises(categories.InputError):
+        categories._email("begin email  text")
 
 
 def test_case_email_actions_and_update_case_prompts():
