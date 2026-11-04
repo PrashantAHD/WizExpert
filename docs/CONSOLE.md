@@ -115,18 +115,57 @@ passwords, MFA codes or tokens.
 
 ### Wiz MCP status
 
-The sidebar shows **Wiz MCP connected / needs sign-in / stopped / not configured** with Start,
-Stop, Authenticate and Refresh. The server finds MCP server *names* containing "wiz" in the
+The sidebar shows **Wiz MCP connected / waiting for your sign-in approval / needs sign-in /
+stopped / not configured** with Start, Stop, Authenticate and Refresh. The server finds MCP server
+*names* containing "wiz" in the
 workspace `.vscode/mcp.json` and the user `mcp.json` (names only; settings, headers and
 environment are never read into a response or job). The helper reports whether Wiz tools are
 registered in `vscode.lm.tools` (connected) and runs VS Code's own `workbench.mcp.startServer` /
 `stopServer` / `restartServer` commands for the buttons. Authenticate restarts the server so
 VS Code opens the SSO page in your browser; finish sign-in there. `GET /api/helper/mcp`,
 `POST /api/helper/mcp {"action": "start|stop|auth|list"}`.
-Limitation: VS Code exposes no public API for MCP server state, so *needs sign-in* is inferred
-(no tools yet within 10 minutes of a Start/Authenticate from the console) and the MCP command
-arguments may differ between VS Code versions; if a button has no effect, use the `list`
+*Waiting for your sign-in approval* means VS Code's own sign-in prompt for that server is open
+on screen (see *VS Code prompts* below); it is reported even when the helper is not connected.
+Limitation: VS Code exposes no public API for MCP server state, so otherwise *needs sign-in* is
+inferred (no tools yet within 10 minutes of a Start/Authenticate from the console) and the MCP
+command arguments may differ between VS Code versions; if a button has no effect, use the `list`
 action (MCP: List Servers) in VS Code.
+
+**Start-up check.** Once per console process, when the helper first connects, the console starts
+the Wiz MCP server if it is configured and stopped (`POST /api/helper/mcp/prewarm`). Any VS Code
+sign-in prompt then appears while you open the console instead of in the middle of a run. It never
+signs in, stops or restarts a running server. Turn it off with `--no-mcp-prewarm`.
+
+### VS Code prompts
+
+Some VS Code prompts are native Windows dialogs, for example *The MCP Server Definition 'wiz'
+wants to authenticate to ...* with **Allow** / **Cancel**. No extension or web page can show,
+answer or pre-approve them, and the console does not try: it only tells you one is open. Every
+page shows a banner such as *VS Code is asking to sign in to ...* with **Bring VS Code to front**;
+you still click **Allow** in VS Code and finish the sign-in in your browser.
+
+- Detection (Windows only; elsewhere the list is always empty) lists visible dialogs owned by
+  `Code.exe` with `EnumWindows`. Task dialogs draw their message without window text, so each new
+  dialog's text is read once through UI Automation in a short-lived Windows PowerShell process
+  (fixed script, only the window handle as input) and cached until the dialog closes. Nothing is
+  clicked and no input is sent to the dialog.
+- The browser receives only the kind (`mcp_auth` or `dialog`), the window title, the button
+  labels and, for sign-in prompts, the parsed server name and host; other dialog text is never
+  returned.
+- **Bring VS Code to front** runs `code --reuse-window <workspace>` and then asks Windows to put the
+  dialog in front. Windows may refuse focus changes from a background process; the dialog's
+  taskbar button then flashes instead.
+- With `window.dialogStyle` set to `custom`, VS Code draws dialogs inside its window and they are
+  not detected; the inferred MCP status above still applies.
+- API: `GET /api/vscode/prompts`, `POST /api/vscode/prompts/focus {"id": "<id from the list>"}`.
+
+**Why the sign-in prompt comes back.** VS Code keeps the Wiz sign-in and renews it in the
+background (the log shows *Token ... is about to expire, refreshing*), and a remembered **Allow**
+is stored per MCP server definition. The prompt returns when no saved sign-in is left, typically
+after the identity provider's maximum session lifetime: VS Code then cannot renew and must ask
+again. To check, open the `*mcp.app.wiz.io*.log` file under
+`%APPDATA%\Code\logs\<start>\window*\exthost` and look for *Found 0 sessions* or a failed
+refresh just before the prompt. VS Code keeps only its last ten start-ups of logs.
 
 ### Imported work and previous reports
 
@@ -254,7 +293,8 @@ shown in the banner and recorded with the run, and the run falls back to
 `code chat` (below) exactly once, so no duplicate chat or job is created. With
 `--no-cli-fallback` the run fails with that reason instead. Use
 `--no-auto-helper` only when you want submissions to fail immediately instead of changing the
-local VS Code setup.
+local VS Code setup. `--no-mcp-prewarm` turns off the start-up Wiz MCP check (see
+*Wiz MCP status*).
 
 On the live run screen, **Stop** requests that the active VS Code chat stop. The helper cancels
 with `workbench.action.chat.cancel` (older VS Code: `workbench.action.chat.stop`), picking the

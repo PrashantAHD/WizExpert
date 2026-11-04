@@ -302,6 +302,7 @@ function refresh() {
       const data = await api("GET", "/api/bootstrap");
       state.categories = data.categories; state.helper = data.helper; renderHelper();
       if (state.helper.connected && (!state.mcpAt || Date.now() - state.mcpAt > 30000)) { state.mcpAt = Date.now(); refreshMcp(); }
+      if (state.helper.connected) prewarmMcp();
       autoConnect();
       state.active = data.active || []; state.history = data.history || [];
       state.updated = Date.now(); state.stale = false; state.loaded = true; state.refreshError = "";
@@ -948,7 +949,7 @@ function approvalBanner(run) {
     h("button", { type: "button", onclick: () => focusVsCode(run) }, "Focus VS Code"));
 }
 // ---- Wiz MCP status (sidebar) ----------------------------------------------------------------------------
-const MCP_TEXT = { connected: "Wiz MCP connected", needs_auth: "Wiz MCP needs sign-in", stopped: "Wiz MCP stopped", not_configured: "Wiz MCP not configured", unknown: "Wiz MCP status unknown" };
+const MCP_TEXT = { connected: "Wiz MCP connected", awaiting_consent: "Wiz MCP waiting for your sign-in approval in VS Code", needs_auth: "Wiz MCP needs sign-in", stopped: "Wiz MCP stopped", not_configured: "Wiz MCP not configured", unknown: "Wiz MCP status unknown" };
 async function refreshMcp() {
   try { state.mcp = await api("GET", "/api/helper/mcp"); } catch (e) { state.mcp = { state: "unknown", detail: e.message, servers: [] }; }
   renderMcp();
@@ -956,7 +957,54 @@ async function refreshMcp() {
 async function mcpAct(action) {
   try { const r = await api("POST", "/api/helper/mcp", { action }); banner("Wiz MCP " + action + ": " + (r.note || "sent") + (action === "auth" ? ". Finish the sign-in in the browser window." : "")); }
   catch (e) { banner("Wiz MCP: " + e.message); }
+  if (action === "start" || action === "auth") setTimeout(refreshPrompts, 2500);
   setTimeout(refreshMcp, 4000);
+}
+// Starts a stopped Wiz MCP server once per console process so a VS Code sign-in prompt shows up now,
+// not halfway through a run. The server decides; "unknown" means the helper was not ready yet.
+async function prewarmMcp() {
+  if (state.prewarmed) return;
+  state.prewarmed = true;
+  try {
+    const r = await api("POST", "/api/helper/mcp/prewarm");
+    if (r.state === "unknown") { state.prewarmed = false; return; }
+    if (r.started) {
+      banner("Starting Wiz MCP now, so any VS Code sign-in prompt appears before you start a run.");
+      setTimeout(refreshPrompts, 2500); setTimeout(refreshMcp, 5000);
+    }
+  } catch (_e) { state.prewarmed = false; }
+}
+// ---- VS Code's own prompts (read-only) ------------------------------------------------------------------
+// VS Code shows some prompts (for example an MCP server asking to sign in) as native dialogs that no
+// extension or web page can answer. The console only says that one is open and brings VS Code forward.
+async function refreshPrompts() {
+  try { state.prompts = (await api("GET", "/api/vscode/prompts")).prompts || []; } catch (_e) { state.prompts = []; }
+  renderPrompts();
+}
+async function focusPrompt(p) {
+  try { const r = await api("POST", "/api/vscode/prompts/focus", { id: p.id }); banner(r.note || "VS Code brought to the front."); }
+  catch (e) { banner("Could not bring VS Code to the front: " + e.message); }
+  setTimeout(refreshPrompts, 1500);
+}
+function renderPrompts() {
+  const box = $("vscode-prompt"); if (!box) return;
+  const p = (state.prompts || [])[0];
+  const sig = JSON.stringify(p ? [p.id, p.kind, p.host, p.buttons] : null);
+  if (sig === state.promptSig) return;
+  state.promptSig = sig;
+  clear(box); box.hidden = !p;
+  if (!p) return;
+  const answer = p.buttons && p.buttons.length ? p.buttons.join(" / ") : "its buttons";
+  if (p.kind === "mcp_auth") {
+    box.append(h("strong", {}, "VS Code is asking to sign in to " + p.host),
+      h("span", {}, " (MCP server \u201c" + p.server + "\u201d). Click " + (p.buttons.includes("Allow") ? "Allow" : "the button") +
+        " in VS Code, then finish the sign-in in your browser. The console cannot answer this prompt for you."));
+  } else {
+    box.append(h("strong", {}, "VS Code is waiting for you"),
+      h("span", {}, " A VS Code dialog is open and needs an answer (" + answer + ")."));
+  }
+  box.append(h("button", { type: "button", onclick: () => focusPrompt(p) }, "Bring VS Code to front"));
+  if (state.prompts.length > 1) box.append(h("span", { class: "help" }, (state.prompts.length - 1) + " more VS Code prompt(s) open."));
 }
 function renderMcp() {
   const box = $("mcp"); if (!box) return;
@@ -1312,3 +1360,5 @@ migrateLegacyHash();
 state.restoreY = (history.state && history.state.y) || 0;
 route();
 setInterval(() => { refresh().catch(() => {}); }, 10000);
+refreshPrompts();
+setInterval(refreshPrompts, 5000);

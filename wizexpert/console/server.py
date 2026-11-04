@@ -447,6 +447,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._api_imports(path, query)
         if path == "/api/runs/active":
             return self._json(HTTPStatus.OK, {"runs": manager.active()})
+        if path == "/api/vscode/prompts":
+            return self._json(HTTPStatus.OK, {"prompts": manager.vscode_prompts()})
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
         if match and RUN_ID.fullmatch(match.group(1)):
             try:
@@ -522,6 +524,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._json(
                 HTTPStatus.OK, manager.mcp_action(str(body.get("action", "")), body.get("server"))
             )
+        if path == "/api/helper/mcp/prewarm":
+            return self._json(HTTPStatus.OK, manager.prewarm_mcp())
+        if path == "/api/vscode/prompts/focus":
+            prompt_id = body.get("id")
+            if not (isinstance(prompt_id, str) and re.fullmatch(r"\d{1,20}", prompt_id)):
+                raise RunError("Unknown VS Code prompt.")
+            return self._json(HTTPStatus.OK, {"ok": True, "note": manager.focus_prompt(prompt_id)})
         if path == "/api/helper/focus":
             run_id = body.get("run_id")
             if run_id is not None and not (isinstance(run_id, str) and RUN_ID.fullmatch(run_id)):
@@ -623,6 +632,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Do not install and reconnect the helper automatically when a run is submitted.",
     )
+    parser.add_argument(
+        "--no-mcp-prewarm",
+        action="store_true",
+        help="Do not start a stopped Wiz MCP server when the console starts (any VS Code sign-in "
+        "prompt then appears when a run first uses Wiz).",
+    )
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(args_list)
     if not 0 <= args.port <= 65535:
@@ -634,6 +649,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_cli_fallback=not args.no_cli_fallback,
         code_command=args.code,
         auto_install_helper=not args.no_auto_helper,
+        mcp_prewarm=not args.no_mcp_prewarm,
     )
     if args.agent:
         config.agent = args.agent

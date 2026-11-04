@@ -61,6 +61,7 @@ class ConsoleConfig:
     allow_cli_fallback: bool = False
     code_command: str = "code"
     auto_install_helper: bool = False
+    mcp_prewarm: bool = True  # start a stopped Wiz MCP server once when the console starts
     start_timeout: float = 90.0
     open_wait_ms: int = 2500
     new_chat_wait_ms: int = 1500

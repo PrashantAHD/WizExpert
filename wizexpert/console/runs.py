@@ -29,6 +29,7 @@ from .sessions import (
     collect_files,
     short,
 )
+from .vscode_prompts import PromptWatcher
 
 ATTEMPT_SECONDS = 30.0
 PROBE_SECONDS = 10.0  # quick liveness probe before a start_chat job
@@ -86,6 +87,7 @@ class RunManager:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         cli: Callable[[list[str]], int] | None = None,
+        prompts: PromptWatcher | None = None,
     ) -> None:
         self.config = config
         self.bridge = bridge
@@ -94,6 +96,9 @@ class RunManager:
         self._clock = clock
         self._sleep = sleep
         self._cli = cli or _run_cli
+        self.prompts = prompts or PromptWatcher()
+        self._prewarmed = False
+        self._prewarm_lock = threading.Lock()
         self._runs: dict[str, Run] = {}
         self.helper_note = ""  # why the helper could not connect (set by the server)
         self._lock = threading.RLock()
@@ -866,7 +871,7 @@ class RunManager:
     _mcp_hint: dict[str, Any] | None = None
 
     def mcp_status(self) -> dict[str, Any]:
-        """connected / needs_auth / stopped for the Wiz MCP server (via the helper)."""
+        """connected / awaiting_consent / needs_auth / stopped for the Wiz MCP server."""
         servers = self.mcp_servers()
         workspace = str(self.config.resolved_workspace())
         out: dict[str, Any] = {
@@ -877,6 +882,19 @@ class RunManager:
         }
         if not servers:
             out.update(state="not_configured", detail="No Wiz MCP server found in mcp.json.")
+            return out
+        # VS Code's own sign-in prompt is visible on screen even when the helper is not connected.
+        prompt = next(
+            (p for p in self.prompts.prompts() if p.kind == "mcp_auth" and p.server in servers),
+            None,
+        )
+        if prompt is not None:
+            out.update(
+                state="awaiting_consent",
+                prompt=prompt.public(),
+                detail=f"VS Code is asking to sign in to {prompt.host}. Click Allow in VS Code, "
+                "then finish the sign-in in your browser.",
+            )
             return out
         if not self.bridge.helper_connected(workspace, min_version=True):
             out["detail"] = (
@@ -941,6 +959,44 @@ class RunManager:
         elif action == "stop":
             self._mcp_hint = {"action": "stop", "at": self._clock()}
         return {"ok": True, "note": _result_text(result)}
+
+    def prewarm_mcp(self) -> dict[str, Any]:
+        """Start a stopped Wiz MCP server once per console process, so any VS Code sign-in prompt
+        appears when the console starts instead of in the middle of a run. Never signs in."""
+        if not self.config.mcp_prewarm:
+            return {"started": False, "state": "disabled"}
+        if self._prewarmed or not self._prewarm_lock.acquire(blocking=False):
+            return {"started": False, "state": "done"}  # done, or another request is doing it
+        try:
+            status = self.mcp_status()
+            if status["state"] == "unknown":
+                return {"started": False, "state": "unknown"}  # helper not ready: try again later
+            self._prewarmed = True
+            if status["state"] != "stopped":
+                return {"started": False, "state": status["state"]}
+            try:
+                self.mcp_action("start")
+            except RunError as error:
+                return {"started": False, "state": "error", "detail": str(error)}
+            return {"started": True, "state": "starting"}
+        finally:
+            self._prewarm_lock.release()
+
+    def vscode_prompts(self) -> list[dict[str, Any]]:
+        """VS Code's native prompts that are open right now (read-only)."""
+        return [p.public() for p in self.prompts.prompts()]
+
+    def focus_prompt(self, prompt_id: str) -> str:
+        """Bring VS Code and one of its open prompts to the front. The user still answers it."""
+        prompt = self.prompts.find(prompt_id)
+        if prompt is None:
+            raise RunError("That VS Code prompt is no longer open.")
+        workspace = str(self.config.resolved_workspace())
+        command = shutil.which(self.config.code_command) or self.config.code_command
+        self._cli([command, "--reuse-window", workspace])
+        if self.prompts.bring_to_front(prompt):
+            return "VS Code prompt brought to the front"
+        return "VS Code raised; if the prompt is hidden, click the flashing VS Code taskbar button"
 
     def open_deliverable(self, relative: str) -> None:
         """Open an existing deliverable (PDF/PPTX/HTML/...) with the system viewer, read-only."""
