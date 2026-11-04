@@ -703,6 +703,41 @@ function showWorkflow(category, stageId, actionId) {
         };
         refreshButton = h("button", { class: "secondary", type: "button", onclick: refreshItem }, "Refresh");
         workItems.append(h("div", { class: "item-row" }, h("div", {}, h("strong", {}, item), h("span", { class: "meta" }, "Refresh today's progress")), refreshButton), message);
+        const replyAction = actions.find((a) => a.id === "reply-stakeholder");
+        if (replyAction) {
+          const box = h("div", { class: "draft-box", hidden: true });
+          const sender = h("input", { type: "text", maxlength: 80, "aria-label": "Sender name", placeholder: "Sender name" });
+          const received = h("input", { type: "date", "aria-label": "Received date", value: new Date().toISOString().slice(0, 10) });
+          const body = h("textarea", { rows: 5, maxlength: 1500, "aria-label": "Stakeholder response", placeholder: "Paste the stakeholder response" });
+          const note = h("p", { class: "help", role: "status" });
+          const payload = () => ({ work_item: item, sender: sender.value, received_date: received.value, email_text: body.value });
+          const saveBtn = h("button", { type: "button", class: "secondary small" }, "Save response");
+          const draftBtn = h("button", { type: "button", class: "small" }, "Generate Reply Draft (not sent)");
+          saveBtn.addEventListener("click", async () => {
+            note.className = "bad"; note.textContent = "";
+            try { await api("POST", "/api/imports/stakeholder-response", payload()); note.className = "help"; note.textContent = "Response saved locally."; }
+            catch (e) { note.textContent = e.message; }
+          });
+          draftBtn.addEventListener("click", async () => {
+            note.className = "bad"; note.textContent = ""; draftBtn.disabled = true;
+            try {
+              await api("POST", "/api/imports/stakeholder-response", payload());
+              const res = await api("POST", "/api/runs", { category_id: category.id, action_id: replyAction.id, inputs: payload() });
+              go(runPath(res.run_id));
+            } catch (e) { note.textContent = e.message; helperRecoveryMessage(e); draftBtn.disabled = false; }
+          });
+          box.append(sender, received, body, h("div", { class: "row-actions" }, saveBtn, draftBtn), note);
+          const toggle = h("button", { class: "secondary small", type: "button", "aria-expanded": "false" }, "Record Response");
+          toggle.addEventListener("click", () => {
+            box.hidden = !box.hidden;
+            toggle.setAttribute("aria-expanded", String(!box.hidden));
+          });
+          api("GET", "/api/imports/stakeholder-response?work_item=" + encodeURIComponent(item)).then((r) => {
+            const last = (r.responses || []).slice(-1)[0];
+            if (last) { sender.value = last.sender; received.value = last.received_date; body.value = last.text; toggle.textContent = "Record Response (saved " + last.received_date + ")"; }
+          }).catch(() => {});
+          workItems.append(h("div", { class: "row-actions" }, toggle), box);
+        }
       }
       detail.append(workItems);
       return;
@@ -965,11 +1000,14 @@ function renderMcp() {
   box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {}, MCP_TEXT[m.state] || m.state)),
     m.detail ? h("p", { class: "help" }, m.detail) : null);
   if (m.servers && m.servers.length) {
+    const running = m.state === "connected" || m.state === "needs_auth";
+    box.append(h("p", { class: "help" }, "Status: " + (running ? "Running" : "Stopped")));
+    const btn = (label, fn) => h("button", { class: "secondary small", type: "button", onclick: fn }, label);
     box.append(h("div", { class: "row-actions" },
-      h("button", { class: "secondary small", type: "button", onclick: () => mcpAct("start") }, "Start"),
-      h("button", { class: "secondary small", type: "button", onclick: () => mcpAct("stop") }, "Stop"),
-      h("button", { class: "secondary small", type: "button", onclick: () => mcpAct("auth") }, "Authenticate"),
-      h("button", { class: "secondary small", type: "button", onclick: refreshMcp }, "Refresh")));
+      running ? null : btn("Start", () => mcpAct("start")),
+      running ? btn("Stop", () => mcpAct("stop")) : null,
+      m.state === "connected" ? null : btn("Authenticate", () => mcpAct("auth")),
+      btn("Refresh", refreshMcp)));
   }
 }
 function previousReportPicker(id) {
