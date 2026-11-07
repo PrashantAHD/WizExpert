@@ -4,7 +4,7 @@ const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const $ = (id) => document.getElementById(id);
 const state = {
   categories: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "", view: "",
-  active: [], history: [], updated: 0, stale: false, refreshing: false, refreshError: "", loaded: false, dataBars: [],
+  active: [], history: [], notifications: [], updated: 0, stale: false, refreshing: false, refreshError: "", loaded: false, dataBars: [],
   hf: { status: "", category: "", q: "" }, hvResults: null, hvCategory: null, hvClear: null, pvResults: null,
   activityBox: null, activityCategory: "", wfId: "", runStatus: "", runCategory: "", focusNext: "", restoreY: null, routeSeq: 0,
 };
@@ -18,6 +18,7 @@ const NEEDS_ATTENTION = new Set(["input_needed", "handed_off", "awaiting_gate"])
 const STAGE_HELP = {
   new: "Start a fresh review and prepare the initial local deliverables.",
   "in-progress": "Continue existing work with an acceptance, email, or status action.",
+  resolved: "Review resolved cases and open their local deliverables (read-only; no refresh or update).",
   previous: "Browse what already exists locally (read-only), then update, compare or start the next one.",
 };
 const VIEWS = ["home", "dashboard", "progress", "history", "workflow", "run"];
@@ -52,7 +53,7 @@ async function api(method, path, body) {
   if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
   return data;
 }
-function banner(text) { const b = $("banner"); if (!b) return; b.hidden = !text; clear(b); if (text) b.append(text); }
+function banner(text, kind) { const b = $("banner"); if (!b) return; b.hidden = !text; b.classList.toggle("info", kind === "info"); clear(b); if (text) b.append(text); }
 function helperRecoveryMessage(error) {
   const text = String(error && error.message || error);
   if (!/helper|reconnect|chat|trust|permission/i.test(text)) return;
@@ -269,6 +270,7 @@ async function route() {
   }
   renderAll();
   updateNav();
+  applySyncScope();
   restoreScroll();
   applyFocus();
 }
@@ -379,6 +381,237 @@ function runTable(rows) {
       h("td", { class: "right" }, h("button", { class: "secondary small", type: "button", "aria-label": "Open run " + r.id, onclick: () => go(runPath(r.id)) }, "Open")))))));
 }
 
+const NOTIF_READ_KEY = "wizexpert.notifications.read";
+const NOTIF_CLEARED_KEY = "wizexpert.notifications.cleared";
+let notifReadMem = new Set();  // fallback when browser storage is unavailable
+let notifClearedMem = new Set();  // fallback when browser storage is unavailable
+function loadNotifRead() {
+  try {
+    const v = JSON.parse(localStorage.getItem(NOTIF_READ_KEY) || "[]");
+    if (Array.isArray(v)) notifReadMem = new Set([...notifReadMem, ...v.filter((x) => typeof x === "string")]);
+  } catch (_e) { /* ignore */ }
+  return notifReadMem;
+}
+function loadNotifCleared() {
+  try {
+    const v = JSON.parse(localStorage.getItem(NOTIF_CLEARED_KEY) || "[]");
+    if (Array.isArray(v)) notifClearedMem = new Set([...notifClearedMem, ...v.filter((x) => typeof x === "string")]);
+  } catch (_e) { /* ignore */ }
+  return notifClearedMem;
+}
+function saveNotifRead(keys) {
+  for (const k of keys) notifReadMem.add(k);
+  const all = [...notifReadMem].slice(-500);  // bound growth; browser-only, no secrets
+  notifReadMem = new Set(all);
+  try { localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(all)); } catch (_e) { /* ignore */ }
+}
+function clearNotifications(keys) {
+  for (const k of keys) notifClearedMem.add(k);
+  const all = [...notifClearedMem].slice(-500);  // bound growth; browser-only, no secrets
+  notifClearedMem = new Set(all);
+  try { localStorage.setItem(NOTIF_CLEARED_KEY, JSON.stringify(all)); } catch (_e) { /* ignore */ }
+  const panel = $("notif-panel");
+  if (panel) delete panel.dataset.sig;
+  renderNotifications();
+}
+function markNotifRead(keys) {
+  saveNotifRead(keys);
+  const panel = $("notif-panel");
+  if (panel) delete panel.dataset.sig;
+  renderNotifications();
+}
+function notificationRow(href, title, context, status, meta, label, key) {
+  const read = loadNotifRead().has(key);
+  const a = link(href, "notification-item",
+    h("span", { class: "notif-dot", "aria-hidden": "true" }),
+    h("span", { class: "notif-title" }, title),
+    h("span", { class: "notif-context" }, context),
+    h("span", { class: "notif-meta" }, h("span", { class: "notif-status" }, status),
+      meta ? h("span", { class: "notif-sub", title: meta }, meta) : null));
+  a.setAttribute("aria-label", (read ? "" : "Unread, ") + label);
+  a.classList.add(read ? "is-read" : "is-unread");
+  a.dataset.notifKey = key;
+  a.dataset.unread = read ? "false" : "true";
+  return a;
+}
+function runContext(run) {
+  const cat = state.categories.find((c) => c.id === run.category_id);
+  const act = cat && run.action_id ? (cat.actions || []).find((x) => x.id === run.action_id) : null;
+  if (run.action_title) return run.action_title + (act && act.description ? ": " + act.description : "");
+  if (cat && run.action_id === cat.default_action) return cat.description;
+  return "Workflow run (action not recorded).";  // runs saved before actions were recorded
+}
+function notificationBar() {
+  const runs = [...state.active, ...state.history];
+  const seen = new Set();
+  const cleared = loadNotifCleared();
+  const events = [];
+  for (const item of state.notifications) {
+    const key = "sync:" + item.run_id + ":" + item.status;
+    if (cleared.has(key)) continue;
+    const status = STATUS_TEXT[item.status] || item.status;
+  const check = item.kind === "status-check";
+  events.push(notificationRow(runPath(item.run_id), check ? "Read-only Wiz status check" : item.case + " queued",
+    check ? "Status check: read-only Wiz status comparison against retained evidence; no case files are written."
+      : "Refresh case: the read-only status check found a change and queued the gated Refresh workflow.", status, item.run_id,
+    (check ? "Read-only Wiz status check" : item.case + " queued") + ", " + status + ", run " + item.run_id, key));
+  }
+  for (const run of runs) {
+    if (seen.has(run.id)) continue;
+    seen.add(run.id);
+    const key = "run:" + run.id + ":" + run.status;
+    if (cleared.has(key)) continue;
+    const status = STATUS_TEXT[run.status] || run.status;
+    const meta = [fmtDate(run.created), run.id].filter(Boolean).join(" \u00b7 ");
+    events.push(notificationRow(runPath(run.id), catTitle(run.category_id),
+      runContext(run), status, meta,
+      catTitle(run.category_id) + (run.action_title ? " \u2013 " + run.action_title : "") + ", " + status + ", run " + run.id, key));
+  }
+  const count = events.filter((e) => e.dataset.unread === "true").length;
+  return { events, count };
+}
+function setNotifOpen(open) {
+  const btn = $("notif-btn"), panel = $("notif-panel");
+  if (!btn || !panel) return;
+  panel.hidden = !open;
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function renderNotifications() {
+  const btn = $("notif-btn"), panel = $("notif-panel"), badge = $("notif-badge");
+  if (!btn || !panel) return;
+  mount(panel, JSON.stringify([state.active, state.history, state.notifications, [...loadNotifRead()], [...loadNotifCleared()]]), (box) => {
+    const { events, count } = notificationBar();
+    const head = h("div", { class: "notif-head" }, h("strong", {}, "Notifications"));
+    const actions = h("div", { class: "notif-actions" });
+    if (count) actions.append(h("button", { type: "button", class: "notif-markall", "aria-label": "Mark all notifications as read",
+      onclick: () => markNotifRead(events.map((e) => e.dataset.notifKey)) }, "Mark all as read"));
+    if (events.length) actions.append(h("button", { type: "button", class: "notif-clear", "aria-label": "Clear all notifications",
+      onclick: () => clearNotifications(events.map((e) => e.dataset.notifKey)) }, "Clear all"));
+    if (actions.childNodes.length) head.append(actions);
+    box.append(head);
+    if (events.length) box.append(...events);
+    else box.append(h("div", {}, "No new notifications"));
+    badge.hidden = !count;
+    badge.textContent = count > 99 ? "99+" : String(count);
+    btn.setAttribute("aria-label", count ? "Notifications, " + count + " new" : "Notifications, none new");
+    for (const a of box.querySelectorAll("a")) {
+      // Capture phase: record read state before the link router handles the click.
+      a.addEventListener("click", () => { saveNotifRead([a.dataset.notifKey]); setNotifOpen(false); setTimeout(() => { delete panel.dataset.sig; renderNotifications(); }, 0); }, true);
+    }
+  });
+}
+async function runStatusSync(report, force = true) {
+  const result = await api("POST", "/api/imports/risk-issues/sync", { force });
+  recordNotifications(result.started || []);
+  await refresh();
+  updateSyncStatus(result.state);
+  if (report) report(result);
+  return result;
+}
+function syncStatusText(syncState) {
+  const last = syncState && syncState.last_started;
+  if (!Number.isFinite(last)) return "Risk Issues only \u00b7 Not synced yet \u00b7 automatic sync runs daily.";
+  const date = new Date(last * 1000);
+  const now = new Date();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((today - day) / 86400000);
+  const when = days === 0 ? "today" : days === 1 ? "yesterday" : date.toLocaleDateString();
+  let result = "";
+  if (syncState.phase === "checking") result = " \u00b7 Wiz status check running.";
+  else if (syncState.phase === "failed") result = " \u00b7 Last status check failed.";
+  else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
+  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
+}
+function updateSyncStatus(syncState) {
+  const button = $("sync-btn"), tooltip = $("sync-tooltip");
+  if (!button) return;
+  const text = syncStatusText(syncState);
+  button.title = text + " \u00b7 Click to sync now";
+  button.setAttribute("aria-label", "Sync Risk Issues status. " + text);
+  if (tooltip) tooltip.textContent = text;
+}
+async function loadTopbarSync() {
+  try {
+    const status = await api("GET", "/api/imports/risk-issues/sync");
+    updateSyncStatus(status.state);
+    recordNotifications([...(status.state.queued || [])]);
+    if (status.due && status.hours > 0 && status.assignee_configured) await syncFromTopbar({ silent: true });
+  } catch (e) {
+    updateSyncStatus({});
+    const tooltip = $("sync-tooltip");
+    if (tooltip) tooltip.textContent = "Status sync unavailable: " + e.message;
+  }
+}
+async function pollSyncProgress() {
+  try {
+    const result = await api("POST", "/api/imports/risk-issues/sync", { force: false });
+    updateSyncStatus(result.state);
+    if ((result.started || []).length) {
+      recordNotifications(result.started);
+      await refresh();
+    }
+  } catch (e) { /* the next tick retries */ }
+}
+setInterval(() => {
+  const btn = $("sync-btn");
+  if (btn && syncAllowedHere() && /status check running|Refresh pending/.test(btn.title)) pollSyncProgress();
+}, 60000);
+// Sync is Risk Issues-only: Monthly Governance and Weekly Progress pages never expose or trigger it.
+const SYNC_EXCLUDED_WORKFLOWS = ["weekly-progress-reporting", "monthly-governance-reporting"];
+function syncAllowedHere() {
+  const m = ROUTE_WF.exec(location.pathname);
+  return !(m && SYNC_EXCLUDED_WORKFLOWS.includes(m[1]));
+}
+function applySyncScope() {
+  const button = $("sync-btn"), tooltip = $("sync-tooltip");
+  if (!button) return;
+  const allowed = syncAllowedHere();
+  button.hidden = !allowed;
+  if (tooltip) tooltip.hidden = !allowed;
+}
+async function syncFromTopbar({ silent = false } = {}) {
+  const button = $("sync-btn");
+  if (!button || button.disabled || !syncAllowedHere()) return;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.title = "Starting read-only Wiz status check...";
+  try {
+    const result = await runStatusSync(null, !silent);
+    if (!silent) {
+      const skipped = (result.skipped || []).length;
+      const note = skipped ? " Not started: " + result.skipped[0].reason : "";
+      banner(result.busy
+        ? "A Wiz status check is already running; Refresh is queued only for cases that changed." + note
+        : (result.started || []).length
+          ? "Read-only Wiz status check started. Only cases whose Wiz status changed get a gated Refresh queued afterwards."
+          : "No Wiz status check was started." + note, "info");
+    }
+  } catch (e) {
+    if (!silent) banner("Status sync unavailable: " + e.message);
+    const tooltip = $("sync-tooltip");
+    if (tooltip) tooltip.textContent = "Status sync unavailable: " + e.message;
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    if (!button.title.startsWith("Risk Issues only \u00b7 Last synced")) updateSyncStatus({});
+  }
+}
+(function bindNotifications() {
+  const btn = $("notif-btn"), panel = $("notif-panel");
+  if (!btn || !panel) return;
+  btn.addEventListener("click", (e) => { e.stopPropagation(); setNotifOpen(panel.hidden); });
+  document.addEventListener("click", (e) => { if (!panel.hidden && !panel.contains(e.target)) setNotifOpen(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { setNotifOpen(false); btn.focus(); } });
+})();
+(function bindTopbarSync() {
+  const button = $("sync-btn");
+  if (button) button.addEventListener("click", syncFromTopbar);
+})();
+function recordNotifications(started) {
+  if (started.length) state.notifications = started.slice();
+}
+
 // ---- home --------------------------------------------------------------------------------------------
 let home = null;
 const WF_ART = {
@@ -457,7 +690,7 @@ function buildHome() {
         h("ul", { class: "principles" }, principles.map((x) => h("li", {}, x)))),
       h("div", { class: "hero-art", "aria-hidden": "true" },
         h("img", { src: "/static/assets/logo.svg", alt: "", width: "320" }))),
-    h("section", { class: "block", "aria-labelledby": "h-wf" }, h("h2", { id: "h-wf" }, "Start a workflow"), home.workflows),
+      h("section", { class: "block", "aria-labelledby": "h-wf" }, h("h2", { id: "h-wf" }, "Start a workflow"), home.workflows),
     aboutSection(),
     h("p", {}, link("/dashboard", "secondary", "Open Dashboard for runs and activity")));
   dash.append(pageHead("Dashboard", "Run summary, current activity and recent runs."),
@@ -482,6 +715,7 @@ function renderSummary() {
 function renderHome() {
   if (!home) return;
   renderSummary();
+  renderNotifications();
   mount(home.active, JSON.stringify([state.active, state.loaded, state.refreshError, state.categories.length]), (box) => {
     if (!dataGate(box)) return;
     if (!state.active.length) box.append(stateBox("empty", "Nothing is running", "Running tasks appear here. See In progress in the sidebar for the full list."));
@@ -680,7 +914,8 @@ function showWorkflow(category, stageId, actionId) {
       else detail.append(monthlyPanel(category));
       return;
     }
-    if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category));
+    if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category, false));
+    if (category.imports === "risk-issues" && stage.id === "resolved") { detail.append(riskCasesPanel(category, true)); return; }
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
       detail.append(h("h2", {}, "Existing work items"));
       const workItems = h("div", { class: "item-list" });
@@ -820,14 +1055,44 @@ function tableOf(head, rows) {
   table.append(body);
   return table;
 }
+function caseTitle(name) { return String(name || "").replace(/-[A-Z]{3}\d{4}-assigned$/, ""); }
+function resolvedRuleTitle(c, rule) {
+  if (!rule || !c || !c.rule_names || typeof c.rule_names !== "object") return "";
+  const exact = c.rule_names[rule];
+  if (typeof exact === "string" && exact.trim()) return exact;
+  const wanted = String(rule).toLowerCase();
+  const key = Object.keys(c.rule_names).find((candidate) => candidate.toLowerCase() === wanted);
+  const title = key ? c.rule_names[key] : "";
+  return typeof title === "string" && title.trim() ? title : "";
+}
 function loadingNote(text) { return h("p", { class: "help", role: "status" }, text); }
-function riskCasesPanel(category) {
-  const list = h("div", { class: "item-list" }, loadingNote("Scanning local Risk Issues cases..."));
+function riskCasesPanel(category, resolvedOnly) {
+  const list = h("div", { class: "item-list" }, loadingNote((resolvedOnly ? "Scanning local resolved Risk Issues cases..." : "Scanning local Risk Issues cases...")));
   const message = h("p", { role: "status" });
   api("GET", "/api/imports/risk-issues").then((res) => {
     clear(list);
-    if (!res.cases.length) { list.append(h("p", { class: "help" }, "No existing case folders were found under deliverables/Risk-Issues.")); return; }
-    for (const c of res.cases) {
+    const shown = res.cases.filter((x) => !!x.resolved === !!resolvedOnly);
+    if (!shown.length) { list.append(h("p", { class: "help" }, resolvedOnly ? "No resolved case folders were detected under deliverables/Risk-Issues." : "No existing case folders were found under deliverables/Risk-Issues.")); return; }
+    const renderResolved = (c, target) => {
+      // One card per rule ID (a combined case shows each rule separately) with its own reason.
+      const rules = c.issue_ids.length ? c.issue_ids : [null];
+      for (const rule of rules) {
+        const reason = rule && c.resolution_reasons ? c.resolution_reasons[rule] : "";
+        renderResolvedCard(c, rule, reason, target);
+      }
+    };
+    const renderResolvedCard = (c, rule, reason, target) => {
+      target.append(h("div", { class: "item-row case-card" },
+        h("div", {}, h("strong", { class: "case-title" }, resolvedRuleTitle(c, rule) || caseTitle(c.name)),
+          rule ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + rule) : null,
+          h("span", { class: "meta resolution-notes-line" }, "Resolution notes: " + (reason || "Resolved")),
+          h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
+          h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown")),
+          h("span", {}, h("span", { class: "badge done" }, "RESOLVED"), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
+        h("div", { class: "row-actions" }, deliverablesButton("risk-issues", c.name, message))));
+    };
+    if (resolvedOnly) { for (const c of shown) renderResolved(c, list); return; }
+    const renderCase = (c, target) => {
       const startCase = async (button, actionId, inputs, enabled) => {
         button.disabled = true; message.textContent = ""; message.className = "bad";
         try {
@@ -897,17 +1162,19 @@ function riskCasesPanel(category) {
         });
         manualBox.append(h("label", { for: box.id }, box, " " + label + " "));
       }
-      list.append(h("div", { class: "item-row case-card" },
-        h("div", {}, h("strong", {}, c.name),
-          h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
+      target.append(h("div", { class: "item-row case-card" },
+        h("div", {}, h("strong", { class: "case-title" }, caseTitle(c.name)),
+          c.issue_ids.length ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + c.issue_ids.join(", ")) : null,
+          h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
           manualBox,
-          h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
+          h("span", {}, (c.resolved ? h("span", { class: "badge done" }, "RESOLVED") : h("span", { class: "badge running" }, c.status)), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
         h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, deliverablesButton("risk-issues", c.name, message))));
-    }
+    };
+    for (const c of shown) renderCase(c, list);
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
-  return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
-    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
+  return h("section", { class: "imports" }, h("h2", {}, resolvedOnly ? "Resolved cases" : "Existing cases"),
+    h("p", { class: "help" }, resolvedOnly ? "Read-only scan of deliverables/Risk-Issues for cases whose latest retained refresh shows every issue RESOLVED. Only the local deliverables can be opened; no refresh, update or email action is offered. Nothing is changed by this list." : "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
 function weeklyPanel(category) {
   const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));
@@ -1042,8 +1309,8 @@ function renderMcp() {
   const box = $("mcp"); if (!box) return;
   clear(box);
   const m = state.mcp || { state: "unknown", detail: "", servers: [] };
-  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {}, MCP_TEXT[m.state] || m.state)),
-    m.detail ? h("p", { class: "help" }, m.detail) : null);
+  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {},   MCP_TEXT[m.state] || m.state)));
+    if (m.detail) box.append(h("p", { class: "help" }, m.detail));
   if (m.servers && m.servers.length) {
     const running = m.state === "connected" || m.state === "needs_auth";
     box.append(h("p", { class: "help" }, "Status: " + (running ? "Running" : "Stopped")));
@@ -1394,4 +1661,5 @@ buildHome(); readCache(); renderAll();
 migrateLegacyHash();
 state.restoreY = (history.state && history.state.y) || 0;
 route();
+loadTopbarSync();
 setInterval(() => { refresh().catch(() => {}); }, 10000);

@@ -151,3 +151,27 @@ def test_other_not_started_runs_are_not_revived(env):  # noqa: F811
         assert manager.get(run.id).status == "not_started"
         run.status, run.message = "stopped", "The console stopped before this run started."
         assert manager.get(run.id).status == "stopped"
+
+
+def test_run_records_canonical_action_and_old_runs_fall_back(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager_with(config, bridge)
+    with FakeHelper(bridge, workspace, home):
+        run = manager.start("risk-issues", {"issue_ids": "wc-id-7"})
+        row = manager.active()[0]
+        assert row["action_id"] == "" or row["action_title"]
+        assert "prompt" not in row and "values" not in row
+        # Persisted action survives restart; records without the field still load.
+        run.action_id = "refresh-case"
+        manager._save()
+        index = config.state_dir / "runs.json"
+        data = json.loads(index.read_text(encoding="utf-8"))
+        assert data[0]["action_id"] == "refresh-case"
+        again = _manager_with(config, Bridge("t" * 64))
+        assert again.history()[0]["action_id"] == "refresh-case"
+        assert again.history()[0]["action_title"]
+        del data[0]["action_id"]
+        index.write_text(json.dumps(data), encoding="utf-8")
+        old = _manager_with(config, Bridge("t" * 64)).history()[0]
+        assert old["action_id"] == "" and old["action_title"] == ""

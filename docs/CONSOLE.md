@@ -157,7 +157,7 @@ found the file opens with the OS default (`os.startfile`). The older `/api/impor
 maps the path onto category + folder + name and goes through the same launcher checks (local
 launch, no helper).
 
-- **Risk Issues** (*In-progress* stage): each folder under `deliverables\Risk-Issues` is a card
+- **Risk Issues** (*In-progress* stage): cases whose latest retained refresh status counts show every issue RESOLVED in Wiz (the only resolution criterion; no manual closure) show a RESOLVED marker and are listed in a separate **Resolved** section; the Resolved stage shows one card per rule ID (a combined case lists each rule separately) in the In-progress card layout (the sanitized per-rule Wiz title from workflow/case metadata `rule_names` (`{"<rule-id>": "title"}` or `[{"rule_id", "title"}]`, case-insensitive rule ID match) when available, otherwise the case folder name with the configured `-<assignee>-assigned` display suffix hidden; long titles wrap fully; the case name is unchanged for actions/API, `Issue rule ID: <id>` subtitle, plus one `Resolution notes: <reason>` line; notes describe the remediation action without resource names and default to "Resolved") with an optional per-rule resolution reason read from the workflow/case metadata `resolution_reasons` (`{"<rule-id>": "reason"}` or `[{"rule_id", "reason"}]`, folded, max 300 characters); all other cases stay in the In-Progress list with all actions available. Each folder under `deliverables\Risk-Issues` is a card
   with status *In-Progress*, rule/issue IDs (from `issue_ids` in the case record, else from the
   folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
   client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
@@ -169,6 +169,40 @@ launch, no helper).
   `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
   `evidence` folder. Archive before replacing, retained evidence is never modified, no
   Wiz/SNOW/cloud change, no email.
+  Sync is Risk Issues-only: the topbar control is labelled "Risk Issues only", is hidden on the Weekly Progress Reporting and Monthly Governance Reporting pages, and the client guard refuses to call the endpoint there; no category-page sync controls exist. Weekly report generation does its own fresh read-only Wiz status fetch for the reporting scope (retained Risk Issues/Daily evidence is only history and remediation context) and Monthly is independent of both.
+  The homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
+  the last sync is older than 24 hours. Sync starts ONE `status-check` run (hidden `system` stage
+  action, not gated) in the VS Code WizExpert chat, because only that chat has read-only Wiz MCP
+  access; the console server has none. The check fetches the latest Wiz status of the eligible
+  cases' issue IDs, compares it with each case's latest retained evidence, writes nothing into
+  case folders, mutates nothing in Wiz/ServiceNow/cloud and sends no email. Its only output is
+  `deliverables/Status-Check/<token>.json` (`checked`, and `changed` with a short `reason`).
+  Eligibility: not resolved, not legacy, has retained evidence and issue IDs, and assigned to the
+  owner. Assignee exists only in Wiz, so the owner id is passed in the prompt and the check run filters
+  read-only. Set it in the private console config (`--config`) as `status_sync_assignee`
+  (never committed to the public repo); with it unset the sync refuses and starts nothing.
+  When the check run completes (the next sync POST, or the 60 s progress poll, which is also a POST,
+  while a sync is in progress), the console queues the existing gated Refresh ONLY for changed cases, one at a
+  time; cases blocked by the one-active-run guard stay `pending` in the sync state and are
+  retried, not lost; a Refresh start refused for any other reason is recorded in `skipped` and dropped
+  from `pending` so it cannot wedge the queue. `GET /api/imports/risk-issues/sync` is side-effect free (it only
+  reports state); only `POST` starts or advances runs, serialized by a lock so concurrent requests cannot
+  double-queue. Sync state records `phase` (checking/refreshing/done/failed), `checked`,
+  `changed`, `pending`, `queued` and `skipped`; a failed check counts as an attempt, so automatic checks
+  retry at most once per interval (a manual forced sync retries immediately). Resolved cases are not
+  rechecked by the sync (owner-requested Resolved stage); rechecking resolved cases for reopening is an
+  explicit follow-up, not implemented. Set private config `status_sync_hours` to change the cadence,
+  or `0` to disable automatic checks. The top-right console topbar includes a read-only status-sync icon
+  beside the global notifications bell. Its hover/focus hint shows the last sync day and time and the last result (checked N, changed M); opening
+  the console triggers the same sync at most once per day when due and an assignee is configured. Activating it manually
+  runs the same sync immediately (forced, bypassing the due check; ignored while a check is running). The banner says "Read-only Wiz status check started".
+  The global notifications bell is in the top-right console topbar
+  (not a Home section, and not inside the Risk Issues menu). Its popover shows **No new notifications**
+  until an event occurs, and the bell badge counts only unread notifications. Unread rows have a highlighted background, a dot and bolder text; read rows are neutral. Read and cleared state are browser-local (`localStorage`, no server or external mutation); clicking a row marks it read before routing, and compact **Mark all as read** and **Clear all** controls sit in the popover header. Clear only dismisses the currently shown rows in this browser; it does not delete runs. It then lists status-sync-triggered Refreshes and recent workflow
+  runs from every category. Each notification row is itself clickable and routes directly
+  to its run or Refresh outcome page. Each row also shows the actual action performed (the run's canonical `action_id` and action title,
+  exposed through bootstrap/history; runs saved before this field existed fall back to a generic line).
+  Status-sync notifications state that the queued action is the gated Refresh. The only polling is the browser's 60 s POST while a sync is in progress; the server runs no background job.
   **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
   is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
   response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and

@@ -62,6 +62,19 @@
       <p id="page-label" class="page-label" aria-hidden="true">Home</p>
       <p class="topbar-note">Evidence first. Approval stays human. Outputs stay traceable.</p>
       <a id="active-run" class="active-run" href="/" hidden></a>
+      <div class="topbar-actions">
+        <button id="sync-btn" class="topbar-icon-btn" type="button" aria-label="Sync Risk Issues status" title="Sync Risk Issues status (Risk Issues only)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 11a8.1 8.1 0 0 0-14.9-4L3 10"/><path d="M3 4v6h6"/><path d="M4 13a8.1 8.1 0 0 0 14.9 4L21 14"/><path d="M21 20v-6h-6"/></svg>
+        </button>
+        <span id="sync-tooltip" class="sync-tooltip" role="tooltip" aria-hidden="true"></span>
+        <div class="notif">
+        <button id="notif-btn" class="notif-btn" type="button" aria-label="Notifications, none new" aria-haspopup="true" aria-expanded="false" aria-controls="notif-panel">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2z"/></svg>
+          <span id="notif-badge" class="notif-badge" hidden></span>
+        </button>
+        <div id="notif-panel" class="notif-panel" role="region" aria-label="Notifications" aria-live="polite" hidden></div>
+        </div>
+      </div>
     </header>
     <div id="route-status" class="sr-only" role="status" aria-live="polite"></div>
     <main id="main" tabindex="-1">
