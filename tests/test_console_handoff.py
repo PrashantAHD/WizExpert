@@ -149,6 +149,51 @@ def test_handoff_rebinds_run_and_is_not_completed(env):  # noqa: F811
     assert any(i.get("tool") == "ask_user" for i in view["progress"]), "seq continues"
 
 
+def test_peer_chat_in_same_session_is_followed(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, path = _start(manager, bridge, workspace, home)
+    run.ahp_id = NEW_AHP
+    first = run.session_id
+    chat = "ad4dfb96-e61e-4f7b-a386-859215e5f901"
+    append(
+        path,
+        tool_start("create_session", ARGS, "h1"),
+        event(
+            "tool.execution_complete",
+            {
+                "toolCallId": "h1",
+                "success": True,
+                "result": {
+                    "content": "Chat created in the current session "
+                    f"(agent-host-session://ahp-session/{NEW_AHP}?chat={chat})."
+                },
+            },
+        ),
+        event("hook.end", {"hookType": "agentStop"}),
+    )
+    assert manager.view(run.id)["status"] == "handed_off" and run.handoff["chat"] == chat
+    make_session(home, workspace, NEW_SID, prompt=PROMPT)
+    run.handoff_try = 0.0
+    assert manager.view(run.id)["status"] == "running"
+    assert run.session_id == NEW_SID and run.chain[0]["session_id"] == first
+
+
+def test_handoff_to_same_ahp_never_waits_silently(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, path = _start(manager, bridge, workspace, home)
+    run.ahp_id = NEW_AHP
+    _handoff(path, NEW_AHP)
+    assert manager.view(run.id)["status"] == "handed_off" and run.handoff is not None
+    make_session(home, workspace, NEW_SID, prompt=PROMPT)
+    run.handoff_try = 0.0
+    manager.view(run.id)
+    assert run.session_id == NEW_SID and run.status == "running"
+
+
 def test_new_chat_found_through_agent_host_db(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)

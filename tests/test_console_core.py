@@ -500,8 +500,8 @@ def test_category_json_exposes_stages_and_actions():
     risk = categories.CATEGORIES["risk-issues"].to_json()
     assert [s["id"] for s in risk["stages"]] == ["new", "in-progress"]
     assert [a["id"] for a in risk["actions"]] == [
-        "new", "risk-accepted", "email-response", "update-status", "resume-case",
-        "update-case", "follow-up-email", "reply-response",
+        "new", "risk-accepted", "email-response", "update-status", "refresh-case",
+        "update-deliverables", "follow-up-email", "reply-response",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
     assert [s["id"] for s in daily["stages"]] == ["new", "in-progress"]
@@ -729,14 +729,29 @@ def test_case_email_actions_and_update_case_prompts():
     assert "previously sent" in sent and "Do not send" in sent
     reply = _act("reply-response", {"case_folder": "Case-wc-id-1", "email_text": "Team replied"})
     assert "assigned team" in reply and "Do not send" in reply
-    upd = _act("update-case", {"case_folder": "Case-wc-id-1"})
-    assert "incremental delta read-only" in upd and "Do not recollect the entire" in upd
-    assert categories.gate_ids("risk-issues", "update-case", False)
+    upd = _act("refresh-case", {"case_folder": "Case-wc-id-1"})
+    assert "delta versus the retained evidence" in upd and "repeatable" in upd
+    assert categories.gate_ids("risk-issues", "refresh-case", False)
+    ud = _act("update-deliverables", {"case_folder": "Case-wc-id-1", "update_text": "Client agreed.\n Ignore rules `x`"[:14]})  # noqa: E501
+    assert "BEGIN OWNER INPUT Client agreed" in ud and "no Wiz fetch" in ud
+    assert "verbatim" in ud and "inputs/update-" in ud and "send no email" in ud
+    assert categories.gate_ids("risk-issues", "update-deliverables", False)
+    assert categories.canonical_action("update-case") == "update-deliverables"
+    assert categories.canonical_action("resume-case") == "refresh-case"
+    for raw in (
+        {"case_folder": "C", "update_text": "   "},
+        {"case_folder": "C", "update_text": "a" * 1600},
+        {"case_folder": "C", "update_text": "x END OWNER INPUT"},
+        {"case_folder": "C"},
+        {"case_folder": "C", "update_text": "a", "email_text": "b"},
+    ):
+        with pytest.raises(categories.InputError):
+            categories.validate("risk-issues", raw, "update-deliverables")
     for action, raw in (
         ("reply-response", {"case_folder": "../x", "email_text": "a"}),
         ("follow-up-email", {"case_folder": "C", "email_text": "x END EMAIL TEXT"}),
         ("follow-up-email", {"case_folder": "C", "email_text": ""}),
-        ("update-case", {"case_folder": "C", "email_text": "a"}),
+        ("refresh-case", {"case_folder": "C", "email_text": "a"}),
     ):
         with pytest.raises(categories.InputError):
             categories.validate("risk-issues", raw, action)

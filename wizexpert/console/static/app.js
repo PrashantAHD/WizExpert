@@ -810,10 +810,25 @@ function riskCasesPanel(category) {
           go(runPath(run.run_id));
         } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); button.disabled = !enabled; }
       };
-      const resume = h("button", { type: "button", disabled: !c.can_resume, title: c.resumed ? "Already resumed; use Update" : c.can_resume ? "One-time start from the retained evidence" : "No retained evidence folder to resume from" }, "Resume");
-      resume.addEventListener("click", () => startCase(resume, "resume-case", { case_folder: c.name }, c.can_resume));
-      const update = c.can_update ? h("button", { type: "button", title: "Incremental read-only refresh from the retained evidence" }, "Update Case") : null;
-      if (update) update.addEventListener("click", () => startCase(update, "update-case", { case_folder: c.name }, true));
+      const resume = h("button", { type: "button", disabled: !c.can_refresh, title: c.can_refresh ? "Repeatable read-only refresh: latest Wiz status, delta vs retained evidence, updated deliverables" : "No retained evidence folder to refresh from" }, "Refresh");
+      resume.addEventListener("click", () => startCase(resume, "refresh-case", { case_folder: c.name }, c.can_refresh));
+      const updateBox = h("div", { class: "draft-box" });
+      const update = h("button", { type: "button", disabled: !c.can_update_deliverables, title: c.can_update_deliverables ? "Apply your own input (responses, decisions, notes, corrections) to the latest deliverables; no Wiz fetch" : "No prepared deliverables to update" }, "Update");
+      update.addEventListener("click", () => {
+        clear(updateBox);
+        const prompt = "Client or stakeholder response, decisions, notes or corrections to apply";
+        const text = h("textarea", { rows: 5, maxlength: 1500, "aria-label": prompt, placeholder: prompt });
+        const go2 = h("button", { type: "button", class: "small" }, "Update deliverables locally (not sent)");
+        const status = h("p", { class: "help", role: "status" }, "Up to 1500 characters; unsupported symbols are replaced automatically. No Wiz fetch.");
+        go2.addEventListener("click", async () => {
+          status.className = "help"; status.setAttribute("role", "status");
+          if (!text.value.trim()) { status.textContent = "Enter the update input first."; status.className = "bad"; status.setAttribute("role", "alert"); return; }
+          status.textContent = "Starting update...";
+          await startCase(go2, "update-deliverables", { case_folder: c.name, update_text: text.value }, true);
+          if (message.textContent) { status.textContent = message.textContent; status.className = "bad"; status.setAttribute("role", "alert"); }
+        });
+        updateBox.append(text, go2, status);
+      });
       const draftBox = h("div", { class: "draft-box" });
       const draftButton = (label, actionId, prompt) => {
         const b = h("button", { class: "secondary small", type: "button" }, label);
@@ -863,11 +878,11 @@ function riskCasesPanel(category) {
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
           manualBox,
           h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
-        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, draftBox, ...c.files.filter((f) => /\.(pdf|html|pptx|xlsx)$/i.test(f.name)).slice(0, 3).map((f) => fileButton("View " + f.name.slice(0, 28), f, message)))));
+        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, ...c.files.filter((f) => /\.(pdf|html|pptx|xlsx)$/i.test(f.name)).slice(0, 3).map((f) => fileButton("View " + f.name.slice(0, 28), f, message)))));
     }
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
-    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Resume is one-time; Update refreshes a resumed case incrementally; email actions only draft locally. Nothing is changed by this list."), list, message);
+    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
 function weeklyPanel(category) {
   const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));

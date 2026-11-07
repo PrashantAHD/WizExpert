@@ -41,7 +41,12 @@ LATE_START_MESSAGE = "The console stopped before this run started."
 INACTIVE = ("completed", "stopped", "interrupted", "not_started", "rejected")
 MCP_HINT_SECONDS = 600.0
 MCP_ACTIONS = ("start", "stop", "auth", "list")
-ACTION_CASE_MODES = {"update-case": "update", "follow-up-email": "any", "reply-response": "any"}
+ACTION_CASE_MODES = {
+    "refresh-case": "refresh",
+    "update-deliverables": "deliverables",
+    "follow-up-email": "any",
+    "reply-response": "any",
+}
 MCP_SERVER = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 
 
@@ -189,9 +194,9 @@ class RunManager:
             if found is None and run.handoff is None and run.status == "handed_off":
                 self._recover_orphan_handoff(run)
                 return
+            # Invariant: a handoff seen in the log always becomes a pending handoff, so the run
+            # is either rebound to the new chat or times out; it can never wait silently.
             if found is not None and run.handoff is None:
-                if found["ahp"] == run.ahp_id:
-                    return
                 run.handoff = {**found, "from": run.session_id, "from_ahp": run.ahp_id}
                 run.ahp_id = found["ahp"]  # Open chat / Stop already point at the new chat
                 run.status = "handed_off"
@@ -203,7 +208,11 @@ class RunManager:
             if now - run.handoff_try < 2.0:
                 return
             run.handoff_try = now
-        sid = self.finder.sdk_session(pending["ahp"]) or self.finder.find_handoff(
+        # A peer chat shares the ahp id with the old chat, so only its prompt identifies it.
+        by_ahp = None if pending.get("chat") else self.finder.sdk_session(pending["ahp"])
+        if by_ahp == pending.get("from"):
+            by_ahp = None
+        sid = by_ahp or self.finder.find_handoff(
             str(pending.get("prompt") or ""),
             float(pending.get("since") or 0.0),
             self._claimed() | {str(pending.get("from") or "")},
@@ -330,6 +339,7 @@ class RunManager:
         ensure_helper: Callable[[], bool] | None = None,
         gated: bool = False,
     ) -> Run:
+        action_id = categories.canonical_action(action_id)
         try:
             values = categories.validate(category_id, raw, action_id)
             prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
@@ -393,7 +403,7 @@ class RunManager:
                     self.config,
                     values["case_folder"],
                     ACTION_CASE_MODES.get(
-                        action_id or "", "resume"
+                        categories.canonical_action(action_id) or "", "refresh"
                     ),
                 )
             if values.get("report_folder"):
