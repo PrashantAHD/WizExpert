@@ -142,6 +142,37 @@ def test_risk_case_resolved_only_when_all_wiz_issues_resolved(env):  # noqa: F81
             assert scanned[name]["status"] == "In-Progress", name
 
 
+def test_risk_case_resolved_uses_latest_refresh_not_sorted_first(env):  # noqa: F811
+    config, workspace, _ = env
+    res = {"OPEN": 0, "IN_PROGRESS": 0, "RESOLVED": 2, "REJECTED": 0}
+    reopened = {**res, "OPEN": 1}
+    cases = {
+        # older file sorts first and says resolved; newer refresh reopened it
+        "Reopen-wc-id-51": [("a.workflow.json", "2026-01-01T00:00:00Z", res),
+                            ("b.workflow.json", "2026-02-01T00:00:00Z", reopened)],
+        # older file sorts first and says in progress; newer refresh resolved it
+        "Resolve-wc-id-52": [("a.workflow.json", "2026-01-01T00:00:00Z", reopened),
+                             ("b.workflow.json", "2026-02-01T00:00:00Z", res)],
+        # newest refresh malformed -> In-Progress, never the older resolved snapshot
+        "Malformed-wc-id-53": [("a.workflow.json", "2026-01-01T00:00:00Z", res),
+                               ("b.workflow.json", "2026-02-01T00:00:00Z", {"RESOLVED": "2"})],
+        # sorted-last file is the older one
+        "Order-wc-id-54": [("a.workflow.json", "2026-03-01T00:00:00Z", res),
+                           ("z.workflow.json", "2026-01-01T00:00:00Z", reopened)],
+    }
+    for name, records in cases.items():
+        for fname, when, counts in records:
+            _touch(workspace / "deliverables" / "Risk-Issues" / name / fname,
+                   json.dumps({"collection": {"collected_at": when, "status_counts": counts}}))
+        _touch(workspace / "deliverables" / "Risk-Issues" / name / "Analysis.html")
+    scanned = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert scanned["Reopen-wc-id-51"]["resolved"] is False
+    assert scanned["Resolve-wc-id-52"]["resolved"] is True
+    assert scanned["Malformed-wc-id-53"]["resolved"] is False
+    assert scanned["Order-wc-id-54"]["resolved"] is True
+    assert scanned["Order-wc-id-54"]["status"] == "RESOLVED"
+
+
 def test_risk_case_without_workflow_json_is_not_resolved(env):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)
