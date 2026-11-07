@@ -11,13 +11,14 @@ const state = {
 const STATUS_TEXT = {
   starting: "Starting the chat in VS Code", running: "Running", input_needed: "Input needed in VS Code",
   completed: "Finished", stopped: "Stopped", not_started: "Did not start", interrupted: "Interrupted",
-  handed_off: "Handed off \u2013 waiting for new chat",
+  handed_off: "Handed off \u2013 waiting for new chat", awaiting_gate: "Waiting for your approval", rejected: "Rejected",
 };
-const TERMINAL = new Set(["completed", "stopped", "not_started", "interrupted"]);
-const NEEDS_ATTENTION = new Set(["input_needed", "handed_off"]);
+const TERMINAL = new Set(["completed", "stopped", "not_started", "interrupted", "rejected"]);
+const NEEDS_ATTENTION = new Set(["input_needed", "handed_off", "awaiting_gate"]);
 const STAGE_HELP = {
   new: "Start a fresh review and prepare the initial local deliverables.",
   "in-progress": "Continue existing work with an acceptance, email, or status action.",
+  previous: "Browse what already exists locally (read-only), then update, compare or start the next one.",
 };
 const VIEWS = ["home", "dashboard", "progress", "history", "workflow", "run"];
 
@@ -300,6 +301,7 @@ function refresh() {
     try {
       const data = await api("GET", "/api/bootstrap");
       state.categories = data.categories; state.helper = data.helper; renderHelper();
+      if (state.helper.connected && (!state.mcpAt || Date.now() - state.mcpAt > 30000)) { state.mcpAt = Date.now(); refreshMcp(); }
       autoConnect();
       state.active = data.active || []; state.history = data.history || [];
       state.updated = Date.now(); state.stale = false; state.loaded = true; state.refreshError = "";
@@ -671,6 +673,14 @@ function showWorkflow(category, stageId, actionId) {
     clear(detail);
     detail.append(h("p", { class: "lede" }, STAGE_HELP[stage.id] || ""));
     const actions = category.actions.filter((a) => a.stage === stage.id);
+    if (category.imports && stage.id === "previous") {
+      const update = actions.find((a) => a.id === "update");
+      if (chosenAction === "update" && update) detail.append(weeklyUpdatePanel(category, update));
+      else if (category.imports === "weekly") detail.append(weeklyPanel(category));
+      else detail.append(monthlyPanel(category));
+      return;
+    }
+    if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category));
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
       detail.append(h("h2", {}, "Existing work items"));
       const workItems = h("div", { class: "item-list" });
@@ -693,6 +703,41 @@ function showWorkflow(category, stageId, actionId) {
         };
         refreshButton = h("button", { class: "secondary", type: "button", onclick: refreshItem }, "Refresh");
         workItems.append(h("div", { class: "item-row" }, h("div", {}, h("strong", {}, item), h("span", { class: "meta" }, "Refresh today's progress")), refreshButton), message);
+        const replyAction = actions.find((a) => a.id === "reply-stakeholder");
+        if (replyAction) {
+          const box = h("div", { class: "draft-box", hidden: true });
+          const sender = h("input", { type: "text", maxlength: 80, "aria-label": "Sender name", placeholder: "Sender name" });
+          const received = h("input", { type: "date", "aria-label": "Received date", value: new Date().toISOString().slice(0, 10) });
+          const body = h("textarea", { rows: 5, maxlength: 1500, "aria-label": "Stakeholder response", placeholder: "Paste the stakeholder response" });
+          const note = h("p", { class: "help", role: "status" });
+          const payload = () => ({ work_item: item, sender: sender.value, received_date: received.value, email_text: body.value });
+          const saveBtn = h("button", { type: "button", class: "secondary small" }, "Save response");
+          const draftBtn = h("button", { type: "button", class: "small" }, "Generate Reply Draft (not sent)");
+          saveBtn.addEventListener("click", async () => {
+            note.className = "bad"; note.textContent = "";
+            try { await api("POST", "/api/imports/stakeholder-response", payload()); note.className = "help"; note.textContent = "Response saved locally."; }
+            catch (e) { note.textContent = e.message; }
+          });
+          draftBtn.addEventListener("click", async () => {
+            note.className = "bad"; note.textContent = ""; draftBtn.disabled = true;
+            try {
+              await api("POST", "/api/imports/stakeholder-response", payload());
+              const res = await api("POST", "/api/runs", { category_id: category.id, action_id: replyAction.id, inputs: payload() });
+              go(runPath(res.run_id));
+            } catch (e) { note.textContent = e.message; helperRecoveryMessage(e); draftBtn.disabled = false; }
+          });
+          box.append(sender, received, body, h("div", { class: "row-actions" }, saveBtn, draftBtn), note);
+          const toggle = h("button", { class: "secondary small", type: "button", "aria-expanded": "false" }, "Record Response");
+          toggle.addEventListener("click", () => {
+            box.hidden = !box.hidden;
+            toggle.setAttribute("aria-expanded", String(!box.hidden));
+          });
+          api("GET", "/api/imports/stakeholder-response?work_item=" + encodeURIComponent(item)).then((r) => {
+            const last = (r.responses || []).slice(-1)[0];
+            if (last) { sender.value = last.sender; received.value = last.received_date; body.value = last.text; toggle.textContent = "Record Response (saved " + last.received_date + ")"; }
+          }).catch(() => {});
+          workItems.append(h("div", { class: "row-actions" }, toggle), box);
+        }
       }
       detail.append(workItems);
       return;
@@ -732,6 +777,283 @@ function showWorkflow(category, stageId, actionId) {
   if (stage) showStage(stage, actionId);
   else if (stageId) detail.append(stateBox("error", "Unknown stage", "This stage is not available for " + category.title + ".", "Back to workflow", () => go(wfPath(category.id))));
   else detail.append(stateBox("empty", "Choose a stage", "Select a stage above to continue."));
+}
+// ---- imported local deliverables (read-only listings) and approval gates --------------------------
+// One shared Deliverables component for every category (risk-issues, weekly, monthly).
+function deliverablesButton(category, folder, message) {
+  return h("button", { class: "secondary small", type: "button", onclick: () => showDeliverables(category, folder, message) }, "Deliverables");
+}
+async function openDeliverable(category, folder, f, withApp, status) {
+  status.textContent = ""; status.className = "help";
+  try {
+    const r = await api("POST", "/api/imports/files/open", { category, folder, name: f.name, with: withApp || undefined });
+    status.textContent = "Opened " + f.name + " (" + r.app + ").";
+  } catch (e) { status.textContent = e.message; status.className = "bad"; }
+}
+async function showDeliverables(category, folder, message) {
+  const status = h("p", { class: "help", role: "status" });
+  const body = h("div", {}, h("p", { class: "help" }, "Loading\u2026"));
+  const close = h("button", { type: "button", class: "secondary", onclick: () => overlay.remove() }, "Close");
+  const overlay = h("div", { class: "modal-overlay", role: "dialog", "aria-modal": "true", "aria-label": "Deliverables for " + folder,
+    onkeydown: (e) => { if (e.key === "Escape") overlay.remove(); } },
+    h("div", { class: "card modal-card" },
+      h("h2", {}, "Deliverables"), body, status, close));
+  document.body.append(overlay); close.focus();
+  try {
+    const { files } = await api("GET", "/api/imports/files?category=" + encodeURIComponent(category) + "&folder=" + encodeURIComponent(folder));
+    clear(body);
+    if (!files.length) { body.append(h("p", { class: "help" }, "No deliverable files here yet.")); return; }
+    const table = h("table", { class: "table" }, h("thead", {}, h("tr", {}, ["Name", "Type", "Modified", ""].map((x) => h("th", {}, x)))));
+    const tb = h("tbody", {});
+    for (const f of files) {
+      const actions = h("td", {}, h("button", { class: "secondary small", type: "button", onclick: () => openDeliverable(category, folder, f, null, status) }, "Open"));
+      if (f.can_open_in_chrome) actions.append(" ", h("button", { class: "secondary small", type: "button", onclick: () => openDeliverable(category, folder, f, "chrome", status) }, "Open in Chrome"));
+      tb.append(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", {}, f.type), h("td", {}, fmtDate(f.modified)), actions));
+    }
+    table.append(tb); body.append(table);
+  } catch (e) { clear(body); body.append(h("p", { class: "bad" }, "Could not list files: " + e.message)); }
+}
+function tableOf(head, rows) {
+  const table = h("table", { class: "table" }, h("thead", {}, h("tr", {}, head.map((c) => h("th", {}, c)))));
+  const body = h("tbody", {});
+  for (const r of rows) body.append(h("tr", {}, r.map((c) => h("td", {}, c == null ? "" : String(c)))));
+  table.append(body);
+  return table;
+}
+function loadingNote(text) { return h("p", { class: "help", role: "status" }, text); }
+function riskCasesPanel(category) {
+  const list = h("div", { class: "item-list" }, loadingNote("Scanning local Risk Issues cases..."));
+  const message = h("p", { role: "status" });
+  api("GET", "/api/imports/risk-issues").then((res) => {
+    clear(list);
+    if (!res.cases.length) { list.append(h("p", { class: "help" }, "No existing case folders were found under deliverables/Risk-Issues.")); return; }
+    for (const c of res.cases) {
+      const startCase = async (button, actionId, inputs, enabled) => {
+        button.disabled = true; message.textContent = ""; message.className = "bad";
+        try {
+          const run = await api("POST", "/api/runs", { category_id: category.id, action_id: actionId, inputs });
+          go(runPath(run.run_id));
+        } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); button.disabled = !enabled; }
+      };
+      const resume = h("button", { type: "button", disabled: !c.can_refresh, title: c.can_refresh ? "Repeatable read-only refresh: latest Wiz status, delta vs retained evidence, updated deliverables" : "No retained evidence folder to refresh from" }, "Refresh");
+      resume.addEventListener("click", () => startCase(resume, "refresh-case", { case_folder: c.name }, c.can_refresh));
+      const updateBox = h("div", { class: "draft-box" });
+      const update = h("button", { type: "button", disabled: !c.can_update_deliverables, title: c.can_update_deliverables ? "Apply your own input (responses, decisions, notes, corrections) to the latest deliverables; no Wiz fetch" : "No prepared deliverables to update" }, "Update");
+      update.addEventListener("click", () => {
+        clear(updateBox);
+        const prompt = "Client or stakeholder response, decisions, notes or corrections to apply";
+        const text = h("textarea", { rows: 5, maxlength: 1500, "aria-label": prompt, placeholder: prompt });
+        const go2 = h("button", { type: "button", class: "small" }, "Update deliverables locally (not sent)");
+        const status = h("p", { class: "help", role: "status" }, "Up to 1500 characters; unsupported symbols are replaced automatically. No Wiz fetch.");
+        go2.addEventListener("click", async () => {
+          status.className = "help"; status.setAttribute("role", "status");
+          if (!text.value.trim()) { status.textContent = "Enter the update input first."; status.className = "bad"; status.setAttribute("role", "alert"); return; }
+          status.textContent = "Starting update...";
+          await startCase(go2, "update-deliverables", { case_folder: c.name, update_text: text.value }, true);
+          if (message.textContent) { status.textContent = message.textContent; status.className = "bad"; status.setAttribute("role", "alert"); }
+        });
+        updateBox.append(text, go2, status);
+      });
+      const draftBox = h("div", { class: "draft-box" });
+      const draftButton = (label, actionId, prompt) => {
+        const b = h("button", { class: "secondary small", type: "button" }, label);
+        b.addEventListener("click", () => {
+          clear(draftBox);
+          const text = h("textarea", { rows: 4, maxlength: 1500, "aria-label": prompt, placeholder: prompt });
+          const go1 = h("button", { type: "button", class: "small" }, "Draft locally (not sent)");
+          const status = h("p", { class: "help", role: "status" }, "Up to 1500 characters; unsupported symbols are replaced automatically.");
+          go1.addEventListener("click", async () => {
+            status.className = "help"; status.setAttribute("role", "status");
+            status.textContent = "Starting draft...";
+            await startCase(go1, actionId, { case_folder: c.name, email_text: text.value }, true);
+            if (message.textContent) { status.textContent = message.textContent; status.className = "bad"; status.setAttribute("role", "alert"); }
+          });
+          draftBox.append(text, go1, status);
+        });
+        return b;
+      };
+      const followUp = draftButton("Follow-up Email", "follow-up-email", "Paste the email you previously sent");
+      const reply = draftButton("Reply to Response", "reply-response", "Paste the response received from the assigned team");
+      const manualBox = h("fieldset", { class: "manual-milestones", id: "status-form-" + c.name, hidden: true }, h("legend", { class: "meta" }, "Current Status"));
+      const statusButton = h("button", { class: "secondary small update-status", type: "button", "aria-expanded": "false", "aria-controls": manualBox.id, title: "Show or hide the one-time status confirmations" }, "Update Status");
+      statusButton.addEventListener("click", () => {
+        const open = manualBox.hidden;
+        manualBox.hidden = !open;
+        statusButton.setAttribute("aria-expanded", open ? "true" : "false");
+      });
+      for (const [key, label, done] of [["ticket_created", "Ticket Created", "Ticket Created"], ["email_sent", "Email Sent", "Email Sent"], ["reports_sent", "Reports Sent", "Reports Sent"], ["follow_up_sent", "Follow-up Sent", "Follow-up Sent"]]) {
+        if (c.manual_milestones && c.manual_milestones[key]) { manualBox.append(h("span", { class: "badge done manual-status", id: "mm-" + c.name + "-" + key }, done)); continue; }
+        const box = h("input", { type: "checkbox", id: "mm-" + c.name + "-" + key, "aria-label": label + " for " + c.name });
+        box.checked = !!(c.manual_milestones && c.manual_milestones[key]);
+        box.disabled = !c.manual_editable;
+        box.addEventListener("change", async () => {
+          if (!box.checked) return; const wanted = true; box.disabled = true;
+          try {
+            await api("POST", "/api/imports/risk-issues/milestone", { case: c.name, milestone: key, checked: wanted });
+            const st = h("span", { class: "badge done manual-status", id: box.id }, done); box.parentNode.replaceWith(st);
+            message.textContent = done + " saved for " + c.name + "."; message.className = "help"; return;
+          } catch (e) { box.checked = false; message.textContent = "Could not save " + label + ": " + e.message; message.className = "bad"; }
+          box.disabled = !c.manual_editable;
+        });
+        manualBox.append(h("label", { for: box.id }, box, " " + label + " "));
+      }
+      list.append(h("div", { class: "item-row case-card" },
+        h("div", {}, h("strong", {}, c.name),
+          h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
+          h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
+          manualBox,
+          h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
+        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, deliverablesButton("risk-issues", c.name, message))));
+    }
+  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
+  return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
+    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
+}
+function weeklyPanel(category) {
+  const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));
+  const message = h("p", { role: "status" });
+  const diffBox = h("div", { class: "diff-box" });
+  const compare = async (name, previous) => {
+    clear(diffBox);
+    try {
+      const d = await api("GET", "/api/imports/weekly-diff?current=" + encodeURIComponent(name) + (previous ? "&previous=" + encodeURIComponent(previous) : ""));
+      diffBox.append(h("h3", {}, "Week-over-week: " + d.current + " vs " + d.previous),
+        d.counts.length ? tableOf(["Count", "Current", "Previous", "Change"], d.counts.map((r) => [r.field, r.current, r.previous, r.delta])) : h("p", { class: "help" }, "No count data."),
+        h("p", {}, "Added: " + d.added.length + " \u00b7 Removed: " + d.removed.length + " \u00b7 Changed: " + d.changed.length),
+        d.added.length ? tableOf(["Added item", "Title", "Status"], d.added.map((i) => [i.item_id, i.title, i.status])) : null,
+        d.removed.length ? tableOf(["Removed item", "Title", "Status"], d.removed.map((i) => [i.item_id, i.title, i.status])) : null,
+        d.changed.length ? tableOf(["Changed item", "Title", "Change"], d.changed.map((i) => [i.item_id, i.title, Object.entries(i.changes).map(([k, v]) => k + ": " + v.from + " \u2192 " + v.to).join("; ")])) : null);
+    } catch (e) { diffBox.append(h("p", { class: "bad" }, e.message)); }
+  };
+  api("GET", "/api/imports/weekly").then((res) => {
+    clear(list);
+    if (!res.reports.length) { list.append(h("p", { class: "help" }, "No previous weekly reports were found. Use New report for the first one.")); return; }
+    res.reports.forEach((r, i) => {
+      const older = res.reports[i + 1];
+      const row = [deliverablesButton("weekly", r.name, message)];
+      if (r.has_data && older && older.has_data) row.push(h("button", { class: "secondary small", type: "button", onclick: () => compare(r.name, older.name) }, "Compare with " + older.name));
+      if (r.latest) row.push(h("button", { type: "button", onclick: () => go(wfPath(category.id, "previous", "update")) }, "Update"));
+      list.append(h("div", { class: "item-row" },
+        h("div", {}, h("strong", {}, "Report " + r.name), h("span", { class: "meta" }, "Last modified " + fmtDate(r.modified) + (r.latest ? " \u00b7 latest (can be updated)" : " \u00b7 read-only history") + (r.template_only ? " \u00b7 template files only" : ""))),
+        h("div", { class: "row-actions" }, ...row)));
+    });
+  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list reports: " + e.message)); });
+  return h("section", { class: "imports" }, h("h2", {}, "Previous reports"),
+    h("p", { class: "help" }, "Read-only list of deliverables/Weekly-Progress-Reporting. Only the latest report can be updated; the email stays a local draft."),
+    list, message, diffBox,
+    h("div", { class: "form-actions" }, h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(category.id, "new")) }, "New report")));
+}
+function monthlyPanel(category) {
+  const list = h("div", { class: "item-list" }, loadingNote("Scanning previous governance months..."));
+  const message = h("p", { role: "status" });
+  const diffBox = h("div", { class: "diff-box" });
+  const compare = async (month) => {
+    clear(diffBox);
+    try {
+      const d = await api("GET", "/api/imports/monthly-compare?month=" + encodeURIComponent(month));
+      diffBox.append(h("h3", {}, "Parity: " + d.month + " (" + d.month_status + ") vs " + d.previous + " (" + d.previous_status + ")"),
+        tableOf(["Check", "This month", "Previous", "OK"], d.checks.map((c) => [c.check, c.current ? "yes" : "no", c.previous ? "yes" : "no", c.ok ? "ok" : "differs"])),
+        d.rows.length ? tableOf(["Snapshot value", "Current", "Previous", "Change"], d.rows.map((r) => [r.field, r.current, r.previous, r.delta])) : h("p", { class: "help" }, d.note));
+    } catch (e) { diffBox.append(h("p", { class: "bad" }, e.message)); }
+  };
+  api("GET", "/api/imports/monthly").then((res) => {
+    clear(list);
+    if (!res.months.length) { list.append(h("p", { class: "help" }, "No previous governance months were found. Use New month.")); return; }
+    for (const m of res.months) {
+      const view = [deliverablesButton("monthly", m.month, message)];
+      list.append(h("div", { class: "item-row" },
+        h("div", {}, h("strong", {}, m.month), h("span", { class: "meta" }, "Last modified " + fmtDate(m.modified) + (m.has_json ? " \u00b7 governance.json present" : " \u00b7 no governance.json")),
+          h("span", { class: "badge " + (m.status === "final" ? "completed" : "input_needed") }, m.status)),
+        h("div", { class: "row-actions" }, ...view, h("button", { class: "secondary small", type: "button", onclick: () => compare(m.month) }, "Compare vs previous month"))));
+    }
+  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list months: " + e.message)); });
+  return h("section", { class: "imports" }, h("h2", {}, "Previous months"),
+    h("p", { class: "help" }, "Read-only list of deliverables/Monthly-Governance-Reporting. PRELIMINARY means no final workbook or deck exists for that month yet."),
+    list, message, diffBox,
+    h("div", { class: "form-actions" }, h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(category.id, "new")) }, "New month")));
+}
+function weeklyUpdatePanel(category, action) {
+  const box = h("div", {}, h("p", { class: "help" }, "Looking up the latest report..."));
+  api("GET", "/api/imports/weekly").then((res) => {
+    clear(box);
+    const latest = res.reports[0];
+    if (!latest) { box.append(h("p", { class: "bad" }, "No previous report exists to update.")); return; }
+    box.append(h("p", { class: "help" }, "Updating the latest report " + latest.name + ". The prior version is archived first, then the report is regenerated from retained evidence with a change log."),
+      formPanel(category, action, action.id, () => go(wfPath(category.id, "previous")), { report_folder: latest.name }));
+  }).catch((e) => { clear(box); box.append(h("p", { class: "bad" }, e.message)); });
+  return box;
+}
+async function gateDecide(run, gate, decision, message, buttons) {
+  message.textContent = ""; buttons.forEach((b) => { b.disabled = true; });
+  try {
+    const res = await api("POST", "/api/runs/" + run.id + "/gate", { gate, decision });
+    state.shown = "";
+    if (res.run_id && res.run_id !== run.id) go(runPath(res.run_id)); else poll();
+  } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); buttons.forEach((b) => { b.disabled = false; }); }
+}
+function gatesBlock(run) {
+  if (!run.gates || !run.gates.length) return null;
+  const message = h("p", { class: "bad", role: "alert" });
+  const next = run.gates.find((g) => g.state === "pending");
+  const first = run.gates[0] === next;
+  const ready = next && !run.child && (first ? run.status === "awaiting_gate" : run.status === "completed");
+  const items = run.gates.map((g) => h("li", {}, h("strong", {}, g.label), " \u2013 " + g.state + (g.at ? " at " + fmtDate(g.at) : "")));
+  const box = h("section", { class: "card gates", "aria-label": "Approval gates" }, h("h2", {}, "Approvals"), h("ul", { class: "gate-list" }, ...items));
+  if (ready) {
+    const approve = h("button", { type: "button" }, "Approve " + next.label.toLowerCase());
+    const reject = h("button", { class: "danger", type: "button" }, "Reject");
+    const buttons = [approve, reject];
+    approve.addEventListener("click", () => gateDecide(run, next.id, "approve", message, buttons));
+    reject.addEventListener("click", () => gateDecide(run, next.id, "reject", message, buttons));
+    box.append(h("p", { class: "help" }, first
+      ? "Nothing has been sent to the agent yet. Approving hands the collection-plan stage to a new VS Code chat."
+      : "The previous stage finished. Approving hands this stage to a new VS Code chat."), h("div", { class: "form-actions" }, approve, reject), message);
+  } else if (run.child) {
+    box.append(h("p", {}, "A later stage was started: ", link(runPath(run.child), "", "open it")));
+  }
+  if (run.parent) box.append(h("p", { class: "help" }, "Continues ", link(runPath(run.parent), "", "the earlier stage"), "."));
+  return box;
+}
+async function focusVsCode(run) {
+  try { const r = await api("POST", "/api/helper/focus", run ? { run_id: run.id } : {}); banner("Focus requested: " + (r.note || "done")); }
+  catch (e) { banner("Could not focus VS Code: " + e.message); }
+}
+function approvalBanner(run) {
+  if (!run.waiting_approval) return null;
+  return h("div", { class: "wait-banner", role: "status" },
+    h("strong", {}, "Waiting for approval in VS Code"),
+    h("span", {}, run.waiting_reason === "stalled"
+      ? " The chat has been silent with a tool call open, so a confirmation prompt is probably waiting."
+      : " A tool call needs your confirmation."),
+    h("button", { type: "button", onclick: () => focusVsCode(run) }, "Focus VS Code"));
+}
+// ---- Wiz MCP status (sidebar) ----------------------------------------------------------------------------
+const MCP_TEXT = { connected: "Wiz MCP connected", needs_auth: "Wiz MCP needs sign-in", stopped: "Wiz MCP stopped", not_configured: "Wiz MCP not configured", unknown: "Wiz MCP status unknown" };
+async function refreshMcp() {
+  try { state.mcp = await api("GET", "/api/helper/mcp"); } catch (e) { state.mcp = { state: "unknown", detail: e.message, servers: [] }; }
+  renderMcp();
+}
+async function mcpAct(action) {
+  try { const r = await api("POST", "/api/helper/mcp", { action }); banner("Wiz MCP " + action + ": " + (r.note || "sent") + (action === "auth" ? ". Finish the sign-in in the browser window." : "")); }
+  catch (e) { banner("Wiz MCP: " + e.message); }
+  setTimeout(refreshMcp, 4000);
+}
+function renderMcp() {
+  const box = $("mcp"); if (!box) return;
+  clear(box);
+  const m = state.mcp || { state: "unknown", detail: "", servers: [] };
+  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {}, MCP_TEXT[m.state] || m.state)),
+    m.detail ? h("p", { class: "help" }, m.detail) : null);
+  if (m.servers && m.servers.length) {
+    const running = m.state === "connected" || m.state === "needs_auth";
+    box.append(h("p", { class: "help" }, "Status: " + (running ? "Running" : "Stopped")));
+    const btn = (label, fn) => h("button", { class: "secondary small", type: "button", onclick: fn }, label);
+    box.append(h("div", { class: "row-actions" },
+      running ? null : btn("Start", () => mcpAct("start")),
+      running ? btn("Stop", () => mcpAct("stop")) : null,
+      m.state === "connected" ? null : btn("Authenticate", () => mcpAct("auth")),
+      btn("Refresh", refreshMcp)));
+  }
 }
 function previousReportPicker(id) {
   // Options come from a local, read-only listing of weekly-progress folders (names only).
@@ -778,7 +1100,7 @@ function formPanel(category, spec, actionId, onBack, initialValues = {}) {
   const draft = Object.assign({}, loadDraft(category.id)[draftKey] || {}, initialValues);
   if (spec.description && actionId) panel.append(h("p", { class: "lede" }, spec.description));
   for (const f of spec.fields) {
-    const multiline = f.name === "email_text";
+    const multiline = ["email_text", "internal_response", "client_response"].includes(f.name);
     const id = "f-" + category.id + "-" + draftKey + "-" + f.name;
     const input = multiline
       ? h("textarea", { id, rows: 8, maxlength: f.max_length || 200, placeholder: f.placeholder || "", autocomplete: "off" })
@@ -819,6 +1141,8 @@ function formPanel(category, spec, actionId, onBack, initialValues = {}) {
       const inputs = {}; for (const [k, v] of Object.entries(fields)) inputs[k] = v.value;
       const body = { category_id: category.id, inputs };
       if (actionId) body.action_id = actionId;
+      // Weekly/monthly runs wait behind console approval gates before the agent gets the prompt.
+      if (category.imports === "weekly" || category.imports === "monthly") body.gated = true;
       const res = await api("POST", "/api/runs", body);
       clearDraft(category.id, draftKey);
       go(runPath(res.run_id));
@@ -876,7 +1200,7 @@ function renderRun(run) {
   state.runStatus = run.status; state.runCategory = run.category_id || run.category;
   updateIndicator();
   // Rebuild only when something changed, so button messages and scroll position survive polling.
-  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output]);
+  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output, run.waiting_approval, run.gates, run.child]);
   if (sig === state.shown) return;
   const first = !state.shown;
   state.shown = sig;
@@ -889,11 +1213,16 @@ function renderRun(run) {
   if (run.can_open_chat) toolbar.append(h("button", { type: "button", onclick: openChat }, "Open this chat in VS Code"));
   if (run.can_stop) toolbar.append(stopButton(run));
   if (run.can_open_output) toolbar.append(h("button", { class: "secondary", type: "button", onclick: openLatestOutput }, "View latest output"));
+  if (run.can_focus) toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => focusVsCode(run) }, "Focus VS Code"));
   if (run.category_id) toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(run.category_id)) }, "Open workflow page"));
   toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go("/history") }, "All history"));
   root.append(runCrumbs(run), h("header", { class: "page-head" },
     h("h1", { class: "route-heading", tabindex: "-1" }, run.category),
     h("p", { class: "status-line", role: "status" }, badge(run.status), h("span", {}, run.message))), toolbar);
+  for (const extra of [approvalBanner(run), gatesBlock(run)]) if (extra) root.append(extra);
+  if (run.category_id === "weekly-progress-reporting" && run.status === "completed") {
+    toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(run.category_id, "previous")) }, "Week-over-week diff"));
+  }
   if (run.pending) root.append(pendingBlock(run));
   const log = rawProgressBlock();
   if (logOpen) log.open = true;

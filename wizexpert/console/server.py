@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import sessions
+from . import imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
 from .runs import RunError, RunManager
@@ -391,9 +391,10 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             instance = re.sub(r"[^0-9a-f]", "", (query.get("instance") or [""])[0])[:32]
             folders = json.loads(unquote((query.get("folders") or ["[]"])[0]))
             folders = [str(f) for f in folders][:10] if isinstance(folders, list) else []
+            version = str((query.get("version") or [""])[0])[:20] or None
         except (ValueError, TypeError):
             return self._error(HTTPStatus.BAD_REQUEST, "Bad query.")
-        self._signed_json(nonce, bridge.poll(after, instance or "x", folders))
+        self._signed_json(nonce, bridge.poll(after, instance or "x", folders, version=version))
 
     def _bridge_post(self, path: str) -> None:
         bridge = self.app.bridge
@@ -442,6 +443,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "deliverables folders; choose first report or enter a folder name.",
                 },
             )
+        if path.startswith("/api/imports/") or path == "/api/helper/mcp":
+            return self._api_imports(path, query)
         if path == "/api/runs/active":
             return self._json(HTTPStatus.OK, {"runs": manager.active()})
         match = re.fullmatch(r"/api/runs/([^/]+)", path)
@@ -451,6 +454,53 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, manager.view(match.group(1), since))
             except (RunError, ValueError):
                 return self._error(HTTPStatus.NOT_FOUND, "Unknown run.")
+        self._error(HTTPStatus.NOT_FOUND, "Not found.")
+
+    def _api_imports(self, path: str, query: dict[str, list[str]]) -> None:
+        """Read-only listings of existing local deliverables plus the Wiz MCP status."""
+        config = self.app.config
+        arg = lambda name: (query.get(name) or [""])[0]  # noqa: E731
+        try:
+            if path == "/api/helper/mcp":
+                return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
+            if path == "/api/imports/risk-issues":
+                return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/files":
+                return self._json(
+                    HTTPStatus.OK,
+                    {"files": launcher.list_files(config, arg("category"), arg("folder"))},
+                )
+            if path == "/api/imports/case-files":
+                return self._json(
+                    HTTPStatus.OK, {"files": launcher.list_case_files(config, arg("case"))}
+                )
+            if path == "/api/imports/stakeholder-response":
+                return self._json(
+                    HTTPStatus.OK,
+                    {"responses": stakeholder.list_responses(config, arg("work_item"))},
+                )
+            if path == "/api/imports/weekly":
+                return self._json(HTTPStatus.OK, {"reports": imports.scan_weekly(config)})
+            if path == "/api/imports/monthly":
+                return self._json(HTTPStatus.OK, {"months": imports.scan_monthly(config)})
+            if path == "/api/imports/weekly-diff":
+                reports = imports.scan_weekly(config)
+                current = arg("current") or (reports[0]["name"] if reports else "")
+                previous = arg("previous")
+                if not previous:
+                    names = [r["name"] for r in reports]
+                    older = names[names.index(current) + 1 :] if current in names else []
+                    previous = older[0] if older else ""
+                if not previous:
+                    raise ValueError("There is no earlier weekly report to compare with.")
+                return self._json(HTTPStatus.OK, imports.weekly_diff(config, current, previous))
+            if path == "/api/imports/monthly-compare":
+                return self._json(
+                    HTTPStatus.OK,
+                    imports.compare_months(config, arg("month"), arg("other") or None),
+                )
+        except ValueError as error:
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
         self._error(HTTPStatus.NOT_FOUND, "Not found.")
 
     def _api_post(self, path: str, body: dict[str, Any]) -> None:
@@ -463,8 +513,76 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
-            run = manager.start(category, inputs, action, ensure_helper=ensure_helper)
+            run = manager.start(
+                category,
+                inputs,
+                action,
+                ensure_helper=ensure_helper,
+                gated=body.get("gated") is True,
+            )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/risk-issues/milestone":
+            try:
+                saved = imports.set_manual_milestone(
+                    self.app.config, body.get("case"), body.get("milestone"), body.get("checked")
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "manual_milestones": saved})
+        if path == "/api/imports/stakeholder-response":
+            try:
+                saved = stakeholder.save_response(self.app.config, body)
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "response": saved})
+        if path == "/api/imports/case-files/open":
+            try:
+                used = launcher.open_case_file(
+                    self.app.config,
+                    body.get("case"),
+                    body.get("name"),
+                    body.get("with"),
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "app": used})
+        if path == "/api/imports/files/open":
+            try:
+                used = launcher.open_file(
+                    self.app.config,
+                    body.get("category"),
+                    body.get("folder"),
+                    body.get("name"),
+                    body.get("with"),
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "app": used})
+        if path == "/api/imports/open":
+            try:
+                launcher.open_relative(self.app.config, str(body.get("path", "")))
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True})
+        if path == "/api/helper/mcp":
+            return self._json(
+                HTTPStatus.OK, manager.mcp_action(str(body.get("action", "")), body.get("server"))
+            )
+        if path == "/api/helper/focus":
+            run_id = body.get("run_id")
+            if run_id is not None and not (isinstance(run_id, str) and RUN_ID.fullmatch(run_id)):
+                raise RunError("Unknown run.")
+            return self._json(HTTPStatus.OK, {"ok": True, "note": manager.focus(run_id)})
+        match = re.fullmatch(r"/api/runs/([^/]+)/gate", path)
+        if match and RUN_ID.fullmatch(match.group(1)):
+            ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
+            result = manager.decide_gate(
+                match.group(1),
+                str(body.get("gate", "")),
+                str(body.get("decision", "")),
+                ensure_helper,
+            )
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/history/reset":
             if body.get("confirm") != "reset-console-history":
                 raise RunError('Send {"confirm": "reset-console-history"} to reset history.')

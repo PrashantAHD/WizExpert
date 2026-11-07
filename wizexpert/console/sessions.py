@@ -58,6 +58,7 @@ MAX_PROGRESS = 400
 MAX_TEXT = 1500
 PERMISSION_FLICKER_SECONDS = 2.5  # auto-approved prompts resolve at once; do not flash them
 IDLE_COMPLETE_SECONDS = 45.0
+STALL_SECONDS = 60.0  # silent log with an open tool call: probably awaiting a confirmation
 SCAN_LIMIT = 500
 
 
@@ -390,7 +391,7 @@ class SessionView:
             content = result.get("content") if isinstance(result, dict) else result
             found = HANDOFF_URI.search(str(content or ""))
             if found:
-                self.handoff = {"ahp": found.group(1), **call}
+                self.handoff = {"ahp": found.group(1), "chat": found.group(2) or "", **call}
                 self._add(
                     "handoff",
                     "Handed off to a new chat"
@@ -470,6 +471,17 @@ class SessionView:
             return "completed"
         return "running"
 
+    def stalled(self, now: float | None = None, seconds: float = STALL_SECONDS) -> bool:
+        """Heuristic: a tool call has been open with no log activity for ``seconds``.
+
+        VS Code does not write every approval prompt to the session log, so a run that is still
+        "running" but silent while a tool call is open is probably waiting for a confirmation.
+        """
+        now = now or time.time()
+        if self.finished or self.pending(now) or not self.open_tools:
+            return False
+        return now - max(self.last_event, _mtime(self.path)) >= seconds
+
 
 def tool_summary(name: str, args: dict[str, Any]) -> str:
     """A short, safe description of a tool call (never the command text or file contents)."""
@@ -494,7 +506,9 @@ def tool_summary(name: str, args: dict[str, Any]) -> str:
 
 
 SECRET_KEY = re.compile(r"token|secret|passw|credential|authoriz|api.?key|cookie", re.IGNORECASE)
-HANDOFF_URI = re.compile(r"agent-host-session://ahp-session/(" + UUID.pattern + ")")
+HANDOFF_URI = re.compile(
+    r"agent-host-session://ahp-session/(" + UUID.pattern + r")(?:\?chat=(" + UUID.pattern + "))?"
+)
 HANDOFF_TOOL = "create_session"
 MAX_HANDOFF_PROMPT = 4000
 
