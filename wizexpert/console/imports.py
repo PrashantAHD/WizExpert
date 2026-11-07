@@ -15,6 +15,7 @@ import contextlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -323,6 +324,26 @@ def set_manual_milestone(
     return _manual_milestones(data)
 
 
+def _all_resolved(folder: Path) -> bool:
+    """True only when the latest retained refresh counts show every issue RESOLVED in Wiz."""
+    try:
+        files = sorted(folder.glob("*.workflow.json"))
+        if not files:
+            return False
+        counts = _load_json(files[0])["collection"]["status_counts"]
+    except Exception:
+        return False
+    if not isinstance(counts, dict) or not counts:
+        return False
+    norm: dict[str, int] = {}
+    for key, value in counts.items():
+        if not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return False
+        k = key.strip().upper().replace(" ", "_")
+        norm[k] = norm.get(k, 0) + value
+    return norm.get("RESOLVED", 0) > 0 and all(v == 0 for k, v in norm.items() if k != "RESOLVED")
+
+
 def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
     """Existing Risk Issues case folders as dashboard cards (newest first, at most 100)."""
     base = _base(config, RISK_DIR)
@@ -339,6 +360,7 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         # plan and no retained evidence folder to resume from.
         legacy = not art["kinds"]["workflow_record"]
         wf = _workflow_status(folder, art)
+        resolved = _all_resolved(folder)
         has_evidence = art["kinds"]["evidence"]
         has_deliverables = any(
             art["kinds"][k]
@@ -349,7 +371,8 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
                 "name": folder.name,
                 "reference": _rel(folder, config),
                 "issue_ids": ids,
-                "status": "In-Progress",
+                "status": "RESOLVED" if resolved else "In-Progress",
+                "resolved": resolved,
                 "legacy": legacy,
                 "modified": modified,
                 "artifacts": art["present"],
@@ -369,6 +392,38 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         )
     cases.sort(key=lambda c: (-c["modified"], c["name"]))
     return cases[:MAX_ITEMS]
+
+
+def status_sync_state(config: ConsoleConfig) -> dict[str, Any]:
+    path = config.state_dir / "status-sync.json"
+    try:
+        value = _load_json(path)
+    except (OSError, ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
+    if force:
+        return True
+    if config.status_sync_hours <= 0:
+        return False
+    last = status_sync_state(config).get("last_started")
+    return not isinstance(last, (int, float)) or time.time() - last >= config.status_sync_hours * 3600
+
+
+def mark_status_sync_started(config: ConsoleConfig, cases: list[str]) -> dict[str, Any]:
+    config.state_dir.mkdir(parents=True, exist_ok=True)
+    state = {
+        "last_started": time.time(),
+        "cases": cases[:100],
+        "mode": "refresh-case",
+    }
+    path = config.state_dir / "status-sync.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+    return state
 
 
 def require_case(config: ConsoleConfig, name: str, mode: str = "refresh") -> dict[str, Any]:

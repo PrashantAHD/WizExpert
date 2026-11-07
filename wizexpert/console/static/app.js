@@ -4,7 +4,7 @@ const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const $ = (id) => document.getElementById(id);
 const state = {
   categories: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "", view: "",
-  active: [], history: [], updated: 0, stale: false, refreshing: false, refreshError: "", loaded: false, dataBars: [],
+  active: [], history: [], notifications: [], updated: 0, stale: false, refreshing: false, refreshError: "", loaded: false, dataBars: [],
   hf: { status: "", category: "", q: "" }, hvResults: null, hvCategory: null, hvClear: null, pvResults: null,
   activityBox: null, activityCategory: "", wfId: "", runStatus: "", runCategory: "", focusNext: "", restoreY: null, routeSeq: 0,
 };
@@ -379,6 +379,199 @@ function runTable(rows) {
       h("td", { class: "right" }, h("button", { class: "secondary small", type: "button", "aria-label": "Open run " + r.id, onclick: () => go(runPath(r.id)) }, "Open")))))));
 }
 
+const NOTIF_READ_KEY = "wizexpert.notifications.read";
+const NOTIF_CLEARED_KEY = "wizexpert.notifications.cleared";
+let notifReadMem = new Set();  // fallback when browser storage is unavailable
+let notifClearedMem = new Set();  // fallback when browser storage is unavailable
+function loadNotifRead() {
+  try {
+    const v = JSON.parse(localStorage.getItem(NOTIF_READ_KEY) || "[]");
+    if (Array.isArray(v)) notifReadMem = new Set([...notifReadMem, ...v.filter((x) => typeof x === "string")]);
+  } catch (_e) { /* ignore */ }
+  return notifReadMem;
+}
+function loadNotifCleared() {
+  try {
+    const v = JSON.parse(localStorage.getItem(NOTIF_CLEARED_KEY) || "[]");
+    if (Array.isArray(v)) notifClearedMem = new Set([...notifClearedMem, ...v.filter((x) => typeof x === "string")]);
+  } catch (_e) { /* ignore */ }
+  return notifClearedMem;
+}
+function saveNotifRead(keys) {
+  for (const k of keys) notifReadMem.add(k);
+  const all = [...notifReadMem].slice(-500);  // bound growth; browser-only, no secrets
+  notifReadMem = new Set(all);
+  try { localStorage.setItem(NOTIF_READ_KEY, JSON.stringify(all)); } catch (_e) { /* ignore */ }
+}
+function clearNotifications(keys) {
+  for (const k of keys) notifClearedMem.add(k);
+  const all = [...notifClearedMem].slice(-500);  // bound growth; browser-only, no secrets
+  notifClearedMem = new Set(all);
+  try { localStorage.setItem(NOTIF_CLEARED_KEY, JSON.stringify(all)); } catch (_e) { /* ignore */ }
+  const panel = $("notif-panel");
+  if (panel) delete panel.dataset.sig;
+  renderNotifications();
+}
+function markNotifRead(keys) {
+  saveNotifRead(keys);
+  const panel = $("notif-panel");
+  if (panel) delete panel.dataset.sig;
+  renderNotifications();
+}
+function notificationRow(href, title, context, status, meta, label, key) {
+  const read = loadNotifRead().has(key);
+  const a = link(href, "notification-item", 
+    h("span", { class: "notif-dot", "aria-hidden": "true" }),
+    h("span", { class: "notif-title" }, title),
+    h("span", { class: "notif-context" }, context),
+    h("span", { class: "notif-meta" }, h("span", { class: "notif-status" }, status),
+      meta ? h("span", { class: "notif-sub", title: meta }, meta) : null));
+  a.setAttribute("aria-label", (read ? "" : "Unread, ") + label);
+  a.classList.add(read ? "is-read" : "is-unread");
+  a.dataset.notifKey = key;
+  a.dataset.unread = read ? "false" : "true";
+  return a;
+}
+function runContext(run) {
+  const cat = state.categories.find((c) => c.id === run.category_id);
+  const act = cat && run.action_id ? (cat.actions || []).find((x) => x.id === run.action_id) : null;
+  if (run.action_title) return run.action_title + (act && act.description ? ": " + act.description : "");
+  if (cat && run.action_id === cat.default_action) return cat.description;
+  return "Workflow run (action not recorded).";  // runs saved before actions were recorded
+}
+function notificationBar() {
+  const runs = [...state.active, ...state.history];
+  const seen = new Set();
+  const cleared = loadNotifCleared();
+  const events = [];
+  for (const item of state.notifications) {
+    const key = "sync:" + item.run_id + ":" + item.status;
+    if (cleared.has(key)) continue;
+    const status = STATUS_TEXT[item.status] || item.status;
+    events.push(notificationRow(runPath(item.run_id), item.case + " queued",
+      "Refresh case: read-only status sync detected a change and queued the gated Refresh workflow.", status, item.run_id,
+      item.case + " queued, " + status + ", run " + item.run_id, key));
+  }
+  for (const run of runs) {
+    if (seen.has(run.id)) continue;
+    seen.add(run.id);
+    const key = "run:" + run.id + ":" + run.status;
+    if (cleared.has(key)) continue;
+    const status = STATUS_TEXT[run.status] || run.status;
+    const meta = [fmtDate(run.created), run.id].filter(Boolean).join(" \u00b7 ");
+    events.push(notificationRow(runPath(run.id), catTitle(run.category_id),
+      runContext(run), status, meta,
+      catTitle(run.category_id) + (run.action_title ? " \u2013 " + run.action_title : "") + ", " + status + ", run " + run.id, key));
+  }
+  const count = events.filter((e) => e.dataset.unread === "true").length;
+  return { events, count };
+}
+function setNotifOpen(open) {
+  const btn = $("notif-btn"), panel = $("notif-panel");
+  if (!btn || !panel) return;
+  panel.hidden = !open;
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function renderNotifications() {
+  const btn = $("notif-btn"), panel = $("notif-panel"), badge = $("notif-badge");
+  if (!btn || !panel) return;
+  mount(panel, JSON.stringify([state.active, state.history, state.notifications, [...loadNotifRead()], [...loadNotifCleared()]]), (box) => {
+    const { events, count } = notificationBar();
+    const head = h("div", { class: "notif-head" }, h("strong", {}, "Notifications"));
+    const actions = h("div", { class: "notif-actions" });
+    if (count) actions.append(h("button", { type: "button", class: "notif-markall", "aria-label": "Mark all notifications as read",
+      onclick: () => markNotifRead(events.map((e) => e.dataset.notifKey)) }, "Mark all as read"));
+    if (events.length) actions.append(h("button", { type: "button", class: "notif-clear", "aria-label": "Clear all notifications",
+      onclick: () => clearNotifications(events.map((e) => e.dataset.notifKey)) }, "Clear all"));
+    if (actions.childNodes.length) head.append(actions);
+    box.append(head);
+    if (events.length) box.append(...events);
+    else box.append(h("div", {}, "No new notifications"));
+    badge.hidden = !count;
+    badge.textContent = count > 99 ? "99+" : String(count);
+    btn.setAttribute("aria-label", count ? "Notifications, " + count + " new" : "Notifications, none new");
+    for (const a of box.querySelectorAll("a")) {
+      // Capture phase: record read state before the link router handles the click.
+      a.addEventListener("click", () => { saveNotifRead([a.dataset.notifKey]); setNotifOpen(false); setTimeout(() => { delete panel.dataset.sig; renderNotifications(); }, 0); }, true);
+    }
+  });
+}
+async function runStatusSync(report) {
+  const result = await api("POST", "/api/imports/risk-issues/sync", { force: true });
+  recordNotifications(result.started || []);
+  await refresh();
+  updateSyncStatus(result.state);
+  if (report) report(result);
+  return result;
+}
+function syncStatusText(syncState) {
+  const last = syncState && syncState.last_started;
+  if (!Number.isFinite(last)) return "Not synced yet \u00b7 automatic sync runs daily.";
+  const date = new Date(last * 1000);
+  const now = new Date();
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((today - day) / 86400000);
+  const when = days === 0 ? "today" : days === 1 ? "yesterday" : date.toLocaleDateString();
+  return "Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+function updateSyncStatus(syncState) {
+  const button = $("sync-btn"), tooltip = $("sync-tooltip");
+  if (!button) return;
+  const text = syncStatusText(syncState);
+  button.title = text + " \u00b7 Click to sync now";
+  button.setAttribute("aria-label", "Sync Risk Issues status. " + text);
+  if (tooltip) tooltip.textContent = text;
+}
+async function loadTopbarSync() {
+  try {
+    const status = await api("GET", "/api/imports/risk-issues/sync");
+    updateSyncStatus(status.state);
+    if (status.due && status.hours > 0) await syncFromTopbar({ silent: true });
+  } catch (e) {
+    updateSyncStatus({});
+    const tooltip = $("sync-tooltip");
+    if (tooltip) tooltip.textContent = "Status sync unavailable: " + e.message;
+  }
+}
+async function syncFromTopbar({ silent = false } = {}) {
+  const button = $("sync-btn");
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.title = "Syncing Risk Issues status...";
+  try {
+    const result = await runStatusSync();
+    if (!silent) {
+      banner(result.started && result.started.length
+        ? "Read-only status sync queued " + result.started.length + " gated Refresh run(s)."
+        : "No eligible In-Progress Risk Issues cases required a refresh.");
+    }
+  } catch (e) {
+    if (!silent) banner("Status sync unavailable: " + e.message);
+    const tooltip = $("sync-tooltip");
+    if (tooltip) tooltip.textContent = "Status sync unavailable: " + e.message;
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    if (!button.title.startsWith("Last synced")) updateSyncStatus({});
+  }
+}
+(function bindNotifications() {
+  const btn = $("notif-btn"), panel = $("notif-panel");
+  if (!btn || !panel) return;
+  btn.addEventListener("click", (e) => { e.stopPropagation(); setNotifOpen(panel.hidden); });
+  document.addEventListener("click", (e) => { if (!panel.hidden && !panel.contains(e.target)) setNotifOpen(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { setNotifOpen(false); btn.focus(); } });
+})();
+(function bindTopbarSync() {
+  const button = $("sync-btn");
+  if (button) button.addEventListener("click", syncFromTopbar);
+})();
+function recordNotifications(started) {
+  if (started.length) state.notifications = started.slice();
+}
+
 // ---- home --------------------------------------------------------------------------------------------
 let home = null;
 const WF_ART = {
@@ -457,7 +650,7 @@ function buildHome() {
         h("ul", { class: "principles" }, principles.map((x) => h("li", {}, x)))),
       h("div", { class: "hero-art", "aria-hidden": "true" },
         h("img", { src: "/static/assets/logo.svg", alt: "", width: "320" }))),
-    h("section", { class: "block", "aria-labelledby": "h-wf" }, h("h2", { id: "h-wf" }, "Start a workflow"), home.workflows),
+      h("section", { class: "block", "aria-labelledby": "h-wf" }, h("h2", { id: "h-wf" }, "Start a workflow"), home.workflows),
     aboutSection(),
     h("p", {}, link("/dashboard", "secondary", "Open Dashboard for runs and activity")));
   dash.append(pageHead("Dashboard", "Run summary, current activity and recent runs."),
@@ -482,6 +675,7 @@ function renderSummary() {
 function renderHome() {
   if (!home) return;
   renderSummary();
+  renderNotifications();
   mount(home.active, JSON.stringify([state.active, state.loaded, state.refreshError, state.categories.length]), (box) => {
     if (!dataGate(box)) return;
     if (!state.active.length) box.append(stateBox("empty", "Nothing is running", "Running tasks appear here. See In progress in the sidebar for the full list."));
@@ -827,7 +1021,7 @@ function riskCasesPanel(category) {
   api("GET", "/api/imports/risk-issues").then((res) => {
     clear(list);
     if (!res.cases.length) { list.append(h("p", { class: "help" }, "No existing case folders were found under deliverables/Risk-Issues.")); return; }
-    for (const c of res.cases) {
+    const renderCase = (c, target) => {
       const startCase = async (button, actionId, inputs, enabled) => {
         button.disabled = true; message.textContent = ""; message.className = "bad";
         try {
@@ -897,13 +1091,19 @@ function riskCasesPanel(category) {
         });
         manualBox.append(h("label", { for: box.id }, box, " " + label + " "));
       }
-      list.append(h("div", { class: "item-row case-card" },
+      target.append(h("div", { class: "item-row case-card" },
         h("div", {}, h("strong", {}, c.name),
           h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
           manualBox,
-          h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
+          h("span", {}, (c.resolved ? h("span", { class: "badge done" }, "RESOLVED") : h("span", { class: "badge running" }, c.status)), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
         h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, deliverablesButton("risk-issues", c.name, message))));
+    };
+    for (const c of res.cases.filter((x) => !x.resolved)) renderCase(c, list);
+    const resolvedCases = res.cases.filter((x) => x.resolved);
+    if (resolvedCases.length) {
+      list.append(h("h3", {}, "Resolved"));
+      for (const c of resolvedCases) renderCase(c, list);
     }
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
@@ -1394,4 +1594,5 @@ buildHome(); readCache(); renderAll();
 migrateLegacyHash();
 state.restoreY = (history.state && history.state.y) || 0;
 route();
+loadTopbarSync();
 setInterval(() => { refresh().catch(() => {}); }, 10000);

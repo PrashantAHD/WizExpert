@@ -110,6 +110,70 @@ def test_risk_cases_become_in_progress_cards_with_legacy_tag(env):  # noqa: F811
     assert new["modified"] > 0
 
 
+def _case_with_counts(workspace, name, collection):
+    folder = workspace / "deliverables" / "Risk-Issues" / name
+    _touch(folder / "x.workflow.json", json.dumps({"collection": collection}))
+    _touch(folder / "Analysis.html")
+    return folder
+
+
+def test_risk_case_resolved_only_when_all_wiz_issues_resolved(env):  # noqa: F811
+    config, workspace, _ = env
+    res = {"OPEN": 0, "IN_PROGRESS": 0, "RESOLVED": 2, "REJECTED": 0}
+    cases = {
+        "Done-wc-id-41": {"status_counts": res},
+        "Prog-wc-id-42": {"status_counts": {**res, "IN_PROGRESS": 1}},
+        "Rej-wc-id-43": {"status_counts": {**res, "REJECTED": 1}},
+        "Zero-wc-id-44": {"status_counts": {k: 0 for k in res}},
+        "Bad-wc-id-45": {"status_counts": {"RESOLVED": "2", "OPEN": 0}},
+        "Bool-wc-id-46": {"status_counts": {"RESOLVED": True}},
+        "Neg-wc-id-47": {"status_counts": {"RESOLVED": 2, "OPEN": -1}},
+        "Missing-wc-id-48": {},
+        "Notdict-wc-id-49": {"status_counts": [1]},
+    }
+    for name, collection in cases.items():
+        _case_with_counts(workspace, name, collection)
+    scanned = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert scanned["Done-wc-id-41"]["resolved"] is True
+    assert scanned["Done-wc-id-41"]["status"] == "RESOLVED"
+    for name in cases:
+        if name != "Done-wc-id-41":
+            assert scanned[name]["resolved"] is False, name
+            assert scanned[name]["status"] == "In-Progress", name
+
+
+def test_risk_case_without_workflow_json_is_not_resolved(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    assert all(not c["resolved"] for c in imports.scan_risk_cases(config))
+
+
+def test_risk_cases_panel_has_resolved_section():
+    js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
+    assert '"Resolved"' in js and "c.resolved" in js and '"RESOLVED"' in js
+
+
+def test_risk_cases_panel_shows_empty_notification_state():
+    js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
+    assert '"No new notifications"' in js
+    assert "function notificationBar()" in js
+    assert "home.notifications" not in js and "renderNotifications()" in js
+    html = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "index.html").read_text("utf-8")  # noqa: E501
+    assert 'id="notif-btn"' in html and 'aria-label="Notifications' in html and 'id="notif-badge"' in html
+    assert 'id="sync-btn"' in html and 'aria-label="Sync Risk Issues status"' in html and 'id="sync-tooltip"' in html
+    assert "riskCasesPanel(category)" in js and "list.append(notifications" not in js
+    assert '"notification-item"' in js
+    assert "function notificationRow(" in js and "notif-title" in js and "notif-context" in js and "notif-meta" in js and "aria-label" in js
+    css = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "style.css").read_text(encoding="utf-8")
+    assert "wizexpert.notifications.read" in js and "wizexpert.notifications.cleared" in js
+    assert "Mark all as read" in js and "Clear all" in js and "is-unread" in js and "notif-dot" in js
+    assert ".is-unread" in css and ".notif-markall" in css and ".notif-clear" in css
+    assert ".notif-context" in css and ".notif-sub" in css and "text-overflow: ellipsis" in css
+    assert "function runStatusSync(" in js and "syncFromTopbar" in js and "loadTopbarSync" in js and "syncStatusText" in js
+    assert "topbar-icon-btn" in css and ".sync-tooltip" in css and "automatic sync runs daily" in js
+    assert 'const sync = h("button"' not in js and '"Sync now"' not in js
+
+
 def test_risk_case_recognizes_case_prefixed_evidence_folder(env):  # noqa: F811
     config, workspace, _ = env
     base = workspace / "deliverables" / "Risk-Issues"
@@ -914,4 +978,4 @@ def test_manual_milestone_endpoint_and_ui_wiring(console):  # noqa: F811
     js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
     assert "/api/imports/risk-issues/milestone" in js and '"aria-label": label' in js
     assert "Ticket Created" in js and "Email Sent" in js and "Reports Sent" in js and "Follow-up Sent" in js  # noqa: E501
-    assert "cleared" not in js
+    assert "clearNotifications" in js and '"aria-label": "Clear all notifications"' in js
