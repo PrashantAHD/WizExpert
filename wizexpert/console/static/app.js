@@ -18,6 +18,7 @@ const NEEDS_ATTENTION = new Set(["input_needed", "handed_off", "awaiting_gate"])
 const STAGE_HELP = {
   new: "Start a fresh review and prepare the initial local deliverables.",
   "in-progress": "Continue existing work with an acceptance, email, or status action.",
+  resolved: "Review resolved cases and open their local deliverables (read-only; no refresh or update).",
   previous: "Browse what already exists locally (read-only), then update, compare or start the next one.",
 };
 const VIEWS = ["home", "dashboard", "progress", "history", "workflow", "run"];
@@ -876,7 +877,8 @@ function showWorkflow(category, stageId, actionId) {
       else detail.append(monthlyPanel(category));
       return;
     }
-    if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category));
+    if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category, false));
+    if (category.imports === "risk-issues" && stage.id === "resolved") { detail.append(riskCasesPanel(category, true)); return; }
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
       detail.append(h("h2", {}, "Existing work items"));
       const workItems = h("div", { class: "item-list" });
@@ -1017,12 +1019,22 @@ function tableOf(head, rows) {
   return table;
 }
 function loadingNote(text) { return h("p", { class: "help", role: "status" }, text); }
-function riskCasesPanel(category) {
-  const list = h("div", { class: "item-list" }, loadingNote("Scanning local Risk Issues cases..."));
+function riskCasesPanel(category, resolvedOnly) {
+  const list = h("div", { class: "item-list" }, loadingNote((resolvedOnly ? "Scanning local resolved Risk Issues cases..." : "Scanning local Risk Issues cases...")));
   const message = h("p", { role: "status" });
   api("GET", "/api/imports/risk-issues").then((res) => {
     clear(list);
-    if (!res.cases.length) { list.append(h("p", { class: "help" }, "No existing case folders were found under deliverables/Risk-Issues.")); return; }
+    const shown = res.cases.filter((x) => !!x.resolved === !!resolvedOnly);
+    if (!shown.length) { list.append(h("p", { class: "help" }, resolvedOnly ? "No resolved case folders were detected under deliverables/Risk-Issues." : "No existing case folders were found under deliverables/Risk-Issues.")); return; }
+    const renderResolved = (c, target) => {
+      target.append(h("div", { class: "item-row case-card" },
+        h("div", {}, h("strong", {}, c.name),
+          h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
+          h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown")),
+          h("span", {}, h("span", { class: "badge done" }, "RESOLVED"), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
+        h("div", { class: "row-actions" }, deliverablesButton("risk-issues", c.name, message))));
+    };
+    if (resolvedOnly) { for (const c of shown) renderResolved(c, list); return; }
     const renderCase = (c, target) => {
       const startCase = async (button, actionId, inputs, enabled) => {
         button.disabled = true; message.textContent = ""; message.className = "bad";
@@ -1101,15 +1113,10 @@ function riskCasesPanel(category) {
           h("span", {}, (c.resolved ? h("span", { class: "badge done" }, "RESOLVED") : h("span", { class: "badge running" }, c.status)), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
         h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, deliverablesButton("risk-issues", c.name, message))));
     };
-    for (const c of res.cases.filter((x) => !x.resolved)) renderCase(c, list);
-    const resolvedCases = res.cases.filter((x) => x.resolved);
-    if (resolvedCases.length) {
-      list.append(h("h3", {}, "Resolved"));
-      for (const c of resolvedCases) renderCase(c, list);
-    }
+    for (const c of shown) renderCase(c, list);
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
-  return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
-    h("p", { class: "help" }, "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
+  return h("section", { class: "imports" }, h("h2", {}, resolvedOnly ? "Resolved cases" : "Existing cases"),
+    h("p", { class: "help" }, resolvedOnly ? "Read-only scan of deliverables/Risk-Issues for cases whose latest retained refresh shows every issue RESOLVED. Only the local deliverables can be opened; no refresh, update or email action is offered. Nothing is changed by this list." : "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
 function weeklyPanel(category) {
   const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));
