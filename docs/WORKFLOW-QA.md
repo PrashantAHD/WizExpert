@@ -34,6 +34,22 @@ no-mutate controls, or a concrete Critical/High security finding. Conflicts with
 those gates are surfaced with the smallest safe alternative, never silently
 dropped.
 
+## Risk Issues case Refresh (rule)
+
+Risk Issues cases have a repeatable **Refresh** action (console `refresh-case`; the old
+Resume id maps to it) and a separate **Update** action (`update-deliverables`; the old
+Update Case id maps to it). Update takes owner free text (responses, decisions, notes,
+corrections), requires existing deliverables and non-empty length-capped input, does no Wiz
+fetch, saves the input verbatim to `inputs/update-TIMESTAMP.md`, archives current deliverables,
+regenerates the latest deliverables from `templates/risk-issues/` with the input applied and
+records a change summary; it is gated, sends no email and changes nothing in Wiz/ServiceNow/cloud.
+Each Refresh must: (1) require the case's retained
+evidence folder; (2) fetch the latest Wiz status of the case issues read-only; (3) compute the
+delta versus the retained evidence (status changes, new/resolved issues, count changes);
+(4) save a new evidence snapshot plus a change summary without altering retained evidence;
+(5) regenerate/update the deliverables from `templates/risk-issues/`, archiving files first.
+There is no one-time gate. No email is sent and no Wiz, ServiceNow or cloud change is made.
+
 Record each such request in the optional top-level review field `owner_changes`
 (missing means none). Values below are illustrative only:
 

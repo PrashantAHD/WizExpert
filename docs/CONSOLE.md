@@ -43,10 +43,14 @@ After selecting Risk Issues, two buttons appear:
 Model: a category may declare `stages` (button groups) and `actions` (fields, template,
 optional `exactly_one_of`). The API takes an optional `action_id` next to `category_id`; omitting
 it keeps the old behavior. Template overrides use `risk-issues` (New) or
-`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`). Daily Progress
+`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`, `follow-up-email`, `reply-response`, `refresh-case`). Daily Progress
 also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
 name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
-work-item list and uses a single **Refresh** button for the selected item. Monthly Governance
+work-item list and uses a single **Refresh** button for the selected item. Each work-item card also has
+**Record Response**: enter the stakeholder's sender name, received date and response text (saved
+locally in the console state folder, one entry per work item and received date), then
+**Generate Reply Draft (not sent)** starts a run that drafts a reply locally from today's report and
+saved evidence. Nothing is sent and no Wiz, ServiceNow or cloud change is made. Monthly Governance
 remains a single-form category.
 
 ### Weekly Progress Reporting inputs
@@ -70,6 +74,145 @@ depth is at most 3 levels and the list holds at most 50 newest folders. When not
 the response says so explicitly and the selector offers "None: this is the first report"
 (the prompt then states it is the first report). "Enter a folder name manually" remains as a
 fallback, also used when the listing fails; the agent confirms a typed folder exists.
+
+## Approvals, imports, Wiz MCP and reporting views
+
+All of these only read local files or ask the helper to run an allow-listed VS Code command.
+The console sends no email, changes nothing in Wiz, ServiceNow or cloud, and never handles
+passwords, MFA codes or tokens.
+
+### Approvals
+
+- **Settings template.** `scripts/console-workspace/settings.template.json` is a workspace
+  `.vscode/settings.json` template that auto-approves only read-only terminal commands
+  (`git status/diff/log/show` and read-only listing cmdlets) and keeps prompting for anything
+  that runs workspace code (any Python script, pytest, `verify.py`, `python -m wizexpert`),
+  redirects or chains commands, mentions `--output`, uses network-share paths, pushes, resets,
+  deletes, moves, writes files from the shell, sends
+  mail, calls the network or runs cloud CLIs. Edits to Python and build-config files, `.env`,
+  keys, `.vscode` and `.github` also keep prompting, so the agent cannot write code and run it
+  unprompted. Copy it into `<outer root>\.vscode\settings.json` (merge the
+  keys if the file exists). VS Code has no per-tool setting for MCP tools, so approve the
+  read-only Wiz MCP `discover` tool with **Always Allow** in VS Code once. Pre-approve `execute`
+  (**Chat: Manage Tool Approval**) only together with a user-level `preToolUse` hook in
+  `~/.copilot/hooks/` that denies any `execute` call whose `tool_name` is not a known read
+  operation, because `execute` can run mutations in principle. Otherwise leave it prompting.
+  In Copilot harness sessions only *user* terminal approvals reach the Agent Host; workspace
+  `chat.tools.terminal.autoApprove` rules are not copied.
+- **Waiting for approval in VS Code.** The run page shows the banner *Waiting for approval in
+  VS Code* with a **Focus VS Code** button when a tool-approval prompt is read from the session
+  log, or (heuristic) when a tool call has been open and the log silent for 60 seconds, because
+  VS Code does not log every prompt. **Focus VS Code** (`POST /api/helper/focus`) reveals the run's
+  chat through the helper and runs `code --reuse-window <workspace>` to raise the window, since
+  an extension cannot raise the OS window itself. Approving inside VS Code stays the only way to
+  answer prompts the console cannot press (see Allow / Skip above).
+- **Approval gates.** Weekly and Monthly runs, Weekly *Update* and Risk Issues *Refresh* are created
+  *waiting for your approval*: nothing is handed to the agent yet. The run page shows the gates
+  *Collection plan* then *Generation* (the catalog also defines *Push*, for flows that publish;
+  no current flow uses it, and the console never pushes itself). **Approve** hands that stage's
+  prompt (the request plus a short stage instruction) to a new VS Code chat; **Reject** ends the
+  flow. Stage 1 runs in the same run; later gates start a follow-up run (`parent` / `child`) once
+  the earlier stage finished, so each chat has its own log. Every decision (gate, decision, time)
+  is saved in `runs.json` with the run (`gates`, `decisions`). API: `POST /api/runs` accepts
+  `"gated": true` (always on for actions flagged gated), `POST /api/runs/<id>/gate` with
+  `{"gate", "decision": "approve"|"reject"}`.
+
+### Wiz MCP status
+
+The sidebar shows **Wiz MCP connected / needs sign-in / stopped / not configured** with Start,
+Stop, Authenticate and Refresh. The server finds MCP server *names* containing "wiz" in the
+workspace `.vscode/mcp.json` and the user `mcp.json` (names only; settings, headers and
+environment are never read into a response or job). The helper reports whether Wiz tools are
+registered in `vscode.lm.tools` (connected) and runs VS Code's own `workbench.mcp.startServer` /
+`stopServer` / `restartServer` commands for the buttons. Authenticate restarts the server so
+VS Code opens the SSO page in your browser; finish sign-in there. `GET /api/helper/mcp`,
+`POST /api/helper/mcp {"action": "start|stop|auth|list"}`.
+Limitation: VS Code exposes no public API for MCP server state, so *needs sign-in* is inferred
+(no tools yet within 10 minutes of a Start/Authenticate from the console) and the MCP command
+arguments may differ between VS Code versions; if a button has no effect, use the `list`
+action (MCP: List Servers) in VS Code.
+
+### Imported work and previous reports
+
+Read-only scans of local folders under the workspace's `deliverables\` folder (configured with
+`--workspace`); source files are never modified, evidence and archive folders are not listed, and
+only names, dates and counts are returned (plus the small `weekly-progress-data.json` and
+`*.governance.json` snapshots for the comparisons). Files are opened only through the shared
+Deliverables panel below (`.pdf .pptx .docx .xlsx .html .eml .msg .md .csv .txt` and images only,
+confined to `deliverables`).
+
+**Deliverables button (every category view: Risk Issues, Weekly, Monthly):** one shared
+component replaces all per-file *View* buttons (the UI renders none; a guard test enforces it).
+It opens a panel listing the folder's direct files (name, type, modified time; `evidence`/archives,
+secrets and unsupported types are never listed) via
+`GET /api/imports/files?category=<risk-issues|weekly|monthly>&folder=<case|report folder|YYYY-MM>`
+(Monthly files are flat, so its folder is the month). **Open**
+calls `POST /api/imports/files/open` (`{category, folder, name, with?}`), which re-resolves the name
+inside that one folder (no traversal, symlinks or sub-paths) and launches the local app
+directly (no shell, argument list): PDF/HTML -> Chrome, xlsx/xls/csv -> Excel, pptx/ppt ->
+PowerPoint, docx/doc -> Word, images -> default viewer (with **Open in Chrome** as an alternate;
+`with` accepts only `chrome`). Chrome/Office are found in the standard install folders; if not
+found the file opens with the OS default (`os.startfile`). The older `/api/imports/open`
+(`{path}`) and `/api/imports/case-files[/open]` routes still work for compatibility; `/open` now
+maps the path onto category + folder + name and goes through the same launcher checks (local
+launch, no helper).
+
+- **Risk Issues** (*In-progress* stage): each folder under `deliverables\Risk-Issues` is a card
+  with status *In-Progress*, rule/issue IDs (from `issue_ids` in the case record, else from the
+  folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
+  client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
+  **legacy** tag when the case has no rebuilt-workflow record (`*.workflow.json` or
+  `case-gate-plan*`). **Refresh** (action `refresh-case`, gated; the old `resume-case` id maps to it) is the **repeatable** case action, enforced like the
+  PHP2Shell daily refresh: fetch the latest Wiz status of the case issues read-only, compute the
+  delta against the retained evidence (status changes, new/resolved issues, changed counts), save
+  the new evidence snapshot plus a change summary, then regenerate/update the deliverables from
+  `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
+  `evidence` folder. Archive before replacing, retained evidence is never modified, no
+  Wiz/SNOW/cloud change, no email.
+  **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
+  is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
+  response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and
+  embedded as quoted `BEGIN/END OWNER INPUT` data, never as instructions). No Wiz fetch. The agent
+  saves the input verbatim to `inputs/update-TIMESTAMP.md` in the case folder, archives the
+  current deliverables, regenerates the latest deliverables from `templates/risk-issues` with the
+  input applied and records a change summary. Disabled unless the case has prepared deliverables;
+  empty input is rejected server side. No email, no Wiz/SNOW/cloud change.
+  Cards also offer **Follow-up Email** (`follow-up-email`: paste the email you sent; a concise
+  status-update follow-up is drafted locally) and **Reply to Response** (`reply-response`: paste the
+  assigned team's response; a reply is drafted locally). Both use the quoted `BEGIN/END EMAIL TEXT`
+  delimiters and the same input limits, and never send. `email-response` (issue-ID form) remains as
+  the legacy equivalent of Reply to Response. Cards show a bounded status line and milestones
+  derived only from the small workflow JSON (latest event status/summary) and artifact names:
+  *Ticket created*, *Email sent*, *Reports prepared/sent* appear only when a non-negated event
+  clause says so; otherwise neutral *Reports present* / *Email draft present*. Malformed or missing
+  records show a neutral fallback; evidence contents are never read. These automatic milestones
+  are read-only and never imply external delivery. Each card also has three checkboxes you
+  confirm yourself: *Ticket created*, *Email sent*, *Reports sent*. A change is saved at once to
+  `manual_milestones` (`ticket_created` / `email_sent` / `reports_sent`, booleans) in the case's
+  existing `*.workflow.json` via `POST /api/imports/risk-issues/milestone`
+  (`{"case", "milestone", "checked"}`; same-origin + CSRF, local file edit only, no Wiz/SNOW/cloud
+  call). Only those three keys and true/false are accepted, the case folder must exist under
+  `deliverables\Risk-Issues` and have a readable workflow record, the write is atomic UTF-8 without
+  BOM, and events and other fields are preserved. Errors are shown on the card list; a missing
+  or malformed field shows the boxes unchecked, and the boxes are disabled without a record.
+  `GET /api/imports/risk-issues`.
+- **Weekly Progress** (*Previous reports* and *New report*): lists `deliverables\Weekly-Progress-Reporting`
+  (newest first) with Open PDF / PPTX / email draft. **Update** exists for the latest report only
+  (enforced by the backend): paste the internal and/or client response (quoted data between
+  BEGIN/END RESPONSES, up to 1500 characters each) or name a local file under `deliverables`;
+  the agent archives the prior version first, regenerates from retained evidence, writes a change
+  log and runs the validators; the email stays a draft. **New report** is the existing form
+  behind the approval gates: the previous report is the baseline, collection is reuse-first, then
+  the post-collection check, generation and validators. **Compare with <previous week>** (and the
+  *Week-over-week diff* button on a finished run) shows count changes and added / removed /
+  changed items from the retained `weekly-progress-data.json` files
+  (`GET /api/imports/weekly-diff?current=&previous=`).
+- **Monthly Governance** (*Previous months* and *New month*): lists months from the workbook,
+  executive dashboard / deck and `*.governance.json` names; a month is **PRELIMINARY** unless a
+  non-preliminary workbook, dashboard or deck exists, otherwise *final*. **Compare vs previous
+  month** shows parity (workbook, dashboard and governance.json present in both) and snapshot
+  count deltas (`GET /api/imports/monthly-compare?month=YYYY-MM`). **New month** is gated and its
+  stage prompts follow the governance runbook (`docs/GOVERNANCE-RUNBOOK.md`).
 
 ## Navigation, drafts and accessibility
 
@@ -189,7 +332,9 @@ per-process CSRF token is intentionally regenerated.
 
 The normal `wizexpert console` command remains available when auto-reload is not needed.
 Changes to the helper extension still require reinstalling it and reloading the VS Code
-window.
+window. The console requires helper version 0.2.1 or newer for Wiz MCP actions. If the MCP
+buttons report that the current helper is not connected, reload the standard VS Code window
+(not the Agents window) so it unloads any older installed helper copy.
 
 Options: `--agent` (custom agent name, default `WizExpert`), `--config` (private JSON:
 `agent`, `output_roots`, `exclude_dirs`, `deny_names`, `prompts`, `start_timeout`),
@@ -274,7 +419,14 @@ status "Handed off - waiting for new chat", and is re-bound to the new chat (fou
 agent-host database, else by the handoff prompt as the first message of a session created after
 the handoff). Status, progress, approvals, Stop, Open chat and output files then follow the new
 chat; successive handoffs chain. The chain (and an unresolved handoff) is saved in `runs.json`.
+A run marked `handed_off` with no recorded handoff (for example a damaged or hand-edited
+`runs.json`) cannot resolve, so the next refresh marks it `interrupted` and saves that atomically;
+it never stays active forever.
 If the new chat never appears within 30 minutes the run becomes "Interrupted".
+Invariant: every handoff seen in the log becomes a pending handoff, including a peer chat
+created in the same VS Code session (`...?chat=<id>`) or a link back to the same session id;
+such chats are found by their handoff prompt. A `handed_off` run therefore always either
+rebinds or times out; it never waits silently.
 
 ## Safety properties
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess  # nosec B404
@@ -18,8 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import categories
-from .bridge import Bridge
+from . import categories, imports
+from .bridge import MIN_HELPER_VERSION, Bridge
 from .categories import InputError
 from .config import ConsoleConfig
 from .sessions import (
@@ -34,9 +35,19 @@ PROBE_SECONDS = 10.0  # quick liveness probe before a start_chat job
 START_SECONDS = 40.0  # wait for the helper's answer to start_chat
 FILES_REFRESH = 6.0
 MAX_RUNS = 50
-ACTIVE = ("starting", "running", "input_needed", "handed_off")
+ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
 HANDOFF_WAIT_SECONDS = 1800.0
-INACTIVE = ("completed", "stopped", "interrupted", "not_started")
+LATE_START_MESSAGE = "The console stopped before this run started."
+INACTIVE = ("completed", "stopped", "interrupted", "not_started", "rejected")
+MCP_HINT_SECONDS = 600.0
+MCP_ACTIONS = ("start", "stop", "auth", "list")
+ACTION_CASE_MODES = {
+    "refresh-case": "refresh",
+    "update-deliverables": "deliverables",
+    "follow-up-email": "any",
+    "reply-response": "any",
+}
+MCP_SERVER = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 
 
 class RunError(Exception):
@@ -63,6 +74,10 @@ class Run:
     handoff: dict[str, Any] | None = None  # handed off, new chat not resolved yet
     handoff_try: float = 0.0
     carried: dict[str, str] = field(default_factory=dict)  # files written by earlier chats
+    gates: list[dict[str, Any]] = field(default_factory=list)  # console approval gates
+    decisions: list[dict[str, Any]] = field(default_factory=list)  # recorded gate decisions
+    parent: str = ""  # earlier run of the same gated flow
+    child: str = ""  # run started by the last approved gate
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -118,6 +133,10 @@ class RunManager:
                     if isinstance(carried, dict)
                     else {}
                 )
+                run.gates = [g for g in item.get("gates", []) if isinstance(g, dict)][:5]
+                run.decisions = [d for d in item.get("decisions", []) if isinstance(d, dict)][:20]
+                run.parent = str(item.get("parent") or "")
+                run.child = str(item.get("child") or "")
                 self._runs[run.id] = run
         except (OSError, ValueError, KeyError, TypeError):
             return
@@ -132,10 +151,7 @@ class RunManager:
                 if sid:
                     run.session_id, run.status, run.message = sid, "running", ""
                 else:
-                    run.status, run.message = (
-                        "not_started",
-                        "The console stopped before this run started.",
-                    )
+                    run.status, run.message = ("not_started", LATE_START_MESSAGE)
             if run.status in ACTIVE and run.session_id:
                 run.view = self._make_view(run, seed=True)
 
@@ -155,17 +171,32 @@ class RunManager:
             view.seq = base_seq
         return view
 
+    def _recover_orphan_handoff(self, run: Run) -> None:
+        """A handed_off run with no pending handoff can never resolve: mark it interrupted."""
+        with run.lock:
+            if run.status != "handed_off" or run.handoff is not None:
+                return
+            run.status = "interrupted"
+            run.message = "The handoff chat was not recorded; open VS Code to continue."
+            self._save()
+
     def _follow(self, run: Run) -> None:
         """Re-bind the run to the new chat once the current chat handed off to it."""
         sv = run.view
-        if sv is None or run.status in INACTIVE:
+        if run.status in INACTIVE:
+            return
+        if sv is None:
+            self._recover_orphan_handoff(run)
             return
         sv.poll()
         found = sv.handoff
         with run.lock:
+            if found is None and run.handoff is None and run.status == "handed_off":
+                self._recover_orphan_handoff(run)
+                return
+            # Invariant: a handoff seen in the log always becomes a pending handoff, so the run
+            # is either rebound to the new chat or times out; it can never wait silently.
             if found is not None and run.handoff is None:
-                if found["ahp"] == run.ahp_id:
-                    return
                 run.handoff = {**found, "from": run.session_id, "from_ahp": run.ahp_id}
                 run.ahp_id = found["ahp"]  # Open chat / Stop already point at the new chat
                 run.status = "handed_off"
@@ -177,14 +208,20 @@ class RunManager:
             if now - run.handoff_try < 2.0:
                 return
             run.handoff_try = now
-        sid = self.finder.sdk_session(pending["ahp"]) or self.finder.find_handoff(
+        # A peer chat shares the ahp id with the old chat, so only its prompt identifies it.
+        by_ahp = None if pending.get("chat") else self.finder.sdk_session(pending["ahp"])
+        if by_ahp == pending.get("from"):
+            by_ahp = None
+        sid = by_ahp or self.finder.find_handoff(
             str(pending.get("prompt") or ""),
             float(pending.get("since") or 0.0),
             self._claimed() | {str(pending.get("from") or "")},
         )
-        if not sid or sid == pending.get("from") or not (
-            self.config.session_state / sid / "events.jsonl"
-        ).exists():
+        if (
+            not sid
+            or sid == pending.get("from")
+            or not (self.config.session_state / sid / "events.jsonl").exists()
+        ):
             if now - float(pending.get("since") or now) > HANDOFF_WAIT_SECONDS:
                 with run.lock:
                     run.status, run.handoff = "interrupted", None
@@ -225,6 +262,10 @@ class RunManager:
                 "chain": r.chain,
                 "handoff": r.handoff,
                 "carried": dict(list(r.carried.items())[:200]),
+                "gates": r.gates,
+                "decisions": r.decisions,
+                "parent": r.parent,
+                "child": r.child,
             }
             for r in items
         ]
@@ -282,6 +323,8 @@ class RunManager:
         """Non-terminal runs (newest first) so a refreshed page or new tab can re-attach."""
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)
+        for r in runs:
+            self._rebind_late_session(r)
         return [
             {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
             for r in runs
@@ -294,12 +337,32 @@ class RunManager:
         raw: dict[str, Any],
         action_id: str | None = None,
         ensure_helper: Callable[[], bool] | None = None,
+        gated: bool = False,
     ) -> Run:
+        action_id = categories.canonical_action(action_id)
         try:
             values = categories.validate(category_id, raw, action_id)
             prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
+            gate_list = categories.gate_ids(category_id, action_id, gated)
+            if gate_list:
+                prompt = categories.stage_prompt(category_id, prompt, gate_list[0])
         except InputError as error:
             raise RunError(str(error)) from None
+        self._check_sources(values, action_id)
+        if gate_list:
+            self._refuse_if_starting(category_id)
+            with self._lock:
+                self._refuse_if_starting(category_id)
+                run = Run(self._new_id(), category_id, values, prompt, self._clock())
+                run.status = "awaiting_gate"
+                run.message = "Waiting for your approval of the collection plan."
+                labels = dict(categories.GATES)
+                run.gates = [
+                    {"id": g, "label": labels[g], "state": "pending", "at": 0.0} for g in gate_list
+                ]
+                self._runs[run.id] = run
+                self._save()
+            return run
         workspace = str(self.config.resolved_workspace())
         self._refuse_if_starting(category_id)
         helper_ready = self.bridge.helper_connected(workspace)
@@ -317,11 +380,7 @@ class RunManager:
                     "window for the workspace automatically, or open one yourself (the Agents "
                     "window cannot run the helper), and try again."
                 )
-            run_id = (
-                time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock()))
-                + "-"
-                + secrets.token_hex(3)
-            )
+            run_id = self._new_id()
             run = Run(run_id, category_id, values, prompt, self._clock())
             self._runs[run_id] = run
             self._save()
@@ -330,6 +389,50 @@ class RunManager:
         else:
             self._launch(run, ensure_helper)
         return run
+
+    def _new_id(self) -> str:
+        return (
+            time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(self._clock())) + "-" + secrets.token_hex(3)
+        )
+
+    def _check_sources(self, values: dict[str, str], action_id: str | None = None) -> None:
+        """Existing-source checks for imported items (read-only; the console never writes)."""
+        try:
+            if values.get("case_folder"):
+                imports.require_case(
+                    self.config,
+                    values["case_folder"],
+                    ACTION_CASE_MODES.get(
+                        categories.canonical_action(action_id) or "", "refresh"
+                    ),
+                )
+            if values.get("report_folder"):
+                latest = imports.latest_weekly(self.config)
+                if latest is None or latest["name"] != values["report_folder"]:
+                    raise ValueError(
+                        "Only the latest weekly report can be updated"
+                        + (f" ({latest['name']})." if latest else "; none was found.")
+                    )
+            if values.get("attachment"):
+                imports.resolve_viewable(
+                    self.config, self.config.output_roots[0] + "/" + values["attachment"]
+                )
+        except ValueError as error:
+            raise RunError(str(error)) from None
+
+    def _rebind_late_session(self, run: Run) -> None:
+        """A chat can appear shortly after a restart; rebind only the exact restart-orphan case."""
+        if run.status != "not_started" or run.message != LATE_START_MESSAGE or run.session_id:
+            return
+        try:
+            sid = self.finder.find(run.prompt, run.created, self._claimed())
+        except Exception:  # noqa: BLE001 - recovery is best effort
+            return
+        if sid:
+            with run.lock:
+                run.session_id, run.status, run.message = sid, "running", ""
+                run.view = self._make_view(run, seed=True)
+            self._save()
 
     def _claimed(self) -> set[str]:
         return {r.session_id for r in self._runs.values() if r.session_id}
@@ -426,6 +529,7 @@ class RunManager:
             run = self._runs.get(run_id)
         if run is None:
             raise RunError("Unknown run.")
+        self._rebind_late_session(run)
         return run
 
     def history(self, limit: int = 20) -> list[dict[str, Any]]:
@@ -481,12 +585,21 @@ class RunManager:
             "can_open_chat": False,
             "can_stop": False,
             "can_open_output": False,
+            "gates": [dict(g) for g in run.gates],
+            "decisions": [dict(d) for d in run.decisions],
+            "parent": run.parent,
+            "child": run.child,
+            "waiting_approval": False,
+            "waiting_reason": "",
+            "can_focus": False,
         }
         if sv is not None:
             sv.poll()
             now = self._clock()
             state = sv.status(now)
             with run.lock:
+                if run.status in ("completed", "stopped") and state == "handed_off":
+                    state = run.status  # a stale handoff in an old log never reopens a finished run
                 if run.status in ("running", "input_needed", "handed_off", "completed", "stopped"):
                     changed = run.status != state
                     run.status = state
@@ -523,8 +636,14 @@ class RunManager:
             )
             data["files"] = self._files(run, sv, status)
             data["can_open_chat"] = bool(ahp)
-            data["can_stop"] = status not in ("completed", "stopped", "interrupted", "not_started")
+            data["can_stop"] = status not in INACTIVE
             data["can_open_output"] = status == "completed" and bool(data["files"])
+            if status not in INACTIVE:
+                if pending is not None and pending.kind == "permission":
+                    data["waiting_approval"], data["waiting_reason"] = True, "approval"
+                elif pending is None and sv.stalled(now):
+                    data["waiting_approval"], data["waiting_reason"] = True, "stalled"
+                data["can_focus"] = True
         data["status"] = status
         return data
 
@@ -581,7 +700,7 @@ class RunManager:
         run = self.get(run_id)
         if not run.ahp_id:
             raise RunError("The live chat is not ready to stop yet.")
-        if run.status in ("completed", "stopped", "interrupted", "not_started"):
+        if run.status in INACTIVE:
             raise RunError("This run is no longer active.")
         sv = run.view
         inactive = ("completed", "stopped", "interrupted", "not_started")
@@ -628,6 +747,258 @@ class RunManager:
         result = self.bridge.wait_result(job, 20.0)
         if result is None or result.get("errors"):
             raise RunError("VS Code did not open the latest output: " + _result_text(result))
+
+    # -- console-owned approval gates ---
+    def decide_gate(
+        self,
+        run_id: str,
+        gate: str,
+        decision: str,
+        ensure_helper: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Approve or reject the next gate; approval hands that stage's prompt to the agent.
+
+        The decision is recorded in the run record. The first gate approves the run itself (it
+        starts its chat); later gates start a follow-up run (a new chat) once the earlier stage
+        finished. Rejecting ends the flow. The console never pushes, sends or deletes itself.
+        """
+        if decision not in ("approve", "reject"):
+            raise RunError("Unknown decision.")
+        run = self.get(run_id)
+        with self._lock, run.lock:
+            if run.child:
+                raise RunError("A later stage of this flow was already started.")
+            pending = [g for g in run.gates if g["state"] == "pending"]
+            target = next((g for g in run.gates if g["id"] == gate), None)
+            if target is None or target["state"] != "pending":
+                raise RunError("That gate is not waiting for a decision.")
+            if target is not pending[0]:
+                raise RunError("Decide the earlier gate first.")
+            first = run.gates.index(target) == 0
+            if first and run.status != "awaiting_gate":
+                raise RunError("This run is not waiting for approval.")
+            if not first and run.status != "completed":
+                raise RunError("The previous stage has not finished yet.")
+            now = self._clock()
+            target["state"] = "approved" if decision == "approve" else "rejected"
+            target["at"] = now
+            run.decisions.append({"gate": gate, "decision": decision, "at": now})
+            if decision == "reject":
+                for g in pending[1:]:
+                    g["state"] = "skipped"
+                if first:
+                    run.status, run.message = "rejected", f"Rejected at the {target['label']} gate."
+                self._save()
+                return {"run_id": run.id, "status": run.status}
+            self._save()
+        try:
+            if first:
+                self._start_registered(run, ensure_helper)
+                return {"run_id": run.id, "status": run.status}
+            base = categories.strip_stage(run.prompt)
+            prompt = categories.stage_prompt(run.category_id, base, gate)
+        except (InputError, KeyError) as error:
+            self._undo_gate(run, target)
+            raise RunError(str(error)) from None
+        except RunError:
+            self._undo_gate(run, target)
+            raise
+        child = Run(self._new_id(), run.category_id, dict(run.values), prompt, self._clock())
+        child.gates = [dict(g) for g in run.gates]
+        child.decisions = [dict(d) for d in run.decisions]
+        child.parent = run.id
+        with self._lock:
+            self._runs[child.id] = child
+            run.child = child.id
+        try:
+            self._start_registered(child, ensure_helper)
+        except RunError:
+            with self._lock:
+                self._runs.pop(child.id, None)
+                run.child = ""
+            self._undo_gate(run, target)
+            raise
+        return {"run_id": child.id, "status": child.status}
+
+    def _undo_gate(self, run: Run, gate: dict[str, Any]) -> None:
+        with run.lock:
+            gate["state"], gate["at"] = "pending", 0.0
+            if run.decisions:
+                run.decisions.pop()
+            self._save()
+
+    def _start_registered(self, run: Run, ensure_helper: Callable[[], bool] | None) -> None:
+        """Hand an already registered run's prompt to the agent (helper readiness first)."""
+        workspace = str(self.config.resolved_workspace())
+        ready = self.bridge.helper_connected(workspace)
+        if not ready and ensure_helper is not None:
+            ready = ensure_helper()
+        ready = ready or self.bridge.helper_connected(workspace)
+        if not ready and not self.config.allow_cli_fallback:
+            raise RunError(
+                "The VS Code helper is not connected for this workspace; open a standard "
+                "VS Code window for it and approve again."
+            )
+        with run.lock:
+            run.status, run.message, run.created = "starting", "", self._clock()
+            self._save()
+        if self._async:
+            threading.Thread(target=self._launch, args=(run, ensure_helper), daemon=True).start()
+        else:
+            self._launch(run, ensure_helper)
+
+    # -- focus, MCP and local files ---
+    def focus(self, run_id: str | None = None) -> str:
+        """Bring the workspace's VS Code window (and the run's chat) to the front."""
+        workspace = str(self.config.resolved_workspace())
+        ahp = ""
+        if run_id:
+            ahp = self.get(run_id).ahp_id
+        note = ""
+        if self.bridge.helper_connected(workspace):
+            job = self.bridge.post_job(
+                {
+                    "kind": "focus",
+                    "workspace": workspace,
+                    "ahp": ahp,
+                    "openWait": self.config.open_wait_ms,
+                }
+            )
+            result = self.bridge.wait_result(job, 20.0)
+            if result is not None and not result.get("errors"):
+                note = "chat revealed in VS Code"
+            else:
+                note = "helper: " + _result_text(result)
+        # The extension API cannot raise the OS window; `code --reuse-window <workspace>` can.
+        command = shutil.which(self.config.code_command) or self.config.code_command
+        code = self._cli([command, "--reuse-window", workspace])
+        if code != 0 and not note.startswith("chat revealed"):
+            raise RunError("Could not focus VS Code (" + note + ").")
+        return note or "window raised"
+
+    def mcp_servers(self) -> list[str]:
+        """Names of configured MCP servers that look like Wiz (names only, never settings)."""
+        return list(self._mcp_definitions())
+
+    def _mcp_definitions(self) -> dict[str, str]:
+        """Wiz server name -> VS Code MCP definition ID (what the MCP commands match on)."""
+        found: dict[str, str] = {}
+        for path, collection in (
+            (self.config.resolved_workspace() / ".vscode" / "mcp.json", "mcp.config.ws0"),
+            (self.config.vscode_user_dir / "mcp.json", "mcp.config.usrlocal"),
+        ):
+            try:
+                text = path.read_text(encoding="utf-8")
+                data = json.loads(re.sub(r"(?m)^\s*//.*$", "", text))
+            except (OSError, ValueError):
+                continue
+            servers = (
+                data.get("servers") or data.get("mcpServers") if isinstance(data, dict) else None
+            )
+            if isinstance(servers, dict):
+                for name in servers:
+                    if (
+                        "wiz" in str(name).lower()
+                        and MCP_SERVER.fullmatch(str(name))
+                        and name not in found
+                    ):
+                        found[str(name)] = f"{collection}.{name}"
+        return dict(list(found.items())[:5])
+
+    _mcp_hint: dict[str, Any] | None = None
+
+    def mcp_status(self) -> dict[str, Any]:
+        """connected / needs_auth / stopped for the Wiz MCP server (via the helper)."""
+        servers = self.mcp_servers()
+        workspace = str(self.config.resolved_workspace())
+        out: dict[str, Any] = {
+            "servers": servers,
+            "state": "unknown",
+            "helper": False,
+            "detail": "",
+        }
+        if not servers:
+            out.update(state="not_configured", detail="No Wiz MCP server found in mcp.json.")
+            return out
+        if not self.bridge.helper_connected(workspace, min_version=True):
+            out["detail"] = (
+                "The current VS Code helper is not connected. Reload the standard VS Code "
+                f"window so helper {'.'.join(map(str, MIN_HELPER_VERSION))} or newer is active."
+            )
+            return out
+        out["helper"] = True
+        job = self.bridge.post_job(
+            {"kind": "mcp_status", "workspace": workspace, "servers": servers}
+        )
+        result = self.bridge.wait_result(job, 15.0)
+        if result is None or result.get("errors"):
+            out["detail"] = "Status unavailable: " + _result_text(result)
+            return out
+        info = result.get("info") or {}
+        tools = int(info.get("toolCount") or 0)
+        hint = self._mcp_hint
+        now = self._clock()
+        if tools > 0:
+            out.update(state="connected", detail=f"{tools} Wiz tool(s) available in VS Code.")
+            self._mcp_hint = None
+        elif hint and hint["action"] in ("start", "auth") and now - hint["at"] < MCP_HINT_SECONDS:
+            out.update(
+                state="needs_auth",
+                detail="No tools yet: finish the SSO sign-in in the browser window, then refresh.",
+            )
+        else:
+            out.update(state="stopped", detail="No Wiz tools are available (server stopped).")
+        out["tools"] = tools
+        return out
+
+    def mcp_action(self, action: str, server: str | None = None) -> dict[str, Any]:
+        """Start, stop or authenticate via VS Code MCP commands (sign-in is in the browser)."""
+        if action not in MCP_ACTIONS:
+            raise RunError("Unknown MCP action.")
+        definitions = self._mcp_definitions()
+        if not definitions:
+            raise RunError("No Wiz MCP server found in mcp.json.")
+        name = server or next(iter(definitions))
+        if name not in definitions:
+            raise RunError("Unknown MCP server.")
+        workspace = str(self.config.resolved_workspace())
+        if not self.bridge.helper_connected(workspace, min_version=True):
+            raise RunError(
+                "The current VS Code helper is not connected for this workspace. Reload the "
+                "standard VS Code window so the latest helper is active."
+            )
+        job = self.bridge.post_job(
+            {
+                "kind": "mcp_action",
+                "workspace": workspace,
+                "action": action,
+                "server": definitions[name],
+            }
+        )
+        result = self.bridge.wait_result(job, 30.0)
+        if result is None or result.get("errors"):
+            raise RunError("VS Code could not run the MCP command: " + _result_text(result))
+        if action in ("start", "auth"):
+            self._mcp_hint = {"action": action, "at": self._clock()}
+        elif action == "stop":
+            self._mcp_hint = {"action": "stop", "at": self._clock()}
+        return {"ok": True, "note": _result_text(result)}
+
+    def open_deliverable(self, relative: str) -> None:
+        """Open an existing deliverable (PDF/PPTX/HTML/...) with the system viewer, read-only."""
+        try:
+            path = imports.resolve_viewable(self.config, relative)
+        except ValueError as error:
+            raise RunError(str(error)) from None
+        workspace = str(self.config.resolved_workspace())
+        if not self.bridge.helper_connected(workspace):
+            raise RunError("The VS Code helper is not connected for this workspace.")
+        job = self.bridge.post_job(
+            {"kind": "open_external", "workspace": workspace, "path": str(path)}
+        )
+        result = self.bridge.wait_result(job, 20.0)
+        if result is None or result.get("errors"):
+            raise RunError("VS Code did not open the file: " + _result_text(result))
 
     def decide(self, run_id: str, action: str) -> None:
         if action not in ("accept", "skip"):

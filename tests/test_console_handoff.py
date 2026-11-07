@@ -149,6 +149,51 @@ def test_handoff_rebinds_run_and_is_not_completed(env):  # noqa: F811
     assert any(i.get("tool") == "ask_user" for i in view["progress"]), "seq continues"
 
 
+def test_peer_chat_in_same_session_is_followed(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, path = _start(manager, bridge, workspace, home)
+    run.ahp_id = NEW_AHP
+    first = run.session_id
+    chat = "ad4dfb96-e61e-4f7b-a386-859215e5f901"
+    append(
+        path,
+        tool_start("create_session", ARGS, "h1"),
+        event(
+            "tool.execution_complete",
+            {
+                "toolCallId": "h1",
+                "success": True,
+                "result": {
+                    "content": "Chat created in the current session "
+                    f"(agent-host-session://ahp-session/{NEW_AHP}?chat={chat})."
+                },
+            },
+        ),
+        event("hook.end", {"hookType": "agentStop"}),
+    )
+    assert manager.view(run.id)["status"] == "handed_off" and run.handoff["chat"] == chat
+    make_session(home, workspace, NEW_SID, prompt=PROMPT)
+    run.handoff_try = 0.0
+    assert manager.view(run.id)["status"] == "running"
+    assert run.session_id == NEW_SID and run.chain[0]["session_id"] == first
+
+
+def test_handoff_to_same_ahp_never_waits_silently(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, path = _start(manager, bridge, workspace, home)
+    run.ahp_id = NEW_AHP
+    _handoff(path, NEW_AHP)
+    assert manager.view(run.id)["status"] == "handed_off" and run.handoff is not None
+    make_session(home, workspace, NEW_SID, prompt=PROMPT)
+    run.handoff_try = 0.0
+    manager.view(run.id)
+    assert run.session_id == NEW_SID and run.status == "running"
+
+
 def test_new_chat_found_through_agent_host_db(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
@@ -231,3 +276,46 @@ def test_unresolved_handoff_times_out_as_interrupted_not_completed(env):  # noqa
     assert manager.view(run.id)["status"] == "interrupted"
     with pytest.raises(RunError):
         manager.stop(run.id)
+
+
+def test_orphaned_handed_off_without_handoff_is_interrupted(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, _path = _start(manager, bridge, workspace, home)
+    saved = json.loads((config.state_dir / "runs.json").read_text(encoding="utf-8"))
+    saved[0]["status"], saved[0]["handoff"] = "handed_off", None
+    (config.state_dir / "runs.json").write_text(json.dumps(saved), encoding="utf-8")
+    again = _manager(config)
+    assert again.view(run.id)["status"] == "interrupted"
+    assert not again.active()
+    persisted = json.loads((config.state_dir / "runs.json").read_text(encoding="utf-8"))
+    assert persisted[0]["status"] == "interrupted"
+    assert _manager(config).get(run.id).status == "interrupted"
+
+
+def test_orphaned_handed_off_without_session_is_interrupted(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, _path = _start(manager, bridge, workspace, home)
+    live = manager.get(run.id)
+    live.status, live.handoff, live.view = "handed_off", None, None
+    assert manager.view(run.id)["status"] == "interrupted"
+
+
+def test_persisted_completed_run_ignores_stale_handoff_in_old_log(env):  # noqa: F811
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    manager = _manager(config, bridge)
+    run, path = _start(manager, bridge, workspace, home)
+    _handoff(path, NEW_AHP)
+    saved = json.loads((config.state_dir / "runs.json").read_text(encoding="utf-8"))
+    saved[0]["status"], saved[0]["handoff"] = "completed", None
+    (config.state_dir / "runs.json").write_text(json.dumps(saved), encoding="utf-8")
+    again = _manager(config)
+    assert again.view(run.id)["status"] == "completed"
+    assert again.get(run.id).status == "completed" and not again.active()
+    assert json.loads((config.state_dir / "runs.json").read_text(encoding="utf-8"))[0][
+        "status"
+    ] == "completed"

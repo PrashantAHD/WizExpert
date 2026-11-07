@@ -90,9 +90,11 @@ class FakeHelper:
         create: bool = True,
         name: str = "fakehelper",
         answer: bool = True,
+        version: str = "0.2.1",
     ) -> None:
         self.bridge, self.workspace, self.home, self.create = bridge, workspace, home, create
-        self.name, self.answer = name, answer
+        self.name, self.answer, self.version = name, answer, version
+        self.infos: dict[str, dict[str, Any]] = {}
         self.jobs: list[dict[str, Any]] = []
         self._stop = threading.Event()
         self.events_path: Path | None = None
@@ -112,7 +114,9 @@ class FakeHelper:
     def _run(self) -> None:
         after = -1
         while not self._stop.is_set():
-            res = self.bridge.poll(after, self.name, [str(self.workspace)], wait=0.1)
+            res = self.bridge.poll(
+                after, self.name, [str(self.workspace)], wait=0.1, version=self.version
+            )
             if after < 0:
                 after = res["last"]
                 continue
@@ -121,7 +125,7 @@ class FakeHelper:
                 self.jobs.append(job)
                 if not self.answer:
                     continue  # a wedged window: still polling, never answers
-                info: dict[str, Any] = {"note": "sent"}
+                info: dict[str, Any] = {"note": "sent", **self.infos.get(job["kind"], {})}
                 if job["kind"] == "start_chat" and self.create:
                     self.events_path = make_session(self.home, self.workspace, prompt=job["prompt"])
                 self.bridge.record_result(job["id"], {"errors": [], "info": info})

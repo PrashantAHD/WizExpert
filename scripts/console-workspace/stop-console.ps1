@@ -1,7 +1,7 @@
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $processes = Get-CimInstance Win32_Process | Where-Object {
     $_.CommandLine -and
-    $_.CommandLine.Contains($workspace) -and
+    $_.CommandLine -match ('(?i)' + [regex]::Escape($workspace.TrimEnd('\')) + '\\?("|\s|$)') -and
     ($_.CommandLine.Contains("wizexpert.console.dev") -or $_.CommandLine -match 'wizexpert(\.exe)?"?\s+console')
 }
 
