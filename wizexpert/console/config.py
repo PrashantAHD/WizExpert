@@ -86,6 +86,9 @@ class ConsoleConfig:
         return Path(self.workspace).resolve()
 
 
+ASSIGNEE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}")
+
+
 def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
     """Apply a private JSON file (agent, output_roots, deny_names, prompts, ...)."""
     data: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -109,7 +112,7 @@ def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
         config.start_timeout = float(data["start_timeout"])
     if "status_sync_assignee" in data:
         assignee = str(data["status_sync_assignee"]).strip()
-        if assignee and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}", assignee):
+        if assignee and not ASSIGNEE_PATTERN.fullmatch(assignee):
             raise ValueError("status_sync_assignee may only use letters, digits, . _ @ -.")
         config.status_sync_assignee = assignee
     if "status_sync_hours" in data:

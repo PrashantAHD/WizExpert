@@ -17,7 +17,7 @@ from test_console_server import api, console, token_of  # noqa: F401  (fixtures/
 
 from wizexpert.console import categories, imports
 from wizexpert.console.bridge import Bridge
-from wizexpert.console.runs import RunError, RunManager
+from wizexpert.console.runs import RunBusyError, RunError, RunManager
 from wizexpert.console.sessions import SessionView
 
 
@@ -110,6 +110,24 @@ def test_risk_cases_become_in_progress_cards_with_legacy_tag(env):  # noqa: F811
     assert new["modified"] > 0
 
 
+def test_risk_case_rule_ids_from_control_ids_file_names_and_long_names(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    _touch(
+        base / "Gateway-Rules" / "Gateway.workflow.json",
+        json.dumps({"finding_id": "wc-id-1-2", "control_ids": ["wc-id-1", "wc-id-2"]}),
+    )
+    _touch(base / "Compound-Finding" / "x.workflow.json", json.dumps({"finding_id": "wc-id-5-6"}))
+    long_name = "L" + "x" * 100
+    _touch(base / long_name / "wc-id-9.html")
+    _touch(base / "No-Id-Case" / "report.xlsx")
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases["Gateway-Rules"]["issue_ids"] == ["wc-id-1", "wc-id-2"]
+    assert cases["Compound-Finding"]["issue_ids"] == ["wc-id-5", "wc-id-6"]
+    assert cases[long_name]["issue_ids"] == ["wc-id-9"]
+    assert cases["No-Id-Case"]["issue_ids"] == []
+
+
 def _case_with_counts(workspace, name, collection):
     folder = workspace / "deliverables" / "Risk-Issues" / name
     _touch(folder / "x.workflow.json", json.dumps({"collection": collection}))
@@ -130,14 +148,19 @@ def test_risk_case_resolved_only_when_all_wiz_issues_resolved(env):  # noqa: F81
         "Neg-wc-id-47": {"status_counts": {"RESOLVED": 2, "OPEN": -1}},
         "Missing-wc-id-48": {},
         "Notdict-wc-id-49": {"status_counts": [1]},
+        "Ign-wc-id-50": {"status_counts": {"OPEN": 0, "REJECTED": 3}},
+        "Acc-wc-id-51": {"status_counts": {"Risk Accepted": 1, "Ignored": 1}},
+        "Mix-wc-id-52": {"status_counts": {"REJECTED": 1, "OPEN": 1}},
     }
+    closed = {"Done-wc-id-41", "Rej-wc-id-43", "Ign-wc-id-50", "Acc-wc-id-51"}
     for name, collection in cases.items():
         _case_with_counts(workspace, name, collection)
     scanned = {c["name"]: c for c in imports.scan_risk_cases(config)}
-    assert scanned["Done-wc-id-41"]["resolved"] is True
-    assert scanned["Done-wc-id-41"]["status"] == "RESOLVED"
+    for name in closed:
+        assert scanned[name]["resolved"] is True, name
+        assert scanned[name]["status"] == "RESOLVED", name
     for name in cases:
-        if name != "Done-wc-id-41":
+        if name not in closed:
             assert scanned[name]["resolved"] is False, name
             assert scanned[name]["status"] == "In-Progress", name
 
@@ -334,7 +357,7 @@ def test_status_check_blocked_stays_due(env):  # noqa: F811
 
     result = imports.run_status_sync(config, blocked)
     assert result["started"] == [] and result["skipped"]
-    assert imports.status_sync_due(config)
+    assert not imports.status_sync_due(config) and imports.status_sync_due(config, force=True)
 
 
 def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: F811
@@ -360,7 +383,7 @@ def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: 
 
     def start(action, inputs):
         if block["on"]:
-            raise RunError("A run of this workflow is already active (run x).")
+            raise RunBusyError("A run of this workflow is already active (run x).")
         started.append((action, inputs))
         return type("R", (), {"id": "ref1", "status": "awaiting_gate"})
 
@@ -378,7 +401,7 @@ def test_status_check_without_result_fails_and_retries(env):  # noqa: F811
     config.status_sync_assignee = "owner1"
     imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
     done = imports.finish_status_check(config, lambda a, i: None, lambda _i: "completed")
-    assert done["state"]["phase"] == "failed" and imports.status_sync_due(config)
+    assert done["state"]["phase"] == "failed" and not imports.status_sync_due(config)
 
 
 def test_status_check_prompt_is_read_only():
@@ -407,6 +430,27 @@ def test_status_sync_wording_and_automatic_not_forced():
     js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
     assert "runStatusSync(null, !silent)" in js
     assert "found changes" not in js and "no changes detected" not in js
+
+
+def test_sync_is_risk_issues_only_in_ui():
+    root = Path(__file__).resolve().parents[1] / "wizexpert" / "console"
+    js = (root / "static" / "app.js").read_text("utf-8")
+    assert '"weekly-progress-reporting", "monthly-governance-reporting"' in js
+    assert "function syncAllowedHere()" in js and "!syncAllowedHere()" in js
+    assert "applySyncScope();" in js and "Risk Issues only" in js
+    html = (root / "static" / "index.html").read_text("utf-8")
+    assert "Risk Issues only" in html
+
+
+def test_weekly_prompt_requires_fresh_readonly_status_fetch(env):  # noqa: F811
+    config, workspace, _ = env
+    run = _manager(config).start(
+        "weekly-progress-reporting", {"reporting_monday": "2026-11-10"}, "new", gated=True
+    )
+    prompt = " ".join(run.prompt.split())
+    assert "fresh read-only Wiz status fetch" in prompt
+    assert "never rely only on sync state" in prompt
+    assert "make no change in Wiz, ServiceNow or cloud" in prompt
 
 
 def test_resume_refuses_unknown_and_legacy_cases(env):  # noqa: F811
@@ -1152,3 +1196,136 @@ def test_manual_milestone_endpoint_and_ui_wiring(console):  # noqa: F811
     assert "/api/imports/risk-issues/milestone" in js and '"aria-label": label' in js
     assert "Ticket Created" in js and "Email Sent" in js and "Reports Sent" in js and "Follow-up Sent" in js  # noqa: E501
     assert "clearNotifications" in js and '"aria-label": "Clear all notifications"' in js
+
+
+def test_weekly_update_report_folder_uses_strict_validator():
+    ok = categories.validate(
+        "weekly-progress-reporting",
+        {"report_folder": "2026-01-06", "internal_response": "ok"}, "update",
+    )
+    assert ok["report_folder"] == "2026-01-06"
+    for bad in ("../x", "a/b", "a\\b", ""):
+        with pytest.raises(categories.InputError):
+            categories.validate(
+                "weekly-progress-reporting",
+                {"report_folder": bad, "internal_response": "ok"}, "update",
+            )
+
+
+def test_status_sync_assignee_accepts_at_in_config_and_prompt(tmp_path):
+    from wizexpert.console.config import ConsoleConfig, load_overrides
+
+    path = tmp_path / "c.json"
+    path.write_text('{"status_sync_assignee": "owner@corp"}', encoding="utf-8")
+    cfg = load_overrides(ConsoleConfig(workspace=tmp_path), path)
+    values = categories.validate("risk-issues", {
+        "assignee": cfg.status_sync_assignee, "case_list": "A-wc-id-1",
+        "result_name": "sc-20260101-abc123",
+    }, "status-check")
+    assert values["assignee"] == "owner@corp"
+
+
+def _checking_state(config, workspace, cases):
+    imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
+    token = imports.status_sync_state(config)["result_name"]
+    out = workspace / "deliverables" / "Status-Check"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / (token + ".json")).write_text(json.dumps({
+        "checked": cases, "changed": [{"case": c, "reason": "moved"} for c in cases],
+    }), encoding="utf-8")
+
+
+def test_non_retryable_refresh_start_is_skipped_not_wedged(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    _checking_state(config, workspace, cases)
+
+    def refuse(action, inputs):
+        raise RunError("This case has no retained evidence folder to refresh from.")
+
+    result = imports.finish_status_check(config, refuse, lambda _i: "completed")
+    state = result["state"]
+    assert state["pending"] == [] and state["phase"] == "done"
+    assert [s["case"] for s in state["skipped"]] == cases
+
+
+def test_busy_refresh_start_stays_pending(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    _checking_state(config, workspace, cases)
+
+    def busy(action, inputs):
+        raise RunBusyError("A run of this workflow is already active (run x).")
+
+    result = imports.finish_status_check(config, busy, lambda _i: "completed")
+    assert result["state"]["pending"] == cases and result["state"]["phase"] == "refreshing"
+    assert not result["state"].get("skipped")
+
+
+def test_force_recovers_when_check_run_is_gone(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
+    calls = []
+
+    def start(action, inputs):
+        calls.append(action)
+        return type("R", (), {"id": "chk2", "status": "running"})
+
+    def gone(_id):
+        raise RunError("Unknown run.")
+
+    result = imports.run_status_sync(config, start, force=True, run_status=gone)
+    assert calls == ["status-check"] and result["state"]["check_run_id"] == "chk2"
+
+
+def test_concurrent_posts_do_not_double_queue(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    _checking_state(config, workspace, cases[:1])
+    started = []
+
+    def start(action, inputs):
+        time.sleep(0.05)
+        started.append(inputs["case_folder"])
+        return type("R", (), {"id": "ref1", "status": "awaiting_gate"})
+
+    threads = [
+        threading.Thread(
+            target=imports.run_status_sync, args=(config, start),
+            kwargs={"run_status": lambda _i: "completed"},
+        )
+        for _ in range(4)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert started == cases[:1]
+
+
+def test_failed_check_backs_off_but_force_retries(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+
+    def blocked(action, inputs):
+        raise RunError("A run of this workflow is already active (run x).")
+
+    imports.run_status_sync(config, blocked)
+    assert imports.status_sync_state(config)["phase"] == "failed"
+    assert not imports.status_sync_due(config) and imports.status_sync_due(config, force=True)
+
+
+def test_sync_get_is_side_effect_free():
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "wizexpert" / "console" / "server.py").read_text("utf-8")
+    get_part = src.split('"/api/imports/risk-issues/sync":')[1].split('"/api/imports/files"')[0]
+    assert "finish_status_check" not in get_part and "manager.start" not in get_part

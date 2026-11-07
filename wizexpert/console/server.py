@@ -466,18 +466,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
             if path == "/api/imports/risk-issues/sync":
-                manager = self.app.manager
-                advanced = imports.finish_status_check(
-                    config,
-                    lambda action, inputs: manager.start("risk-issues", inputs, action),
-                    lambda run_id: manager.view(run_id)["status"],
-                )
+                # Side-effect free: only POST may start or advance runs.
                 return self._json(
                     HTTPStatus.OK,
                     {
                         "due": imports.status_sync_due(config),
-                        "state": advanced["state"],
-                        "queued": advanced["queued"],
+                        "state": imports.status_sync_state(config),
+                        "queued": [],
                         "hours": config.status_sync_hours,
                         "assignee_configured": bool(config.status_sync_assignee),
                     },
