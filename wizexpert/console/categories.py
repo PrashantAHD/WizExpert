@@ -475,7 +475,11 @@ CATEGORIES: dict[str, Category] = {
             ),
         ),
         "Risk Issues category: prepare the deliverables for Wiz issue {issue_ids}",
-        stages=(("new", "New work-item"), ("in-progress", "In-progress")),
+        stages=(
+            ("new", "New work-item"),
+            ("in-progress", "In-progress"),
+            ("resolved", "Resolved"),
+        ),
         default_action="new",
         actions=RISK_ACTIONS,
         imports="risk-issues",
