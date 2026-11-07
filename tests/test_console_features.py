@@ -191,17 +191,47 @@ def test_risk_cases_panel_shows_empty_notification_state():
     assert "function notificationBar()" in js
     assert "home.notifications" not in js and "renderNotifications()" in js
     html = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "index.html").read_text("utf-8")  # noqa: E501
-    assert 'id="notif-btn"' in html and 'aria-label="Notifications' in html and 'id="notif-badge"' in html
-    assert 'id="sync-btn"' in html and 'aria-label="Sync Risk Issues status"' in html and 'id="sync-tooltip"' in html
-    assert "riskCasesPanel(category, false)" in js and "riskCasesPanel(category, true)" in js and "list.append(notifications" not in js
+    assert (
+        'id="notif-btn"' in html
+        and 'aria-label="Notifications' in html
+        and 'id="notif-badge"' in html
+    )
+    assert (
+        'id="sync-btn"' in html
+        and 'aria-label="Sync Risk Issues status"' in html
+        and 'id="sync-tooltip"' in html
+    )
+    assert (
+        "riskCasesPanel(category, false)" in js
+        and "riskCasesPanel(category, true)" in js
+        and "list.append(notifications" not in js
+    )
     assert '"notification-item"' in js
-    assert "function notificationRow(" in js and "notif-title" in js and "notif-context" in js and "notif-meta" in js and "aria-label" in js
-    css = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "style.css").read_text(encoding="utf-8")
+    assert (
+        "function notificationRow(" in js
+        and "notif-title" in js
+        and "notif-context" in js
+        and "notif-meta" in js
+        and "aria-label" in js
+    )
+    static = Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static"
+    css_path = static / "style.css"
+    css = css_path.read_text(encoding="utf-8")
     assert "wizexpert.notifications.read" in js and "wizexpert.notifications.cleared" in js
-    assert "Mark all as read" in js and "Clear all" in js and "is-unread" in js and "notif-dot" in js
+    assert (
+        "Mark all as read" in js
+        and "Clear all" in js
+        and "is-unread" in js
+        and "notif-dot" in js
+    )
     assert ".is-unread" in css and ".notif-markall" in css and ".notif-clear" in css
     assert ".notif-context" in css and ".notif-sub" in css and "text-overflow: ellipsis" in css
-    assert "function runStatusSync(" in js and "syncFromTopbar" in js and "loadTopbarSync" in js and "syncStatusText" in js
+    assert (
+        "function runStatusSync(" in js
+        and "syncFromTopbar" in js
+        and "loadTopbarSync" in js
+        and "syncStatusText" in js
+    )
     assert "topbar-icon-btn" in css and ".sync-tooltip" in css and "automatic sync runs daily" in js
     assert 'const sync = h("button"' not in js and '"Sync now"' not in js
 
@@ -320,7 +350,10 @@ def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: 
     out.mkdir(parents=True)
     (out / (token + ".json")).write_text(json.dumps({
         "checked": cases + ["Not-Asked"],
-        "changed": [{"case": cases[0], "reason": "status moved"}, {"case": "Not-Asked", "reason": "x"}],
+        "changed": [
+            {"case": cases[0], "reason": "status moved"},
+            {"case": "Not-Asked", "reason": "x"},
+        ],
     }), encoding="utf-8")
     started = []
     block = {"on": True}
@@ -350,7 +383,9 @@ def test_status_check_without_result_fails_and_retries(env):  # noqa: F811
 
 def test_status_check_prompt_is_read_only():
     values = categories.validate("risk-issues", {
-        "assignee": "owner1", "case_list": "A-wc-id-1, B-wc-id-2", "result_name": "sc-20260101-abc123",
+        "assignee": "owner1",
+        "case_list": "A-wc-id-1, B-wc-id-2",
+        "result_name": "sc-20260101-abc123",
     }, "status-check")
     prompt = categories.build_prompt("risk-issues", values, None, "status-check")
     assert "owner1" in prompt and "read-only" in prompt and "no email" in prompt.lower()
