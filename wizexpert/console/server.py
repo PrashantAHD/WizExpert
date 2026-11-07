@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import imports, sessions, stakeholder
+from . import imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import ConsoleConfig, load_overrides
 from .runs import RunError, RunManager
@@ -465,6 +465,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/files":
+                return self._json(
+                    HTTPStatus.OK,
+                    {"files": launcher.list_files(config, arg("category"), arg("folder"))},
+                )
+            if path == "/api/imports/case-files":
+                return self._json(
+                    HTTPStatus.OK, {"files": launcher.list_case_files(config, arg("case"))}
+                )
             if path == "/api/imports/stakeholder-response":
                 return self._json(
                     HTTPStatus.OK,
@@ -526,8 +535,34 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 raise RunError(str(exc)) from None
             return self._json(HTTPStatus.OK, {"ok": True, "response": saved})
+        if path == "/api/imports/case-files/open":
+            try:
+                used = launcher.open_case_file(
+                    self.app.config,
+                    body.get("case"),
+                    body.get("name"),
+                    body.get("with"),
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "app": used})
+        if path == "/api/imports/files/open":
+            try:
+                used = launcher.open_file(
+                    self.app.config,
+                    body.get("category"),
+                    body.get("folder"),
+                    body.get("name"),
+                    body.get("with"),
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, {"ok": True, "app": used})
         if path == "/api/imports/open":
-            manager.open_deliverable(str(body.get("path", "")))
+            try:
+                launcher.open_relative(self.app.config, str(body.get("path", "")))
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
             return self._json(HTTPStatus.OK, {"ok": True})
         if path == "/api/helper/mcp":
             return self._json(
