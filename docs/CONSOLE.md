@@ -170,7 +170,7 @@ launch, no helper).
   `evidence` folder. Archive before replacing, retained evidence is never modified, no
   Wiz/SNOW/cloud change, no email.
   Sync is Risk Issues-only: the topbar control is labelled "Risk Issues only", is hidden on the Weekly Progress Reporting and Monthly Governance Reporting pages, and the client guard refuses to call the endpoint there; no category-page sync controls exist. Weekly report generation does its own fresh read-only Wiz status fetch for the reporting scope (retained Risk Issues/Daily evidence is only history and remediation context) and Monthly is independent of both.
-  the homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
+  The homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
   the last sync is older than 24 hours. Sync starts ONE `status-check` run (hidden `system` stage
   action, not gated) in the VS Code WizExpert chat, because only that chat has read-only Wiz MCP
   access; the console server has none. The check fetches the latest Wiz status of the eligible
