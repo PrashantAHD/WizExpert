@@ -1055,6 +1055,16 @@ function tableOf(head, rows) {
   table.append(body);
   return table;
 }
+function caseTitle(name) { return String(name || "").replace(/-[A-Z]{3}\d{4}-assigned$/, ""); }
+function resolvedRuleTitle(c, rule) {
+  if (!rule || !c || !c.rule_names || typeof c.rule_names !== "object") return "";
+  const exact = c.rule_names[rule];
+  if (typeof exact === "string" && exact.trim()) return exact;
+  const wanted = String(rule).toLowerCase();
+  const key = Object.keys(c.rule_names).find((candidate) => candidate.toLowerCase() === wanted);
+  const title = key ? c.rule_names[key] : "";
+  return typeof title === "string" && title.trim() ? title : "";
+}
 function loadingNote(text) { return h("p", { class: "help", role: "status" }, text); }
 function riskCasesPanel(category, resolvedOnly) {
   const list = h("div", { class: "item-list" }, loadingNote((resolvedOnly ? "Scanning local resolved Risk Issues cases..." : "Scanning local Risk Issues cases...")));
@@ -1064,9 +1074,18 @@ function riskCasesPanel(category, resolvedOnly) {
     const shown = res.cases.filter((x) => !!x.resolved === !!resolvedOnly);
     if (!shown.length) { list.append(h("p", { class: "help" }, resolvedOnly ? "No resolved case folders were detected under deliverables/Risk-Issues." : "No existing case folders were found under deliverables/Risk-Issues.")); return; }
     const renderResolved = (c, target) => {
+      // One card per rule ID (a combined case shows each rule separately) with its own reason.
+      const rules = c.issue_ids.length ? c.issue_ids : [null];
+      for (const rule of rules) {
+        const reason = rule && c.resolution_reasons ? c.resolution_reasons[rule] : "";
+        renderResolvedCard(c, rule, reason, target);
+      }
+    };
+    const renderResolvedCard = (c, rule, reason, target) => {
       target.append(h("div", { class: "item-row case-card" },
-        h("div", {}, h("strong", {}, c.name),
-          c.issue_ids.length ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + c.issue_ids.join(", ")) : null,
+        h("div", {}, h("strong", { class: "case-title" }, resolvedRuleTitle(c, rule) || caseTitle(c.name)),
+          rule ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + rule) : null,
+          h("span", { class: "meta resolution-notes-line" }, "Resolution notes: " + (reason || "Resolved")),
           h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown")),
           h("span", {}, h("span", { class: "badge done" }, "RESOLVED"), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
@@ -1144,7 +1163,7 @@ function riskCasesPanel(category, resolvedOnly) {
         manualBox.append(h("label", { for: box.id }, box, " " + label + " "));
       }
       target.append(h("div", { class: "item-row case-card" },
-        h("div", {}, h("strong", {}, c.name),
+        h("div", {}, h("strong", { class: "case-title" }, caseTitle(c.name)),
           c.issue_ids.length ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + c.issue_ids.join(", ")) : null,
           h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),

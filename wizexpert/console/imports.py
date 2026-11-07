@@ -147,6 +147,108 @@ def _metadata_ids(folder: Path) -> list[str]:
     return []
 
 
+MAX_REASON = 300
+
+
+def _metadata_rule_names(folder: Path) -> dict[str, str]:
+    """Per-rule display titles from ``rule_names`` in workflow/case metadata.
+
+    Text is whitespace-folded and capped so metadata cannot inject unbounded card content.
+    Missing or malformed metadata safely returns an empty mapping.
+    """
+    candidates = [*sorted(folder.glob("*.workflow.json")), folder / "case-metadata.json"]
+    out: dict[str, str] = {}
+    for candidate in candidates:
+        data = _load_json(candidate)
+        raw = data.get("rule_names") if isinstance(data, dict) else None
+        if isinstance(raw, list):
+            raw = {
+                str(i.get("rule_id")): i.get("title", i.get("name"))
+                for i in raw
+                if isinstance(i, dict) and i.get("rule_id") is not None
+            }
+        if not isinstance(raw, dict):
+            continue
+        for key, value in raw.items():
+            if (
+                isinstance(key, str)
+                and isinstance(value, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", key)
+                and " ".join(value.split())
+            ):
+                title = " ".join(value.split())[:MAX_REASON]
+                for ident in issue_ids_from_name(key) or [key.lower()]:
+                    out.setdefault(ident, title)
+    return out
+
+
+def _metadata_resolution_reasons(folder: Path) -> dict[str, str]:
+    """Per-rule resolution reasons from ``resolution_reasons`` in workflow/case metadata.
+
+    Shape: ``{"resolution_reasons": {"<rule-id>": "reason"}}`` or a list of
+    ``{"rule_id": "...", "reason": "..."}``. Text is whitespace-folded and capped.
+    """
+    candidates = [*sorted(folder.glob("*.workflow.json")), folder / "case-metadata.json"]
+    out: dict[str, str] = {}
+    for candidate in candidates:
+        data = _load_json(candidate)
+        raw = data.get("resolution_reasons") if isinstance(data, dict) else None
+        if isinstance(raw, list):
+            raw = {
+                str(i.get("rule_id")): i.get("reason")
+                for i in raw
+                if isinstance(i, dict) and i.get("rule_id") is not None
+            }
+        if not isinstance(raw, dict):
+            continue
+        for key, value in raw.items():
+            if (
+                isinstance(key, str)
+                and isinstance(value, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", key)
+                and " ".join(value.split())
+            ):
+                text = " ".join(value.split())[:MAX_REASON]
+                for ident in issue_ids_from_name(key) or [key.lower()]:
+                    out.setdefault(ident, text)
+    return out
+
+
+_CLOSED_REASON_LABELS = {
+    "RESOLVED": "Resolved",
+    "REJECTED": "Ignored",
+    "IGNORED": "Ignored",
+    "RISK_ACCEPTED": "Risk accepted",
+}
+
+
+def _fallback_resolution_reason(folder: Path) -> str:
+    counts = _latest_status_counts(folder)
+    if not isinstance(counts, dict):
+        return "Resolved"
+    labels: list[str] = []
+    for key, value in counts.items():
+        normalized = str(key).strip().upper().replace(" ", "_").replace("-", "_")
+        label = _CLOSED_REASON_LABELS.get(normalized)
+        if (
+            label
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+            and label not in labels
+        ):
+            labels.append(label)
+    return labels[0] if len(labels) == 1 else "Resolved"
+
+
+def _resolution_reasons_for(folder: Path, ids: list[str]) -> dict[str, str]:
+    reasons = _metadata_resolution_reasons(folder)
+    fallback = _fallback_resolution_reason(folder)
+    for ident in ids:
+        reasons.setdefault(ident, fallback)
+    return reasons
+
+
 def _file_name_ids(folder: Path, config: ConsoleConfig) -> list[str]:
     """Rule IDs from direct-child file names such as ``wc-id-870_Analysis.html`` (names only)."""
     found: list[str] = []
@@ -447,6 +549,8 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
                 "issue_ids": ids,
                 "status": "RESOLVED" if resolved else "In-Progress",
                 "resolved": resolved,
+                "rule_names": _metadata_rule_names(folder) if resolved else {},
+                "resolution_reasons": _resolution_reasons_for(folder, ids) if resolved else {},
                 "legacy": legacy,
                 "modified": modified,
                 "artifacts": art["present"],

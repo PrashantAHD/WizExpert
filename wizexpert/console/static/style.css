@@ -433,3 +433,4 @@ body.nav-collapsed .shortcuts { display: none; }
 .notif-panel > .notification-item.is-read { background: transparent; }
 .notif-panel > .notification-item.is-read .notif-title { font-weight: 500; color: #4a5a73; }
 .notif-panel > .notification-item.is-unread:hover, .notif-panel > .notification-item.is-unread:focus-visible { background: #dcebff; }
+.case-card .case-title { display: block; white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; word-break: break-word; }
