@@ -498,9 +498,10 @@ def test_new_action_is_the_unchanged_default():
 
 def test_category_json_exposes_stages_and_actions():
     risk = categories.CATEGORIES["risk-issues"].to_json()
-    assert [s["id"] for s in risk["stages"]] == ["new", "in-progress"]
+    assert [s["id"] for s in risk["stages"]] == ["new", "in-progress", "resolved"]
+    assert not [a for a in risk["actions"] if a["stage"] == "resolved"]
     assert [a["id"] for a in risk["actions"]] == [
-        "new", "risk-accepted", "email-response", "update-status", "refresh-case",
+        "new", "risk-accepted", "email-response", "update-status", "refresh-case", "status-check",
         "update-deliverables", "follow-up-email", "reply-response",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()

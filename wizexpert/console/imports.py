@@ -408,17 +408,15 @@ def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
         return True
     if config.status_sync_hours <= 0:
         return False
-    last = status_sync_state(config).get("last_started")
+    state = status_sync_state(config)
+    if state.get("phase") == "failed":
+        return True  # a failed check is retried at the next opportunity
+    last = state.get("last_started")
     return not isinstance(last, (int, float)) or time.time() - last >= config.status_sync_hours * 3600
 
 
-def mark_status_sync_started(config: ConsoleConfig, cases: list[str]) -> dict[str, Any]:
+def _write_sync_state(config: ConsoleConfig, state: dict[str, Any]) -> dict[str, Any]:
     config.state_dir.mkdir(parents=True, exist_ok=True)
-    state = {
-        "last_started": time.time(),
-        "cases": cases[:100],
-        "mode": "refresh-case",
-    }
     path = config.state_dir / "status-sync.json"
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -426,35 +424,144 @@ def mark_status_sync_started(config: ConsoleConfig, cases: list[str]) -> dict[st
     return state
 
 
-def run_status_sync(config: ConsoleConfig, start: Any, *, force: bool = False) -> dict[str, Any]:
-    """Queue gated Refresh runs for eligible cases; never raises for per-case start errors.
+def mark_status_sync_started(config: ConsoleConfig, cases: list[str], **extra: Any) -> dict[str, Any]:
+    return _write_sync_state(
+        config,
+        {"last_started": time.time(), "cases": cases[:100], "mode": "status-check", **extra},
+    )
 
-    ``start(case_name)`` returns a run-like object (``id``, ``status``) or raises (for
-    example the one-active-run guard). Failures become ``skipped`` entries. The sync is
-    marked started only when at least one Refresh was queued, so a sync blocked entirely
-    by an active run stays due and is retried.
-    """
-    if not status_sync_due(config, force=force):
-        return {"started": [], "skipped": [], "state": status_sync_state(config)}
-    candidates = [
-        case for case in scan_risk_cases(config)
+
+STATUS_CHECK_DIR = "Status-Check"
+_RUN_ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
+
+
+def eligible_sync_cases(config: ConsoleConfig) -> list[str]:
+    """Open, non-legacy cases with retained evidence and issue IDs (assignee is checked in Wiz)."""
+    return [
+        case["name"]
+        for case in scan_risk_cases(config)
         if not case["resolved"] and not case["legacy"]
         and case["can_refresh"] and case["issue_ids"]
     ]
-    started: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    for case in candidates:
+
+
+def _read_status_result(config: ConsoleConfig, token: str, allowed: list[str]) -> dict[str, Any] | None:
+    """The status-check run's JSON result, restricted to the cases that were asked for."""
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,40}", token or ""):
+        return None
+    root = config.resolved_workspace() / config.output_roots[0] / STATUS_CHECK_DIR
+    path = root / (token + ".json")
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_JSON_BYTES:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("checked"), list):
+        return None
+    changed: list[dict[str, str]] = []
+    for item in data.get("changed") or []:
+        if isinstance(item, dict) and item.get("case") in allowed:
+            changed.append({"case": item["case"], "reason": str(item.get("reason", ""))[:200]})
+    checked = [c for c in data["checked"] if c in allowed]
+    return {"checked": checked, "changed": changed}
+
+
+def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+    """Advance a started status check: read its result, then queue Refresh for changed cases.
+
+    ``run_status(run_id)`` returns the check run's status. Refresh runs that the one-active-run
+    guard blocks stay in ``pending`` and are retried by the next call, so none are lost.
+    Returns ``{"state": ..., "queued": [newly queued refreshes]}``.
+    """
+    state = status_sync_state(config)
+    queued: list[dict[str, Any]] = []
+    if state.get("phase") == "checking":
         try:
-            run = start(case["name"])
-        except Exception as error:  # noqa: BLE001 - reported per case, never fatal
-            skipped.append({"case": case["name"], "reason": str(error)[:300]})
-            continue
-        started.append({"case": case["name"], "run_id": run.id, "status": run.status})
-    if started or not candidates:
-        state = mark_status_sync_started(config, [item["case"] for item in started])
-    else:
-        state = status_sync_state(config)
-    return {"started": started, "skipped": skipped, "state": state}
+            status = run_status(state.get("check_run_id", ""))
+        except Exception:  # noqa: BLE001 - an unknown run ends the check
+            status = "not_started"
+        if status in _RUN_ACTIVE:
+            return {"state": state, "queued": queued}
+        result = (
+            _read_status_result(config, state.get("result_name", ""), state.get("cases", []))
+            if status == "completed" else None
+        )
+        if result is None:
+            state.update(phase="failed", error="The Wiz status check did not produce a result; "
+                         "nothing was refreshed. Sync again to retry.")
+        else:
+            state.update(
+                phase="refreshing", checked=len(result["checked"]),
+                changed=[c["case"] for c in result["changed"]],
+                reasons={c["case"]: c["reason"] for c in result["changed"]},
+                pending=[c["case"] for c in result["changed"]],
+            )
+    if state.get("phase") == "refreshing":
+        pending = list(state.get("pending", []))
+        while pending:
+            try:
+                run = start("refresh-case", {"case_folder": pending[0]})
+            except Exception:  # noqa: BLE001 - guard blocked: keep pending, retry later
+                break
+            item = {"case": pending.pop(0), "run_id": run.id, "status": run.status,
+                    "kind": "refresh-case"}
+            queued.append(item)
+            state.setdefault("queued", []).append(item)
+            break  # one gated Refresh at a time; the rest follow on later calls
+        state["pending"] = pending
+        if not pending:
+            state["phase"] = "done"
+    if state.get("phase") in ("failed", "refreshing", "done"):
+        _write_sync_state(config, state)
+    return {"state": state, "queued": queued}
+
+
+def run_status_sync(
+    config: ConsoleConfig, start: Any, *, force: bool = False, run_status: Any = None
+) -> dict[str, Any]:
+    """Start ONE read-only Wiz status check run; Refresh is queued later for changed cases.
+
+    ``start(action_id, inputs)`` returns a run-like object (``id``, ``status``) or raises (for
+    example the one-active-run guard); ``run_status(run_id)`` returns a run's status. The sync
+    is marked started only when the check run started, so a blocked sync stays due. Raises
+    ValueError when no ``status_sync_assignee`` is configured.
+    """
+    if run_status is not None:
+        advanced = finish_status_check(config, start, run_status)
+        state = advanced["state"]
+        if state.get("phase") in ("checking", "refreshing"):
+            return {"started": advanced["queued"], "skipped": [], "state": state, "busy": True}
+    if not status_sync_due(config, force=force):
+        return {"started": [], "skipped": [], "state": status_sync_state(config)}
+    if not config.status_sync_assignee:
+        raise ValueError(
+            "Status sync needs the owner assignee: set status_sync_assignee in the private "
+            "console config. No status check was started."
+        )
+    candidates = eligible_sync_cases(config)
+    if not candidates:
+        state = mark_status_sync_started(config, [], phase="done", checked=0, changed=[])
+        return {"started": [], "skipped": [], "state": state}
+    token = "sc-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(3).hex()
+    try:
+        run = start(
+            "status-check",
+            {
+                "assignee": config.status_sync_assignee,
+                "case_list": ", ".join(candidates[:40]),
+                "result_name": token,
+            },
+        )
+    except Exception as error:  # noqa: BLE001 - reported, sync stays due
+        return {"started": [], "skipped": [{"case": "Wiz status check", "reason": str(error)[:300]}],
+                "state": status_sync_state(config)}
+    state = mark_status_sync_started(
+        config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token
+    )
+    item = {"case": "Read-only Wiz status check", "run_id": run.id, "status": run.status,
+            "kind": "status-check"}
+    return {"started": [item], "skipped": [], "state": state}
 
 
 def require_case(config: ConsoleConfig, name: str, mode: str = "refresh") -> dict[str, Any]:

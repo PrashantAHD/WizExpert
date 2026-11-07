@@ -449,9 +449,11 @@ function notificationBar() {
     const key = "sync:" + item.run_id + ":" + item.status;
     if (cleared.has(key)) continue;
     const status = STATUS_TEXT[item.status] || item.status;
-    events.push(notificationRow(runPath(item.run_id), item.case + " queued",
-      "Refresh case: read-only status sync detected a change and queued the gated Refresh workflow.", status, item.run_id,
-      item.case + " queued, " + status + ", run " + item.run_id, key));
+  const check = item.kind === "status-check";
+  events.push(notificationRow(runPath(item.run_id), check ? "Read-only Wiz status check" : item.case + " queued",
+    check ? "Status check: read-only Wiz status comparison against retained evidence; no case files are written."
+      : "Refresh case: the read-only status check found a change and queued the gated Refresh workflow.", status, item.run_id,
+    (check ? "Read-only Wiz status check" : item.case + " queued") + ", " + status + ", run " + item.run_id, key));
   }
   for (const run of runs) {
     if (seen.has(run.id)) continue;
@@ -514,7 +516,11 @@ function syncStatusText(syncState) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((today - day) / 86400000);
   const when = days === 0 ? "today" : days === 1 ? "yesterday" : date.toLocaleDateString();
-  return "Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  let result = "";
+  if (syncState.phase === "checking") result = " \u00b7 Wiz status check running.";
+  else if (syncState.phase === "failed") result = " \u00b7 Last status check failed.";
+  else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
+  return "Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
 }
 function updateSyncStatus(syncState) {
   const button = $("sync-btn"), tooltip = $("sync-tooltip");
@@ -528,27 +534,44 @@ async function loadTopbarSync() {
   try {
     const status = await api("GET", "/api/imports/risk-issues/sync");
     updateSyncStatus(status.state);
-    if (status.due && status.hours > 0) await syncFromTopbar({ silent: true });
+    recordNotifications([...(status.state.queued || [])]);
+    if (status.due && status.hours > 0 && status.assignee_configured) await syncFromTopbar({ silent: true });
   } catch (e) {
     updateSyncStatus({});
     const tooltip = $("sync-tooltip");
     if (tooltip) tooltip.textContent = "Status sync unavailable: " + e.message;
   }
 }
+async function pollSyncProgress() {
+  try {
+    const status = await api("GET", "/api/imports/risk-issues/sync");
+    updateSyncStatus(status.state);
+    if ((status.queued || []).length) {
+      recordNotifications([...(status.state.queued || [])]);
+      await refresh();
+    }
+  } catch (e) { /* the next tick retries */ }
+}
+setInterval(() => {
+  const btn = $("sync-btn");
+  if (btn && /status check running|Refresh pending/.test(btn.title)) pollSyncProgress();
+}, 60000);
 async function syncFromTopbar({ silent = false } = {}) {
   const button = $("sync-btn");
   if (!button || button.disabled) return;
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
-  button.title = "Syncing Risk Issues status...";
+  button.title = "Starting read-only Wiz status check...";
   try {
     const result = await runStatusSync(null, !silent);
     if (!silent) {
-      const queued = (result.started || []).length, skipped = (result.skipped || []).length;
-      const note = skipped ? " " + skipped + " case(s) skipped (a Risk Issues run may already be active)." : "";
-      banner(queued
-        ? "Queued " + queued + " gated Refresh run(s); each Refresh performs the Wiz status comparison after approval." + note
-        : "No gated Refresh was queued." + note, "info");
+      const skipped = (result.skipped || []).length;
+      const note = skipped ? " Not started: " + result.skipped[0].reason : "";
+      banner(result.busy
+        ? "A Wiz status check is already running; Refresh is queued only for cases that changed." + note
+        : (result.started || []).length
+          ? "Read-only Wiz status check started. Only cases whose Wiz status changed get a gated Refresh queued afterwards."
+          : "No Wiz status check was started." + note, "info");
     }
   } catch (e) {
     if (!silent) banner("Status sync unavailable: " + e.message);
