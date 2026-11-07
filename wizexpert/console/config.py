@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,10 @@ class ConsoleConfig:
     start_timeout: float = 90.0
     open_wait_ms: int = 2500
     new_chat_wait_ms: int = 1500
+    status_sync_hours: float = 24.0
+    # Owner identifier (as shown as assignee in Wiz) whose cases the status sync checks.
+    # Empty: the sync refuses to run. Set it in the private console config, never here.
+    status_sync_assignee: str = ""
 
     @property
     def session_state(self) -> Path:
@@ -81,12 +86,18 @@ class ConsoleConfig:
         return Path(self.workspace).resolve()
 
 
+ASSIGNEE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}")
+
+
 def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
     """Apply a private JSON file (agent, output_roots, deny_names, prompts, ...)."""
     data: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("The console config must be a JSON object.")
-    allowed = {"agent", "output_roots", "exclude_dirs", "deny_names", "prompts", "start_timeout"}
+    allowed = {
+        "agent", "output_roots", "exclude_dirs", "deny_names", "prompts",
+        "start_timeout", "status_sync_hours", "status_sync_assignee",
+    }
     unknown = sorted(set(data) - allowed)
     if unknown:
         raise ValueError("Unknown console config key(s): " + ", ".join(unknown))
@@ -99,4 +110,11 @@ def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
         config.prompts = {str(k): str(v) for k, v in data["prompts"].items()}
     if "start_timeout" in data:
         config.start_timeout = float(data["start_timeout"])
+    if "status_sync_assignee" in data:
+        assignee = str(data["status_sync_assignee"]).strip()
+        if assignee and not ASSIGNEE_PATTERN.fullmatch(assignee):
+            raise ValueError("status_sync_assignee may only use letters, digits, . _ @ -.")
+        config.status_sync_assignee = assignee
+    if "status_sync_hours" in data:
+        config.status_sync_hours = max(0.0, float(data["status_sync_hours"]))
     return config

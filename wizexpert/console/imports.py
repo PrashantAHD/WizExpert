@@ -15,6 +15,8 @@ import contextlib
 import json
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,7 @@ MONTHLY_DIR = "Monthly-Governance-Reporting"
 MAX_ITEMS = 100
 MAX_JSON_BYTES = 5 * 1024 * 1024
 VIEWABLE = frozenset({*DELIVERABLE_EXTENSIONS, ".txt"})
-SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,149}")
 ISSUE_TOKEN = re.compile(r"(?i)\b(wc-id)-(\d+(?:-\d+)*)")
 MONTHS = {
     m: i + 1
@@ -118,19 +120,144 @@ def _metadata_ids(folder: Path) -> list[str]:
     for candidate in candidates:
         data = _load_json(candidate)
         if isinstance(data, dict):
-            for key in ("issue_ids", "rule_ids", "issue_id", "rule_id"):
+            for key in (
+                "issue_ids",
+                "rule_ids",
+                "control_ids",
+                "issue_id",
+                "rule_id",
+                "control_id",
+                "finding_id",
+            ):
                 value = data.get(key)
                 if isinstance(value, str):
                     value = [value]
                 if isinstance(value, list):
-                    ids = [
-                        str(v)
-                        for v in value
-                        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", str(v))
-                    ]
+                    ids: list[str] = []
+                    for v in value:
+                        text = str(v)
+                        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", text):
+                            continue
+                        # Expand compound IDs such as "wc-id-12-13" into wc-id-12, wc-id-13.
+                        for ident in issue_ids_from_name(text) or [text]:
+                            if ident not in ids:
+                                ids.append(ident)
                     if ids:
                         return ids[:10]
     return []
+
+
+MAX_REASON = 300
+
+
+def _metadata_rule_names(folder: Path) -> dict[str, str]:
+    """Per-rule display titles from ``rule_names`` in workflow/case metadata.
+
+    Text is whitespace-folded and capped so metadata cannot inject unbounded card content.
+    Missing or malformed metadata safely returns an empty mapping.
+    """
+    candidates = [*sorted(folder.glob("*.workflow.json")), folder / "case-metadata.json"]
+    out: dict[str, str] = {}
+    for candidate in candidates:
+        data = _load_json(candidate)
+        raw = data.get("rule_names") if isinstance(data, dict) else None
+        if isinstance(raw, list):
+            raw = {
+                str(i.get("rule_id")): i.get("title", i.get("name"))
+                for i in raw
+                if isinstance(i, dict) and i.get("rule_id") is not None
+            }
+        if not isinstance(raw, dict):
+            continue
+        for key, value in raw.items():
+            if (
+                isinstance(key, str)
+                and isinstance(value, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", key)
+                and " ".join(value.split())
+            ):
+                title = " ".join(value.split())[:MAX_REASON]
+                for ident in issue_ids_from_name(key) or [key.lower()]:
+                    out.setdefault(ident, title)
+    return out
+
+
+def _metadata_resolution_reasons(folder: Path) -> dict[str, str]:
+    """Per-rule resolution reasons from ``resolution_reasons`` in workflow/case metadata.
+
+    Shape: ``{"resolution_reasons": {"<rule-id>": "reason"}}`` or a list of
+    ``{"rule_id": "...", "reason": "..."}``. Text is whitespace-folded and capped.
+    """
+    candidates = [*sorted(folder.glob("*.workflow.json")), folder / "case-metadata.json"]
+    out: dict[str, str] = {}
+    for candidate in candidates:
+        data = _load_json(candidate)
+        raw = data.get("resolution_reasons") if isinstance(data, dict) else None
+        if isinstance(raw, list):
+            raw = {
+                str(i.get("rule_id")): i.get("reason")
+                for i in raw
+                if isinstance(i, dict) and i.get("rule_id") is not None
+            }
+        if not isinstance(raw, dict):
+            continue
+        for key, value in raw.items():
+            if (
+                isinstance(key, str)
+                and isinstance(value, str)
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", key)
+                and " ".join(value.split())
+            ):
+                text = " ".join(value.split())[:MAX_REASON]
+                for ident in issue_ids_from_name(key) or [key.lower()]:
+                    out.setdefault(ident, text)
+    return out
+
+
+_CLOSED_REASON_LABELS = {
+    "RESOLVED": "Resolved",
+    "REJECTED": "Ignored",
+    "IGNORED": "Ignored",
+    "RISK_ACCEPTED": "Risk accepted",
+}
+
+
+def _fallback_resolution_reason(folder: Path) -> str:
+    counts = _latest_status_counts(folder)
+    if not isinstance(counts, dict):
+        return "Resolved"
+    labels: list[str] = []
+    for key, value in counts.items():
+        normalized = str(key).strip().upper().replace(" ", "_").replace("-", "_")
+        label = _CLOSED_REASON_LABELS.get(normalized)
+        if (
+            label
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+            and label not in labels
+        ):
+            labels.append(label)
+    return labels[0] if len(labels) == 1 else "Resolved"
+
+
+def _resolution_reasons_for(folder: Path, ids: list[str]) -> dict[str, str]:
+    reasons = _metadata_resolution_reasons(folder)
+    fallback = _fallback_resolution_reason(folder)
+    for ident in ids:
+        reasons.setdefault(ident, fallback)
+    return reasons
+
+
+def _file_name_ids(folder: Path, config: ConsoleConfig) -> list[str]:
+    """Rule IDs from direct-child file names such as ``wc-id-870_Analysis.html`` (names only)."""
+    found: list[str] = []
+    for entry in _children(folder, config):
+        if entry.is_file():
+            for ident in issue_ids_from_name(entry.name):
+                if ident not in found:
+                    found.append(ident)
+    return found[:10]
 
 
 def _artifacts(folder: Path, config: ConsoleConfig) -> dict[str, Any]:
@@ -323,6 +450,72 @@ def set_manual_milestone(
     return _manual_milestones(data)
 
 
+_COLLECTION_TIME_KEYS = ("collected_at", "refreshed_at", "synced_at", "generated_at", "as_of")
+
+
+def _collection_time(collection: dict[str, Any], path: Path) -> float:
+    """Epoch seconds of a refresh collection (ISO timestamp field, else file mtime)."""
+    from datetime import UTC, datetime
+
+    for key in _COLLECTION_TIME_KEYS:
+        value = collection.get(key)
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.timestamp()
+    return _mtime(path)
+
+
+def _latest_status_counts(folder: Path) -> Any:
+    """``status_counts`` of the most recent refresh record, never an older snapshot.
+
+    Records without a ``collection`` object are ignored; if the newest refresh has missing or
+    malformed counts the result is ``None`` (stays In-Progress) instead of an older record's.
+    """
+    best: tuple[float, str] | None = None
+    best_counts: Any = None
+    for path in folder.glob("*.workflow.json"):
+        data = _load_json(path)
+        collection = data.get("collection") if isinstance(data, dict) else None
+        if not isinstance(collection, dict):
+            continue
+        key = (_collection_time(collection, path), path.name)
+        if best is None or key > best:
+            best, best_counts = key, collection.get("status_counts")
+    return best_counts
+
+
+# Owner rule: Ignored (Wiz REJECTED) and Risk Accepted count as Resolved.
+CLOSED_STATUSES = frozenset({"RESOLVED", "REJECTED", "IGNORED", "RISK_ACCEPTED"})
+
+
+def _all_resolved(folder: Path) -> bool:
+    """True only when the latest retained refresh counts show every issue closed in Wiz.
+
+    Closed means Resolved, Ignored/Rejected or Risk Accepted (all treated as Resolved).
+    """
+    counts = _latest_status_counts(folder)
+    if not isinstance(counts, dict) or not counts:
+        return False
+    norm: dict[str, int] = {}
+    for key, value in counts.items():
+        if (
+            not isinstance(key, str)
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            return False
+        k = key.strip().upper().replace(" ", "_").replace("-", "_")
+        norm[k] = norm.get(k, 0) + value
+    closed = sum(v for k, v in norm.items() if k in CLOSED_STATUSES)
+    return closed > 0 and all(v == 0 for k, v in norm.items() if k not in CLOSED_STATUSES)
+
+
 def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
     """Existing Risk Issues case folders as dashboard cards (newest first, at most 100)."""
     base = _base(config, RISK_DIR)
@@ -333,12 +526,17 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         if not folder.is_dir() or not SAFE_NAME.fullmatch(folder.name):
             continue
         art = _artifacts(folder, config)
-        ids = _metadata_ids(folder) or issue_ids_from_name(folder.name)
+        ids = (
+            _metadata_ids(folder)
+            or issue_ids_from_name(folder.name)
+            or _file_name_ids(folder, config)
+        )
         modified = max([_mtime(folder), *[f["modified"] for f in art["files"]]])
         # "Legacy": created before the rebuilt case workflow, i.e. no workflow record / gate
         # plan and no retained evidence folder to resume from.
         legacy = not art["kinds"]["workflow_record"]
         wf = _workflow_status(folder, art)
+        resolved = _all_resolved(folder)
         has_evidence = art["kinds"]["evidence"]
         has_deliverables = any(
             art["kinds"][k]
@@ -349,7 +547,10 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
                 "name": folder.name,
                 "reference": _rel(folder, config),
                 "issue_ids": ids,
-                "status": "In-Progress",
+                "status": "RESOLVED" if resolved else "In-Progress",
+                "resolved": resolved,
+                "rule_names": _metadata_rule_names(folder) if resolved else {},
+                "resolution_reasons": _resolution_reasons_for(folder, ids) if resolved else {},
                 "legacy": legacy,
                 "modified": modified,
                 "artifacts": art["present"],
@@ -369,6 +570,229 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         )
     cases.sort(key=lambda c: (-c["modified"], c["name"]))
     return cases[:MAX_ITEMS]
+
+
+class StartRefused(Exception):
+    """The console refused to start a run (message is safe to show)."""
+
+
+class StartBlocked(StartRefused):
+    """Refused only for a transient reason; queued work is retried later."""
+
+
+# Serializes every status-sync read-modify-write so concurrent requests cannot double-queue.
+_SYNC_LOCK = threading.RLock()
+
+
+def status_sync_state(config: ConsoleConfig) -> dict[str, Any]:
+    path = config.state_dir / "status-sync.json"
+    try:
+        value = _load_json(path)
+    except (OSError, ValueError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
+    if force:
+        return True
+    if config.status_sync_hours <= 0:
+        return False
+    state = status_sync_state(config)
+    # A failed check also counts as an attempt (last_started), so automatic retries are at most
+    # one per interval; a manual (forced) sync retries immediately.
+    last = state.get("last_started")
+    return (
+        not isinstance(last, (int, float))
+        or time.time() - last >= config.status_sync_hours * 3600
+    )
+
+
+def _write_sync_state(config: ConsoleConfig, state: dict[str, Any]) -> dict[str, Any]:
+    config.state_dir.mkdir(parents=True, exist_ok=True)
+    path = config.state_dir / "status-sync.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+    return state
+
+
+def mark_status_sync_started(
+    config: ConsoleConfig, cases: list[str], **extra: Any
+) -> dict[str, Any]:
+    return _write_sync_state(
+        config,
+        {"last_started": time.time(), "cases": cases[:100], "mode": "status-check", **extra},
+    )
+
+
+STATUS_CHECK_DIR = "Status-Check"
+_RUN_ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
+
+
+def eligible_sync_cases(config: ConsoleConfig) -> list[str]:
+    """Open, non-legacy cases with retained evidence and issue IDs (assignee is checked in Wiz)."""
+    return [
+        case["name"]
+        for case in scan_risk_cases(config)
+        if not case["resolved"] and not case["legacy"]
+        and case["can_refresh"] and case["issue_ids"]
+    ]
+
+
+def _read_status_result(
+    config: ConsoleConfig, token: str, allowed: list[str]
+) -> dict[str, Any] | None:
+    """The status-check run's JSON result, restricted to the cases that were asked for."""
+    if not re.fullmatch(r"[A-Za-z0-9-]{8,40}", token or ""):
+        return None
+    root = config.resolved_workspace() / config.output_roots[0] / STATUS_CHECK_DIR
+    path = root / (token + ".json")
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_JSON_BYTES:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("checked"), list):
+        return None
+    changed: list[dict[str, str]] = []
+    for item in data.get("changed") or []:
+        if isinstance(item, dict) and item.get("case") in allowed:
+            changed.append({"case": item["case"], "reason": str(item.get("reason", ""))[:200]})
+    checked = [c for c in data["checked"] if c in allowed]
+    return {"checked": checked, "changed": changed}
+
+
+def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+    with _SYNC_LOCK:
+        return _finish_status_check(config, start, run_status)
+
+
+def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+    """Advance a started status check: read its result, then queue Refresh for changed cases.
+
+    ``run_status(run_id)`` returns the check run's status. Refresh runs that the one-active-run
+    guard blocks stay in ``pending`` and are retried by the next call, so none are lost. A start
+    refused for any other reason is recorded in ``skipped`` and dropped from ``pending`` so it
+    cannot block the queue forever.
+    Returns ``{"state": ..., "queued": [newly queued refreshes]}``.
+    """
+    state = status_sync_state(config)
+    queued: list[dict[str, Any]] = []
+    if state.get("phase") == "checking":
+        try:
+            status = run_status(state.get("check_run_id", ""))
+        except (StartRefused, ValueError):  # an unknown run ends the check
+            status = "not_started"
+        if status in _RUN_ACTIVE:
+            return {"state": state, "queued": queued}
+        result = (
+            _read_status_result(config, state.get("result_name", ""), state.get("cases", []))
+            if status == "completed" else None
+        )
+        if result is None:
+            state.update(phase="failed", error="The Wiz status check did not produce a result; "
+                         "nothing was refreshed. Sync again to retry.")
+        else:
+            state.update(
+                phase="refreshing", checked=len(result["checked"]),
+                changed=[c["case"] for c in result["changed"]],
+                reasons={c["case"]: c["reason"] for c in result["changed"]},
+                pending=[c["case"] for c in result["changed"]],
+            )
+    if state.get("phase") == "refreshing":
+        pending = list(state.get("pending", []))
+        while pending:
+            case = pending[0]
+            try:
+                run = start("refresh-case", {"case_folder": case})
+            except StartBlocked:
+                break  # transient (active-run guard): keep pending, retry on the next POST
+            except (StartRefused, ValueError) as error:
+                pending.pop(0)  # not retryable: record it and move on
+                state.setdefault("skipped", []).append(
+                    {"case": case, "reason": str(error)[:300]}
+                )
+                continue
+            item = {"case": pending.pop(0), "run_id": run.id, "status": run.status,
+                    "kind": "refresh-case"}
+            queued.append(item)
+            state.setdefault("queued", []).append(item)
+            break  # one gated Refresh at a time; the rest follow on later calls
+        state["pending"] = pending
+        if not pending:
+            state["phase"] = "done"
+    if state.get("phase") in ("failed", "refreshing", "done"):
+        _write_sync_state(config, state)
+    return {"state": state, "queued": queued}
+
+
+def run_status_sync(
+    config: ConsoleConfig, start: Any, *, force: bool = False, run_status: Any = None
+) -> dict[str, Any]:
+    """Start ONE read-only Wiz status check run; Refresh is queued later for changed cases.
+
+    ``start(action_id, inputs)`` returns a run-like object (``id``, ``status``) or raises (for
+    example the one-active-run guard); ``run_status(run_id)`` returns a run's status. The sync
+    is marked started only when the check run started, so a blocked sync stays due. Raises
+    ValueError when no ``status_sync_assignee`` is configured. Only this POST-side function may
+    start or advance runs; it holds the sync lock for the whole read-modify-write.
+    """
+    with _SYNC_LOCK:
+        return _run_status_sync(config, start, force=force, run_status=run_status)
+
+
+def _run_status_sync(
+    config: ConsoleConfig, start: Any, *, force: bool, run_status: Any
+) -> dict[str, Any]:
+    advanced_started: list[dict[str, Any]] = []
+    if run_status is not None:
+        advanced = _finish_status_check(config, start, run_status)
+        advanced_started = list(advanced["queued"])
+        state = advanced["state"]
+        if state.get("phase") in ("checking", "refreshing"):
+            return {"started": advanced_started, "skipped": [], "state": state, "busy": True}
+    if not status_sync_due(config, force=force):
+        return {"started": advanced_started, "skipped": [], "state": status_sync_state(config)}
+    if not config.status_sync_assignee:
+        raise ValueError(
+            "Status sync needs the owner assignee: set status_sync_assignee in the private "
+            "console config. No status check was started."
+        )
+    candidates = eligible_sync_cases(config)
+    if not candidates:
+        state = mark_status_sync_started(config, [], phase="done", checked=0, changed=[])
+        return {"started": [], "skipped": [], "state": state}
+    token = "sc-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(3).hex()
+    try:
+        run = start(
+            "status-check",
+            {
+                "assignee": config.status_sync_assignee,
+                "case_list": ", ".join(candidates[:40]),
+                "result_name": token,
+            },
+        )
+    except (StartRefused, ValueError) as error:
+        reason = str(error)[:300]
+        # Record the attempt so automatic retries back off to one per interval.
+        state = _write_sync_state(
+            config,
+            {"last_started": time.time(), "cases": [], "mode": "status-check",
+             "phase": "failed", "error": reason},
+        )
+        return {
+            "started": advanced_started,
+            "skipped": [{"case": "Wiz status check", "reason": reason}],
+            "state": state,
+        }
+    state = mark_status_sync_started(
+        config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token
+    )
+    item = {"case": "Read-only Wiz status check", "run_id": run.id, "status": run.status,
+            "kind": "status-check"}
+    return {"started": [item], "skipped": [], "state": state}
 
 
 def require_case(config: ConsoleConfig, name: str, mode: str = "refresh") -> dict[str, Any]:

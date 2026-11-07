@@ -498,9 +498,10 @@ def test_new_action_is_the_unchanged_default():
 
 def test_category_json_exposes_stages_and_actions():
     risk = categories.CATEGORIES["risk-issues"].to_json()
-    assert [s["id"] for s in risk["stages"]] == ["new", "in-progress"]
+    assert [s["id"] for s in risk["stages"]] == ["new", "in-progress", "resolved"]
+    assert not [a for a in risk["actions"] if a["stage"] == "resolved"]
     assert [a["id"] for a in risk["actions"]] == [
-        "new", "risk-accepted", "email-response", "update-status", "refresh-case",
+        "new", "risk-accepted", "email-response", "update-status", "refresh-case", "status-check",
         "update-deliverables", "follow-up-email", "reply-response",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
@@ -632,17 +633,18 @@ def test_weekly_progress_category_prompt_and_validation():
                  "do not send email", "Note: keep short",
                  "depends on the Risk Issues and Daily Progress Reporting categories",
                  "Update the previous weekly report instead of recreating the inventory",
-                 "re-collect them unnecessarily",
-                 "Fetch from Wiz read-only only missing or conflicting details",
-                 "reconcile new responses", "Never infer closure from an owner message",
+                 "do not re-collect that history",
+                 "fresh read-only Wiz status fetch",
+                 "never rely only on sync state or stale retained status",
+                 "Never infer closure from an owner message",
                  "Items resolved during the covered period stay in this report",
                  "resolution and current-status evidence", "active carry-forward list",
                  "unless they return to IN_PROGRESS", "keep the prior report unchanged",
-                 "retain-first evidence reuse", "before any Wiz fetch",
+                 "retain-first reuse for history",
                  "selected previous weekly folder",
                  "retained local Risk Issues and Daily Progress evidence",
-                 "re-fetch already retained rule, status or count data",
-                 "only missing or conflicting details", "multiple underlying IN_PROGRESS issues",
+
+                 "multiple underlying IN_PROGRESS issues",
                  "assignee evidence is absent or conflicting",
                  "one representative underlying issue only",
                  "clearly rule consistent", "retain the ambiguity and do not guess"):

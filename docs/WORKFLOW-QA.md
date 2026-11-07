@@ -49,6 +49,20 @@ delta versus the retained evidence (status changes, new/resolved issues, count c
 (4) save a new evidence snapshot plus a change summary without altering retained evidence;
 (5) regenerate/update the deliverables from `templates/risk-issues/`, archiving files first.
 There is no one-time gate. No email is sent and no Wiz, ServiceNow or cloud change is made.
+Closure rule (owner decision): Ignored (Wiz `REJECTED`) and Risk Accepted are treated as
+Resolved. A case is Resolved when its latest refresh counts are all Resolved/Ignored/Risk
+Accepted with at least one such issue; any Open or In Progress issue keeps it In-Progress.
+
+**Sync / status check (rule).** Sync is Risk Issues-only; Weekly Progress and Monthly Governance never trigger or are targets of it. Weekly generation reuses retained evidence for history only and always performs a fresh read-only Wiz status fetch for the current scope (never sync state alone). The console Sync button never queues Refresh directly. It first
+starts one read-only `status-check` run (owner-assigned eligible cases only; owner id comes from
+private config `status_sync_assignee`, never the public repo; refuse if unset). The run fetches
+Wiz status read-only, compares with each case's latest retained evidence, writes nothing to case
+deliverables or evidence, changes nothing in Wiz/ServiceNow/cloud, sends no email, and saves only
+`deliverables/Status-Check/<token>.json` (`checked`, `changed[{case, reason}]`). Only changed
+cases then get a gated Refresh queued, one at a time; guard-blocked ones stay pending, other
+refused starts are recorded as skipped. GET of the sync endpoint is read-only; only POST advances
+state (under a lock). Failed checks back off to the configured interval. Follow-up: resolved cases
+are not rechecked for reopening.
 
 Record each such request in the optional top-level review field `owner_changes`
 (missing means none). Values below are illustrative only:

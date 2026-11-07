@@ -50,8 +50,13 @@ ACTION_CASE_MODES = {
 MCP_SERVER = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 
 
-class RunError(Exception):
+class RunError(imports.StartRefused):
     """A request the manager refuses (message is safe to show)."""
+
+
+class RunBusyError(RunError, imports.StartBlocked):
+    """A start refused only for a transient reason (active-run guard, helper not connected);
+    queued work that hits it is retried later."""
 
 
 @dataclass
@@ -78,6 +83,7 @@ class Run:
     decisions: list[dict[str, Any]] = field(default_factory=list)  # recorded gate decisions
     parent: str = ""  # earlier run of the same gated flow
     child: str = ""  # run started by the last approved gate
+    action_id: str = ""  # canonical action id ("" for runs saved before this field existed)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -127,6 +133,7 @@ class RunManager:
                 run.chain = [c for c in item.get("chain", []) if isinstance(c, dict)][:50]
                 handoff = item.get("handoff")
                 run.handoff = handoff if isinstance(handoff, dict) else None
+                run.action_id = str(item.get("action_id") or "")
                 carried = item.get("carried")
                 run.carried = (
                     {str(k): str(v) for k, v in carried.items()}
@@ -266,6 +273,7 @@ class RunManager:
                 "decisions": r.decisions,
                 "parent": r.parent,
                 "child": r.child,
+                "action_id": r.action_id,
             }
             for r in items
         ]
@@ -295,10 +303,10 @@ class RunManager:
         with self._lock:
             runs = list(self._runs.values())
         if any(r.status == "starting" for r in runs):
-            raise RunError("Another run is still starting; wait for it to appear first.")
+            raise RunBusyError("Another run is still starting; wait for it to appear first.")
         for r in runs:
             if category_id and r.category_id == category_id and self._still_active(r):
-                raise RunError(
+                raise RunBusyError(
                     "A run of this workflow is already active (run "
                     + r.id
                     + "). Open it from Recent activity instead of starting a duplicate."
@@ -326,7 +334,7 @@ class RunManager:
         for r in runs:
             self._rebind_late_session(r)
         return [
-            {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
+            _brief(r)
             for r in runs
             if self._still_active(r)
         ]
@@ -354,6 +362,7 @@ class RunManager:
             with self._lock:
                 self._refuse_if_starting(category_id)
                 run = Run(self._new_id(), category_id, values, prompt, self._clock())
+                run.action_id = action_id or categories.CATEGORIES[category_id].default_action
                 run.status = "awaiting_gate"
                 run.message = "Waiting for your approval of the collection plan."
                 labels = dict(categories.GATES)
@@ -374,7 +383,7 @@ class RunManager:
             self._refuse_if_starting(category_id)
             helper_ready = helper_ready or self.bridge.helper_connected(workspace)
             if not helper_ready and not self.config.allow_cli_fallback:
-                raise RunError(
+                raise RunBusyError(
                     "The VS Code helper is not connected for this workspace. Install it "
                     "(wizexpert console install-helper); the console opens a standard VS Code "
                     "window for the workspace automatically, or open one yourself (the Agents "
@@ -382,6 +391,7 @@ class RunManager:
                 )
             run_id = self._new_id()
             run = Run(run_id, category_id, values, prompt, self._clock())
+            run.action_id = action_id or categories.CATEGORIES[category_id].default_action
             self._runs[run_id] = run
             self._save()
         if self._async:
@@ -536,7 +546,7 @@ class RunManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)[:limit]
         return [
-            {"id": r.id, "category_id": r.category_id, "status": r.status, "created": r.created}
+            _brief(r)
             for r in runs
         ]
 
@@ -807,6 +817,7 @@ class RunManager:
         child.gates = [dict(g) for g in run.gates]
         child.decisions = [dict(d) for d in run.decisions]
         child.parent = run.id
+        child.action_id = run.action_id
         with self._lock:
             self._runs[child.id] = child
             run.child = child.id
@@ -939,7 +950,7 @@ class RunManager:
         hint = self._mcp_hint
         now = self._clock()
         if tools > 0:
-            out.update(state="connected", detail=f"{tools} Wiz tool(s) available in VS Code.")
+            out.update(state="connected", detail="")
             self._mcp_hint = None
         elif hint and hint["action"] in ("start", "auth") and now - hint["at"] < MCP_HINT_SECONDS:
             out.update(
@@ -1046,6 +1057,19 @@ class RunManager:
             raise RunError("Not pressed: " + short(result["info"]["guard"], 120))
         if result.get("errors"):
             raise RunError("VS Code could not press the button: " + _result_text(result))
+
+
+def _brief(r: Run) -> dict[str, Any]:
+    """Safe public summary of a run; older runs without an action fall back to the category."""
+    action_id, title = categories.action_summary(r.category_id, r.action_id)
+    return {
+        "id": r.id,
+        "category_id": r.category_id,
+        "status": r.status,
+        "created": r.created,
+        "action_id": action_id,
+        "action_title": title,
+    }
 
 
 def _result_text(result: dict[str, Any] | None) -> str:

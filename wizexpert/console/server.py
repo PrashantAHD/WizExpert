@@ -465,6 +465,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/risk-issues/sync":
+                # Side-effect free: only POST may start or advance runs.
+                return self._json(
+                    HTTPStatus.OK,
+                    {
+                        "due": imports.status_sync_due(config),
+                        "state": imports.status_sync_state(config),
+                        "queued": [],
+                        "hours": config.status_sync_hours,
+                        "assignee_configured": bool(config.status_sync_assignee),
+                    },
+                )
             if path == "/api/imports/files":
                 return self._json(
                     HTTPStatus.OK,
@@ -521,6 +533,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 gated=body.get("gated") is True,
             )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/risk-issues/sync":
+            force = body.get("force") is True
+            try:
+                result = imports.run_status_sync(
+                    manager.config,
+                    lambda action, inputs: manager.start("risk-issues", inputs, action),
+                    force=force,
+                    run_status=lambda run_id: manager.view(run_id)["status"],
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/imports/risk-issues/milestone":
             try:
                 saved = imports.set_manual_milestone(
