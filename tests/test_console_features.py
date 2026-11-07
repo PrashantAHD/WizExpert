@@ -236,6 +236,33 @@ def test_resume_case_is_gated_and_starts_from_retained_evidence(env):  # noqa: F
     assert manager.get(run.id).decisions[0]["decision"] == "approve"
 
 
+def test_status_sync_skips_failed_cases_and_stays_due_when_blocked(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+
+    def blocked(name):
+        raise RunError("A run of this workflow is already active (run x).")
+
+    result = imports.run_status_sync(config, blocked)
+    assert result["started"] == [] and result["skipped"]
+    assert imports.status_sync_due(config)
+
+    class _Run:
+        id, status = "r1", "awaiting_gate"
+
+    result = imports.run_status_sync(config, lambda name: _Run())
+    assert result["started"] and not result["skipped"]
+    assert not imports.status_sync_due(config)
+    assert imports.run_status_sync(config, blocked)["started"] == []
+    assert imports.status_sync_due(config, force=True)
+
+
+def test_status_sync_wording_and_automatic_not_forced():
+    js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
+    assert "runStatusSync(null, !silent)" in js
+    assert "found changes" not in js and "no changes detected" not in js
+
+
 def test_resume_refuses_unknown_and_legacy_cases(env):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)

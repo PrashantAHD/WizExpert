@@ -532,30 +532,12 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/imports/risk-issues/sync":
             force = body.get("force") is True
-            if not imports.status_sync_due(manager.config, force=force):
-                return self._json(
-                    HTTPStatus.OK,
-                    {"started": [], "state": imports.status_sync_state(manager.config)},
-                )
-            candidates = [
-                case for case in imports.scan_risk_cases(manager.config)
-                if not case["resolved"]
-                and not case["legacy"]
-                and case["can_refresh"]
-                and case["issue_ids"]
-            ]
-            started = []
-            for case in candidates:
-                run = manager.start(
-                    "risk-issues",
-                    {"case_folder": case["name"]},
-                    "refresh-case",
-                )
-                started.append({"case": case["name"], "run_id": run.id, "status": run.status})
-            state = imports.mark_status_sync_started(
-                manager.config, [case["name"] for case in candidates]
+            result = imports.run_status_sync(
+                manager.config,
+                lambda name: manager.start("risk-issues", {"case_folder": name}, "refresh-case"),
+                force=force,
             )
-            return self._json(HTTPStatus.OK, {"started": started, "state": state})
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/imports/risk-issues/milestone":
             try:
                 saved = imports.set_manual_milestone(
