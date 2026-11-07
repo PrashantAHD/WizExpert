@@ -150,7 +150,8 @@ def test_risk_case_without_workflow_json_is_not_resolved(env):  # noqa: F811
 
 def test_risk_cases_panel_has_resolved_section():
     js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
-    assert '"Resolved"' in js and "c.resolved" in js and '"RESOLVED"' in js
+    assert '"Resolved cases"' in js and "c.resolved" in js and '"RESOLVED"' in js
+    assert "renderResolved" in js and 'stage.id === "resolved"' in js
 
 
 def test_risk_cases_panel_shows_empty_notification_state():
@@ -161,7 +162,7 @@ def test_risk_cases_panel_shows_empty_notification_state():
     html = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "index.html").read_text("utf-8")  # noqa: E501
     assert 'id="notif-btn"' in html and 'aria-label="Notifications' in html and 'id="notif-badge"' in html
     assert 'id="sync-btn"' in html and 'aria-label="Sync Risk Issues status"' in html and 'id="sync-tooltip"' in html
-    assert "riskCasesPanel(category)" in js and "list.append(notifications" not in js
+    assert "riskCasesPanel(category, false)" in js and "riskCasesPanel(category, true)" in js and "list.append(notifications" not in js
     assert '"notification-item"' in js
     assert "function notificationRow(" in js and "notif-title" in js and "notif-context" in js and "notif-meta" in js and "aria-label" in js
     css = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "style.css").read_text(encoding="utf-8")
@@ -236,25 +237,104 @@ def test_resume_case_is_gated_and_starts_from_retained_evidence(env):  # noqa: F
     assert manager.get(run.id).decisions[0]["decision"] == "approve"
 
 
-def test_status_sync_skips_failed_cases_and_stays_due_when_blocked(env):  # noqa: F811
+def test_status_sync_requires_assignee_and_starts_one_check_run(env):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)
+    calls = []
 
-    def blocked(name):
+    class _Run:
+        id, status = "r1", "running"
+
+    def start(action, inputs):
+        calls.append((action, inputs))
+        return _Run()
+
+    with pytest.raises(ValueError, match="status_sync_assignee"):
+        imports.run_status_sync(config, start)
+    assert not calls
+    config.status_sync_assignee = "owner1"
+    result = imports.run_status_sync(config, start)
+    assert len(calls) == 1 and calls[0][0] == "status-check"
+    assert calls[0][1]["assignee"] == "owner1"
+    assert result["started"][0]["kind"] == "status-check"
+    assert result["state"]["phase"] == "checking" and not imports.status_sync_due(config)
+    # While checking, a forced sync does not start a duplicate.
+    again = imports.run_status_sync(config, start, force=True, run_status=lambda _i: "running")
+    assert again["busy"] and len(calls) == 1
+
+
+def test_status_check_blocked_stays_due(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+
+    def blocked(action, inputs):
         raise RunError("A run of this workflow is already active (run x).")
 
     result = imports.run_status_sync(config, blocked)
     assert result["started"] == [] and result["skipped"]
     assert imports.status_sync_due(config)
 
-    class _Run:
-        id, status = "r1", "awaiting_gate"
 
-    result = imports.run_status_sync(config, lambda name: _Run())
-    assert result["started"] and not result["skipped"]
-    assert not imports.status_sync_due(config)
-    assert imports.run_status_sync(config, blocked)["started"] == []
-    assert imports.status_sync_due(config, force=True)
+def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    assert cases
+    state_run = type("R", (), {"id": "chk", "status": "running"})
+    imports.run_status_sync(config, lambda a, i: state_run)
+    token = imports.status_sync_state(config)["result_name"]
+    out = workspace / "deliverables" / "Status-Check"
+    out.mkdir(parents=True)
+    (out / (token + ".json")).write_text(json.dumps({
+        "checked": cases + ["Not-Asked"],
+        "changed": [{"case": cases[0], "reason": "status moved"}, {"case": "Not-Asked", "reason": "x"}],
+    }), encoding="utf-8")
+    started = []
+    block = {"on": True}
+
+    def start(action, inputs):
+        if block["on"]:
+            raise RunError("A run of this workflow is already active (run x).")
+        started.append((action, inputs))
+        return type("R", (), {"id": "ref1", "status": "awaiting_gate"})
+
+    first = imports.finish_status_check(config, start, lambda _i: "completed")
+    assert first["queued"] == [] and first["state"]["pending"] == [cases[0]]  # guard: pending kept
+    block["on"] = False
+    second = imports.finish_status_check(config, start, lambda _i: "completed")
+    assert started == [("refresh-case", {"case_folder": cases[0]})]
+    assert second["state"]["phase"] == "done" and second["state"]["changed"] == [cases[0]]
+
+
+def test_status_check_without_result_fails_and_retries(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
+    done = imports.finish_status_check(config, lambda a, i: None, lambda _i: "completed")
+    assert done["state"]["phase"] == "failed" and imports.status_sync_due(config)
+
+
+def test_status_check_prompt_is_read_only():
+    values = categories.validate("risk-issues", {
+        "assignee": "owner1", "case_list": "A-wc-id-1, B-wc-id-2", "result_name": "sc-20260101-abc123",
+    }, "status-check")
+    prompt = categories.build_prompt("risk-issues", values, None, "status-check")
+    assert "owner1" in prompt and "read-only" in prompt and "no email" in prompt.lower()
+    assert "Status-Check/sc-20260101-abc123.json" in prompt
+
+
+def test_status_sync_assignee_config_validated(tmp_path):
+    from wizexpert.console.config import ConsoleConfig, load_overrides
+
+    path = tmp_path / "c.json"
+    path.write_text('{"status_sync_assignee": "owner1"}', encoding="utf-8")
+    assert load_overrides(ConsoleConfig(workspace=tmp_path), path).status_sync_assignee == "owner1"
+    path.write_text('{"status_sync_assignee": "bad value!"}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_overrides(ConsoleConfig(workspace=tmp_path), path)
 
 
 def test_status_sync_wording_and_automatic_not_forced():

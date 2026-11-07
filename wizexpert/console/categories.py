@@ -277,7 +277,7 @@ RISK_ACTIONS: tuple[Action, ...] = (
     ),
     Action(
         "status-check",
-        "in-progress",
+        "system",
         "Read-only Wiz status check",
         "Started by Sync: read-only Wiz status check of the owner's open cases against their "
         "retained evidence; only changed cases get a gated Refresh queued afterwards.",

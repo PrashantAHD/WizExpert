@@ -466,12 +466,20 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
             if path == "/api/imports/risk-issues/sync":
+                manager = self.app.manager
+                advanced = imports.finish_status_check(
+                    config,
+                    lambda action, inputs: manager.start("risk-issues", inputs, action),
+                    lambda run_id: manager.view(run_id)["status"],
+                )
                 return self._json(
                     HTTPStatus.OK,
                     {
                         "due": imports.status_sync_due(config),
-                        "state": imports.status_sync_state(config),
+                        "state": advanced["state"],
+                        "queued": advanced["queued"],
                         "hours": config.status_sync_hours,
+                        "assignee_configured": bool(config.status_sync_assignee),
                     },
                 )
             if path == "/api/imports/files":
@@ -532,11 +540,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/imports/risk-issues/sync":
             force = body.get("force") is True
-            result = imports.run_status_sync(
-                manager.config,
-                lambda name: manager.start("risk-issues", {"case_folder": name}, "refresh-case"),
-                force=force,
-            )
+            try:
+                result = imports.run_status_sync(
+                    manager.config,
+                    lambda action, inputs: manager.start("risk-issues", inputs, action),
+                    force=force,
+                    run_status=lambda run_id: manager.view(run_id)["status"],
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
             return self._json(HTTPStatus.OK, result)
         if path == "/api/imports/risk-issues/milestone":
             try:

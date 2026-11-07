@@ -50,6 +50,14 @@ delta versus the retained evidence (status changes, new/resolved issues, count c
 (5) regenerate/update the deliverables from `templates/risk-issues/`, archiving files first.
 There is no one-time gate. No email is sent and no Wiz, ServiceNow or cloud change is made.
 
+**Sync / status check (rule).** The console Sync button never queues Refresh directly. It first
+starts one read-only `status-check` run (owner-assigned eligible cases only; owner id comes from
+private config `status_sync_assignee`, never the public repo; refuse if unset). The run fetches
+Wiz status read-only, compares with each case's latest retained evidence, writes nothing to case
+deliverables or evidence, changes nothing in Wiz/ServiceNow/cloud, sends no email, and saves only
+`deliverables/Status-Check/<token>.json` (`checked`, `changed[{case, reason}]`). Only changed
+cases then get a gated Refresh queued, one at a time; blocked ones stay pending.
+
 Record each such request in the optional top-level review field `owner_changes`
 (missing means none). Values below are illustrative only:
 

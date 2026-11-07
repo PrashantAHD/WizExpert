@@ -169,19 +169,26 @@ launch, no helper).
   `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
   `evidence` folder. Archive before replacing, retained evidence is never modified, no
   Wiz/SNOW/cloud change, no email.
-  the homepage topbar performs a read-only status sync for eligible worked-on In-Progress cases when
-  the last sync is older than 24 hours. The sync routes each
-  eligible case through the existing gated Refresh action; that workflow performs the
-  authoritative Wiz status comparison and its existing gates remain required before
-  collection or generation. Set private config `status_sync_hours` to change the cadence,
+  the homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
+  the last sync is older than 24 hours. Sync starts ONE `status-check` run (hidden `system` stage
+  action, not gated) in the VS Code WizExpert chat, because only that chat has read-only Wiz MCP
+  access; the console server has none. The check fetches the latest Wiz status of the eligible
+  cases' issue IDs, compares it with each case's latest retained evidence, writes nothing into
+  case folders, mutates nothing in Wiz/ServiceNow/cloud and sends no email. Its only output is
+  `deliverables/Status-Check/<token>.json` (`checked`, and `changed` with a short `reason`).
+  Eligibility: not resolved, not legacy, has retained evidence and issue IDs, and assigned to the
+  owner. Assignee exists only in Wiz, so the owner id is passed in the prompt and the check run filters
+  read-only. Set it in the private console config (`--config`) as `status_sync_assignee`
+  (never committed to the public repo); with it unset the sync refuses and starts nothing.
+  When the check run completes (the next sync request or the 60 s progress poll while a sync is
+  in progress), the console queues the existing gated Refresh ONLY for changed cases, one at a
+  time; cases blocked by the one-active-run guard stay `pending` in the sync state and are
+  retried, not lost. Sync state records `phase` (checking/refreshing/done/failed), `checked`,
+  `changed`, `pending` and `queued`; a failed check stays due. Set private config `status_sync_hours` to change the cadence,
   or `0` to disable automatic checks. The top-right console topbar includes a read-only status-sync icon
-  beside the global notifications bell. Its hover/focus hint shows the last sync day and time; opening
-  the console triggers the same gated status sync at most once per day when due. Activating it manually
-  runs the same sync immediately (forced, bypassing the due check) and refreshes the local run/notification view.
-  The automatic sync does not force: the server re-checks the due window. The sync only queues gated
-  Refresh runs; it does not itself detect changes. Because only one Risk Issues run may be active, extra
-  cases are returned in `skipped` with a reason instead of failing the request; the sync is marked
-  started only when at least one Refresh was queued, so a fully blocked sync stays due.
+  beside the global notifications bell. Its hover/focus hint shows the last sync day and time and the last result (checked N, changed M); opening
+  the console triggers the same sync at most once per day when due and an assignee is configured. Activating it manually
+  runs the same sync immediately (forced, bypassing the due check; ignored while a check is running). The banner says "Read-only Wiz status check started".
   The global notifications bell is in the top-right console topbar
   (not a Home section, and not inside the Risk Issues menu). Its popover shows **No new notifications**
   until an event occurs, and the bell badge counts only unread notifications. Unread rows have a highlighted background, a dot and bolder text; read rows are neutral. Read and cleared state are browser-local (`localStorage`, no server or external mutation); clicking a row marks it read before routing, and compact **Mark all as read** and **Clear all** controls sit in the popover header. Clear only dismisses the currently shown rows in this browser; it does not delete runs. It then lists status-sync-triggered Refreshes and recent workflow
