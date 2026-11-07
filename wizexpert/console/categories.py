@@ -151,6 +151,20 @@ def canonical_action(action_id: str | None) -> str | None:
     return LEGACY_ACTION_IDS.get(action_id or "", action_id)
 
 
+def action_summary(category_id: str, action_id: str | None) -> tuple[str, str]:
+    """Canonical (action id, action title); ("", "") when unknown or not recorded."""
+    category = CATEGORIES.get(category_id)
+    action_id = canonical_action(action_id) or ""
+    if category is None or not action_id:
+        return "", ""
+    if action_id == category.default_action:
+        return action_id, category.new_title if category.stages else ""
+    for action in category.actions:
+        if action.action_id == action_id:
+            return action_id, action.title
+    return "", ""
+
+
 _ISSUES_FIELD = FieldSpec(
     "issue_ids",
     "Wiz issue ID(s)",

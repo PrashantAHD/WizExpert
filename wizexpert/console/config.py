@@ -64,6 +64,7 @@ class ConsoleConfig:
     start_timeout: float = 90.0
     open_wait_ms: int = 2500
     new_chat_wait_ms: int = 1500
+    status_sync_hours: float = 24.0
 
     @property
     def session_state(self) -> Path:
@@ -86,7 +87,10 @@ def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
     data: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("The console config must be a JSON object.")
-    allowed = {"agent", "output_roots", "exclude_dirs", "deny_names", "prompts", "start_timeout"}
+    allowed = {
+        "agent", "output_roots", "exclude_dirs", "deny_names", "prompts",
+        "start_timeout", "status_sync_hours",
+    }
     unknown = sorted(set(data) - allowed)
     if unknown:
         raise ValueError("Unknown console config key(s): " + ", ".join(unknown))
@@ -99,4 +103,6 @@ def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:
         config.prompts = {str(k): str(v) for k, v in data["prompts"].items()}
     if "start_timeout" in data:
         config.start_timeout = float(data["start_timeout"])
+    if "status_sync_hours" in data:
+        config.status_sync_hours = max(0.0, float(data["status_sync_hours"]))
     return config

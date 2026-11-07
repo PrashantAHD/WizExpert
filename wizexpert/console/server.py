@@ -465,6 +465,15 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 return self._json(HTTPStatus.OK, self.app.manager.mcp_status())
             if path == "/api/imports/risk-issues":
                 return self._json(HTTPStatus.OK, {"cases": imports.scan_risk_cases(config)})
+            if path == "/api/imports/risk-issues/sync":
+                return self._json(
+                    HTTPStatus.OK,
+                    {
+                        "due": imports.status_sync_due(config),
+                        "state": imports.status_sync_state(config),
+                        "hours": config.status_sync_hours,
+                    },
+                )
             if path == "/api/imports/files":
                 return self._json(
                     HTTPStatus.OK,
@@ -521,6 +530,32 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 gated=body.get("gated") is True,
             )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/risk-issues/sync":
+            force = body.get("force") is True
+            if not imports.status_sync_due(manager.config, force=force):
+                return self._json(
+                    HTTPStatus.OK,
+                    {"started": [], "state": imports.status_sync_state(manager.config)},
+                )
+            candidates = [
+                case for case in imports.scan_risk_cases(manager.config)
+                if not case["resolved"]
+                and not case["legacy"]
+                and case["can_refresh"]
+                and case["issue_ids"]
+            ]
+            started = []
+            for case in candidates:
+                run = manager.start(
+                    "risk-issues",
+                    {"case_folder": case["name"]},
+                    "refresh-case",
+                )
+                started.append({"case": case["name"], "run_id": run.id, "status": run.status})
+            state = imports.mark_status_sync_started(
+                manager.config, [case["name"] for case in candidates]
+            )
+            return self._json(HTTPStatus.OK, {"started": started, "state": state})
         if path == "/api/imports/risk-issues/milestone":
             try:
                 saved = imports.set_manual_milestone(

@@ -157,7 +157,7 @@ found the file opens with the OS default (`os.startfile`). The older `/api/impor
 maps the path onto category + folder + name and goes through the same launcher checks (local
 launch, no helper).
 
-- **Risk Issues** (*In-progress* stage): each folder under `deliverables\Risk-Issues` is a card
+- **Risk Issues** (*In-progress* stage): cases whose latest retained refresh status counts show every issue RESOLVED in Wiz (the only resolution criterion; no manual closure) show a RESOLVED marker and are listed in a separate **Resolved** section; all other cases stay in the In-Progress list with all actions available. Each folder under `deliverables\Risk-Issues` is a card
   with status *In-Progress*, rule/issue IDs (from `issue_ids` in the case record, else from the
   folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
   client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
@@ -169,6 +169,22 @@ launch, no helper).
   `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
   `evidence` folder. Archive before replacing, retained evidence is never modified, no
   Wiz/SNOW/cloud change, no email.
+  the homepage topbar performs a read-only status sync for eligible worked-on In-Progress cases when
+  the last sync is older than 24 hours. The sync routes each
+  eligible case through the existing gated Refresh action; that workflow performs the
+  authoritative Wiz status comparison and its existing gates remain required before
+  collection or generation. Set private config `status_sync_hours` to change the cadence,
+  or `0` to disable automatic checks. The top-right console topbar includes a read-only status-sync icon
+  beside the global notifications bell. Its hover/focus hint shows the last sync day and time; opening
+  the console triggers the same gated status sync at most once per day when due. Activating it manually
+  runs the same sync immediately and refreshes the local run/notification view.
+  The global notifications bell is in the top-right console topbar
+  (not a Home section, and not inside the Risk Issues menu). Its popover shows **No new notifications**
+  until an event occurs, and the bell badge counts only unread notifications. Unread rows have a highlighted background, a dot and bolder text; read rows are neutral. Read and cleared state are browser-local (`localStorage`, no server or external mutation); clicking a row marks it read before routing, and compact **Mark all as read** and **Clear all** controls sit in the popover header. Clear only dismisses the currently shown rows in this browser; it does not delete runs. It then lists status-sync-triggered Refreshes and recent workflow
+  runs from every category. Each notification row is itself clickable and routes directly
+  to its run or Refresh outcome page. Each row also shows the actual action performed (the run's canonical `action_id` and action title,
+  exposed through bootstrap/history; runs saved before this field existed fall back to a generic line).
+  Status-sync notifications state that the queued action is the gated Refresh. There is no background polling.
   **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
   is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
   response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and
