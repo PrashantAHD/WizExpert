@@ -324,15 +324,51 @@ def set_manual_milestone(
     return _manual_milestones(data)
 
 
+_COLLECTION_TIME_KEYS = ("collected_at", "refreshed_at", "synced_at", "generated_at", "as_of")
+
+
+def _collection_time(collection: dict[str, Any], path: Path) -> float:
+    """Epoch seconds of a refresh collection (ISO timestamp field, else file mtime)."""
+    from datetime import UTC, datetime
+
+    for key in _COLLECTION_TIME_KEYS:
+        value = collection.get(key)
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.timestamp()
+    return _mtime(path)
+
+
+def _latest_status_counts(folder: Path) -> Any:
+    """``status_counts`` of the most recent refresh record, never an older snapshot.
+
+    Records without a ``collection`` object are ignored; if the newest refresh has missing or
+    malformed counts the result is ``None`` (stays In-Progress) instead of an older record's.
+    """
+    best: tuple[float, str] | None = None
+    best_counts: Any = None
+    for path in folder.glob("*.workflow.json"):
+        try:
+            data = _load_json(path)
+            collection = data["collection"] if isinstance(data, dict) else None
+            if not isinstance(collection, dict):
+                continue
+            key = (_collection_time(collection, path), path.name)
+        except Exception:
+            continue
+        if best is None or key > best:
+            best, best_counts = key, collection.get("status_counts")
+    return best_counts
+
+
 def _all_resolved(folder: Path) -> bool:
     """True only when the latest retained refresh counts show every issue RESOLVED in Wiz."""
-    try:
-        files = sorted(folder.glob("*.workflow.json"))
-        if not files:
-            return False
-        counts = _load_json(files[0])["collection"]["status_counts"]
-    except Exception:
-        return False
+    counts = _latest_status_counts(folder)
     if not isinstance(counts, dict) or not counts:
         return False
     norm: dict[str, int] = {}
