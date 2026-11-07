@@ -137,9 +137,25 @@ action (MCP: List Servers) in VS Code.
 Read-only scans of local folders under the workspace's `deliverables\` folder (configured with
 `--workspace`); source files are never modified, evidence and archive folders are not listed, and
 only names, dates and counts are returned (plus the small `weekly-progress-data.json` and
-`*.governance.json` snapshots for the comparisons). **View** opens the file in the system
-viewer through the helper (`open_external`; `.pdf .pptx .docx .xlsx .html .eml .msg .md .csv .txt`
-only, confined to `deliverables`).
+`*.governance.json` snapshots for the comparisons). Files are opened only through the shared
+Deliverables panel below (`.pdf .pptx .docx .xlsx .html .eml .msg .md .csv .txt` and images only,
+confined to `deliverables`).
+
+**Deliverables button (every category view: Risk Issues, Weekly, Monthly):** one shared
+component replaces all per-file *View* buttons (the UI renders none; a guard test enforces it).
+It opens a panel listing the folder's direct files (name, type, modified time; `evidence`/archives,
+secrets and unsupported types are never listed) via
+`GET /api/imports/files?category=<risk-issues|weekly|monthly>&folder=<case|report folder|YYYY-MM>`
+(Monthly files are flat, so its folder is the month). **Open**
+calls `POST /api/imports/files/open` (`{category, folder, name, with?}`), which re-resolves the name
+inside that one folder (no traversal, symlinks or sub-paths) and launches the local app
+directly (no shell, argument list): PDF/HTML -> Chrome, xlsx/xls/csv -> Excel, pptx/ppt ->
+PowerPoint, docx/doc -> Word, images -> default viewer (with **Open in Chrome** as an alternate;
+`with` accepts only `chrome`). Chrome/Office are found in the standard install folders; if not
+found the file opens with the OS default (`os.startfile`). The older `/api/imports/open`
+(`{path}`) and `/api/imports/case-files[/open]` routes still work for compatibility; `/open` now
+maps the path onto category + folder + name and goes through the same launcher checks (local
+launch, no helper).
 
 - **Risk Issues** (*In-progress* stage): each folder under `deliverables\Risk-Issues` is a card
   with status *In-Progress*, rule/issue IDs (from `issue_ids` in the case record, else from the

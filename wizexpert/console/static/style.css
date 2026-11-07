@@ -389,3 +389,6 @@ body.nav-collapsed .shortcuts { display: none; }
 .diff-box { margin-top: 1rem; overflow-x: auto; }
 .table { border-collapse: collapse; width: 100%; margin: .5rem 0; font-size: .9rem; }
 .table th, .table td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: left; }
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal-card{background:#fff;color:#111;max-width:760px;max-height:80vh;overflow:auto;padding:16px}

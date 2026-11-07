@@ -779,14 +779,39 @@ function showWorkflow(category, stageId, actionId) {
   else detail.append(stateBox("empty", "Choose a stage", "Select a stage above to continue."));
 }
 // ---- imported local deliverables (read-only listings) and approval gates --------------------------
-const FILE_KIND = { pptx: "Open PPTX", pdf: "Open PDF", email: "Open email draft" };
-async function viewFile(path, message) {
-  message.textContent = "";
-  try { await api("POST", "/api/imports/open", { path }); message.textContent = "Opened with the system viewer."; message.className = "help"; }
-  catch (e) { message.textContent = e.message; message.className = "bad"; }
+// One shared Deliverables component for every category (risk-issues, weekly, monthly).
+function deliverablesButton(category, folder, message) {
+  return h("button", { class: "secondary small", type: "button", onclick: () => showDeliverables(category, folder, message) }, "Deliverables");
 }
-function fileButton(label, file, message) {
-  return h("button", { class: "secondary small", type: "button", title: file.name, onclick: () => viewFile(file.path, message) }, label);
+async function openDeliverable(category, folder, f, withApp, status) {
+  status.textContent = ""; status.className = "help";
+  try {
+    const r = await api("POST", "/api/imports/files/open", { category, folder, name: f.name, with: withApp || undefined });
+    status.textContent = "Opened " + f.name + " (" + r.app + ").";
+  } catch (e) { status.textContent = e.message; status.className = "bad"; }
+}
+async function showDeliverables(category, folder, message) {
+  const status = h("p", { class: "help", role: "status" });
+  const body = h("div", {}, h("p", { class: "help" }, "Loading\u2026"));
+  const close = h("button", { type: "button", class: "secondary", onclick: () => overlay.remove() }, "Close");
+  const overlay = h("div", { class: "modal-overlay", role: "dialog", "aria-modal": "true", "aria-label": "Deliverables for " + folder,
+    onkeydown: (e) => { if (e.key === "Escape") overlay.remove(); } },
+    h("div", { class: "card modal-card" },
+      h("h2", {}, "Deliverables"), body, status, close));
+  document.body.append(overlay); close.focus();
+  try {
+    const { files } = await api("GET", "/api/imports/files?category=" + encodeURIComponent(category) + "&folder=" + encodeURIComponent(folder));
+    clear(body);
+    if (!files.length) { body.append(h("p", { class: "help" }, "No deliverable files here yet.")); return; }
+    const table = h("table", { class: "table" }, h("thead", {}, h("tr", {}, ["Name", "Type", "Modified", ""].map((x) => h("th", {}, x)))));
+    const tb = h("tbody", {});
+    for (const f of files) {
+      const actions = h("td", {}, h("button", { class: "secondary small", type: "button", onclick: () => openDeliverable(category, folder, f, null, status) }, "Open"));
+      if (f.can_open_in_chrome) actions.append(" ", h("button", { class: "secondary small", type: "button", onclick: () => openDeliverable(category, folder, f, "chrome", status) }, "Open in Chrome"));
+      tb.append(h("tr", {}, h("td", { class: "mono" }, f.name), h("td", {}, f.type), h("td", {}, fmtDate(f.modified)), actions));
+    }
+    table.append(tb); body.append(table);
+  } catch (e) { clear(body); body.append(h("p", { class: "bad" }, "Could not list files: " + e.message)); }
 }
 function tableOf(head, rows) {
   const table = h("table", { class: "table" }, h("thead", {}, h("tr", {}, head.map((c) => h("th", {}, c)))));
@@ -878,7 +903,7 @@ function riskCasesPanel(category) {
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
           manualBox,
           h("span", {}, h("span", { class: "badge running" }, c.status), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
-        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, ...c.files.filter((f) => /\.(pdf|html|pptx|xlsx)$/i.test(f.name)).slice(0, 3).map((f) => fileButton("View " + f.name.slice(0, 28), f, message)))));
+        h("div", { class: "row-actions" }, resume, update, statusButton, followUp, reply, updateBox, draftBox, deliverablesButton("risk-issues", c.name, message))));
     }
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list cases: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Existing cases"),
@@ -905,8 +930,7 @@ function weeklyPanel(category) {
     if (!res.reports.length) { list.append(h("p", { class: "help" }, "No previous weekly reports were found. Use New report for the first one.")); return; }
     res.reports.forEach((r, i) => {
       const older = res.reports[i + 1];
-      const buttons = Object.entries(FILE_KIND).filter(([k]) => r.files[k]).map(([k, label]) => fileButton(label, r.files[k], message));
-      const row = [...buttons];
+      const row = [deliverablesButton("weekly", r.name, message)];
       if (r.has_data && older && older.has_data) row.push(h("button", { class: "secondary small", type: "button", onclick: () => compare(r.name, older.name) }, "Compare with " + older.name));
       if (r.latest) row.push(h("button", { type: "button", onclick: () => go(wfPath(category.id, "previous", "update")) }, "Update"));
       list.append(h("div", { class: "item-row" },
@@ -936,7 +960,7 @@ function monthlyPanel(category) {
     clear(list);
     if (!res.months.length) { list.append(h("p", { class: "help" }, "No previous governance months were found. Use New month.")); return; }
     for (const m of res.months) {
-      const view = m.files.filter((f) => f.kind !== "governance_json").map((f) => fileButton("Open " + f.kind.replace("_", " ") + (f.preliminary ? " (prelim.)" : ""), f, message));
+      const view = [deliverablesButton("monthly", m.month, message)];
       list.append(h("div", { class: "item-row" },
         h("div", {}, h("strong", {}, m.month), h("span", { class: "meta" }, "Last modified " + fmtDate(m.modified) + (m.has_json ? " \u00b7 governance.json present" : " \u00b7 no governance.json")),
           h("span", { class: "badge " + (m.status === "final" ? "completed" : "input_needed") }, m.status)),
