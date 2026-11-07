@@ -340,6 +340,10 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         legacy = not art["kinds"]["workflow_record"]
         wf = _workflow_status(folder, art)
         has_evidence = art["kinds"]["evidence"]
+        has_deliverables = any(
+            art["kinds"][k]
+            for k in ("report", "analysis", "client_assessment", "stakeholder_email")
+        )
         cases.append(
             {
                 "name": folder.name,
@@ -350,8 +354,10 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
                 "modified": modified,
                 "artifacts": art["present"],
                 "files": art["files"][:12],
-                "can_resume": has_evidence and not wf["resumed"],
-                "can_update": has_evidence and wf["resumed"],
+                "can_refresh": has_evidence,
+                "can_resume": has_evidence,  # legacy alias of can_refresh
+                "can_update": has_deliverables,
+                "can_update_deliverables": has_deliverables,
                 "resumed": wf["resumed"],
                 "milestones": wf["milestones"],
                 "manual_milestones": wf["manual"],
@@ -365,24 +371,18 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
     return cases[:MAX_ITEMS]
 
 
-def require_case(config: ConsoleConfig, name: str, mode: str = "resume") -> dict[str, Any]:
+def require_case(config: ConsoleConfig, name: str, mode: str = "refresh") -> dict[str, Any]:
     """The scanned case with this folder name, or ValueError.
 
-    ``mode``: ``resume`` (one-time imported-case continuation), ``update`` (already resumed
-    case) or ``any`` (the case merely has to exist, e.g. for local email drafts).
+    ``mode``: ``refresh`` (repeatable; needs a retained evidence folder, no one-time gate)
+    or ``any`` (the case merely has to exist, e.g. for local email drafts).
     """
     for case in scan_risk_cases(config):
         if case["name"] == name:
-            if mode == "resume":
-                if case["resumed"]:
-                    raise ValueError("This case was already resumed; use Update instead.")
-                if not case["can_resume"]:
-                    raise ValueError("This case has no retained evidence folder to resume from.")
-            elif mode == "update":
-                if not case["resumed"]:
-                    raise ValueError("Resume this case first; Update applies after a resume.")
-                if not case["can_update"]:
-                    raise ValueError("This case has no retained evidence folder to update from.")
+            if mode == "deliverables" and not case["can_update_deliverables"]:
+                raise ValueError("This case has no prepared deliverables to update.")
+            if mode in ("refresh", "resume") and not case["can_refresh"]:
+                raise ValueError("This case has no retained evidence folder to refresh from.")
             return case
     raise ValueError("No such Risk Issues case folder under the deliverables folder.")
 

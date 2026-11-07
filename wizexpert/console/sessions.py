@@ -391,7 +391,7 @@ class SessionView:
             content = result.get("content") if isinstance(result, dict) else result
             found = HANDOFF_URI.search(str(content or ""))
             if found:
-                self.handoff = {"ahp": found.group(1), **call}
+                self.handoff = {"ahp": found.group(1), "chat": found.group(2) or "", **call}
                 self._add(
                     "handoff",
                     "Handed off to a new chat"
@@ -506,7 +506,9 @@ def tool_summary(name: str, args: dict[str, Any]) -> str:
 
 
 SECRET_KEY = re.compile(r"token|secret|passw|credential|authoriz|api.?key|cookie", re.IGNORECASE)
-HANDOFF_URI = re.compile(r"agent-host-session://ahp-session/(" + UUID.pattern + ")")
+HANDOFF_URI = re.compile(
+    r"agent-host-session://ahp-session/(" + UUID.pattern + r")(?:\?chat=(" + UUID.pattern + "))?"
+)
 HANDOFF_TOOL = "create_session"
 MAX_HANDOFF_PROMPT = 4000
 

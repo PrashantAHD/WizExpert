@@ -43,7 +43,7 @@ After selecting Risk Issues, two buttons appear:
 Model: a category may declare `stages` (button groups) and `actions` (fields, template,
 optional `exactly_one_of`). The API takes an optional `action_id` next to `category_id`; omitting
 it keeps the old behavior. Template overrides use `risk-issues` (New) or
-`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`, `follow-up-email`, `reply-response`, `update-case`). Daily Progress
+`risk-issues/<action-id>` (`risk-accepted`, `email-response`, `update-status`, `follow-up-email`, `reply-response`, `refresh-case`). Daily Progress
 also has `new-work-item` and `continue-work-item` actions: a new item requires a work-item
 name plus either Wiz issue IDs or CVE details, while In-Progress starts from the local
 work-item list and uses a single **Refresh** button for the selected item. Each work-item card also has
@@ -106,7 +106,7 @@ passwords, MFA codes or tokens.
   chat through the helper and runs `code --reuse-window <workspace>` to raise the window, since
   an extension cannot raise the OS window itself. Approving inside VS Code stays the only way to
   answer prompts the console cannot press (see Allow / Skip above).
-- **Approval gates.** Weekly and Monthly runs, Weekly *Update* and Risk Issues *Resume* are created
+- **Approval gates.** Weekly and Monthly runs, Weekly *Update* and Risk Issues *Refresh* are created
   *waiting for your approval*: nothing is handed to the agent yet. The run page shows the gates
   *Collection plan* then *Generation* (the catalog also defines *Push*, for flows that publish;
   no current flow uses it, and the console never pushes itself). **Approve** hands that stage's
@@ -146,12 +146,21 @@ only, confined to `deliverables`).
   folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
   client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
   **legacy** tag when the case has no rebuilt-workflow record (`*.workflow.json` or
-  `case-gate-plan*`). **Resume** (action `resume-case`, gated) starts from the retained evidence
-  using the `templates/risk-issues` logic; it is disabled when the case has no `evidence` folder and is
-  **one-time**: once the workflow record has a stage 2+ event (or a "Resume collection" summary) the
-  card offers **Update** instead (`update-case`, gated): reuse retained evidence, incremental
-  read-only Wiz delta refresh only (status changes, new detections/resources, changed counts), no
-  full historical recollection, archive before replacing, no Wiz/SNOW/cloud change, no email.
+  `case-gate-plan*`). **Refresh** (action `refresh-case`, gated; the old `resume-case` id maps to it) is the **repeatable** case action, enforced like the
+  PHP2Shell daily refresh: fetch the latest Wiz status of the case issues read-only, compute the
+  delta against the retained evidence (status changes, new/resolved issues, changed counts), save
+  the new evidence snapshot plus a change summary, then regenerate/update the deliverables from
+  `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
+  `evidence` folder. Archive before replacing, retained evidence is never modified, no
+  Wiz/SNOW/cloud change, no email.
+  **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
+  is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
+  response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and
+  embedded as quoted `BEGIN/END OWNER INPUT` data, never as instructions). No Wiz fetch. The agent
+  saves the input verbatim to `inputs/update-TIMESTAMP.md` in the case folder, archives the
+  current deliverables, regenerates the latest deliverables from `templates/risk-issues` with the
+  input applied and records a change summary. Disabled unless the case has prepared deliverables;
+  empty input is rejected server side. No email, no Wiz/SNOW/cloud change.
   Cards also offer **Follow-up Email** (`follow-up-email`: paste the email you sent; a concise
   status-update follow-up is drafted locally) and **Reply to Response** (`reply-response`: paste the
   assigned team's response; a reply is drafted locally). Both use the quoted `BEGIN/END EMAIL TEXT`
@@ -398,6 +407,10 @@ A run marked `handed_off` with no recorded handoff (for example a damaged or han
 `runs.json`) cannot resolve, so the next refresh marks it `interrupted` and saves that atomically;
 it never stays active forever.
 If the new chat never appears within 30 minutes the run becomes "Interrupted".
+Invariant: every handoff seen in the log becomes a pending handoff, including a peer chat
+created in the same VS Code session (`...?chat=<id>`) or a link back to the same session id;
+such chats are found by their handoff prompt. A `handed_off` run therefore always either
+rebinds or times out; it never waits silently.
 
 ## Safety properties
 

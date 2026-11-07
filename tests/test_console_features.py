@@ -102,11 +102,11 @@ def test_risk_cases_become_in_progress_cards_with_legacy_tag(env):  # noqa: F811
     cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
     new, old = cases["Synthetic-Case-wc-id-11-12"], cases["Old-Case-wc-id-7"]
     assert new["status"] == "In-Progress" and new["issue_ids"] == ["wc-id-11", "wc-id-12"]
-    assert not new["legacy"] and new["can_resume"]
+    assert not new["legacy"] and new["can_refresh"]
     assert {"analysis", "client_assessment", "stakeholder_email", "evidence", "report"} <= set(
         new["artifacts"]
     )
-    assert old["legacy"] and not old["can_resume"] and old["issue_ids"] == ["wc-id-7"]
+    assert old["legacy"] and not old["can_refresh"] and old["issue_ids"] == ["wc-id-7"]
     assert new["modified"] > 0
 
 
@@ -124,10 +124,10 @@ def test_risk_case_recognizes_case_prefixed_evidence_folder(env):  # noqa: F811
     _touch(bare / "my evidence" / "raw.json")
     _touch(bare / "Analysis.html")
     cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
-    assert cases["Prefixed-wc-id-31"]["can_resume"]
+    assert cases["Prefixed-wc-id-31"]["can_refresh"]
     assert "evidence" in cases["Prefixed-wc-id-31"]["artifacts"]
-    assert not cases["Nested-wc-id-32"]["can_resume"]
-    assert not cases["Bare-wc-id-33"]["can_resume"]
+    assert not cases["Nested-wc-id-32"]["can_refresh"]
+    assert not cases["Bare-wc-id-33"]["can_refresh"]
 
 def test_issue_ids_come_from_folder_name_when_no_metadata():
     assert imports.issue_ids_from_name("Synthetic-wc-id-11-12") == [
@@ -159,7 +159,9 @@ def test_resume_case_is_gated_and_starts_from_retained_evidence(env):  # noqa: F
     _risk(workspace)
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
-    run = manager.start("risk-issues", {"case_folder": "Synthetic-Case-wc-id-11-12"}, "resume-case")
+    run = manager.start(
+        "risk-issues", {"case_folder": "Synthetic-Case-wc-id-11-12"}, "refresh-case"
+    )
     assert run.status == "awaiting_gate" and run.session_id == ""
     assert "Synthetic-Case-wc-id-11-12" in run.prompt and "retained evidence" in run.prompt
     assert "Stage collection plan" in run.prompt
@@ -175,18 +177,18 @@ def test_resume_refuses_unknown_and_legacy_cases(env):  # noqa: F811
     _risk(workspace)
     manager = _manager(config)
     with pytest.raises(RunError, match="No such"):
-        manager.start("risk-issues", {"case_folder": "Missing-Case"}, "resume-case")
+        manager.start("risk-issues", {"case_folder": "Missing-Case"}, "refresh-case")
     with pytest.raises(RunError, match="no retained evidence"):
-        manager.start("risk-issues", {"case_folder": "Old-Case-wc-id-7"}, "resume-case")
+        manager.start("risk-issues", {"case_folder": "Old-Case-wc-id-7"}, "refresh-case")
     with pytest.raises(RunError):
-        manager.start("risk-issues", {"case_folder": "../x"}, "resume-case")
+        manager.start("risk-issues", {"case_folder": "../x"}, "refresh-case")
 
 
 def _workflow(folder, events):
     _touch(folder / "x.workflow.json", json.dumps({"version": 1, "events": events}))
 
 
-def test_resume_is_one_time_then_update_and_status_milestones(env):  # noqa: F811
+def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
     config, workspace, _ = env
     base = workspace / "deliverables" / "Risk-Issues"
     fresh = base / "Fresh-wc-id-41"
@@ -204,22 +206,43 @@ def test_resume_is_one_time_then_update_and_status_milestones(env):  # noqa: F81
     _touch(bad / "evidence" / "raw.json")
     _touch(bad / "x.workflow.json", "{not json")
     cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
-    assert cases["Fresh-wc-id-41"]["can_resume"] and not cases["Fresh-wc-id-41"]["can_update"]
+    assert cases["Fresh-wc-id-41"]["can_refresh"]
     d = cases["Done-wc-id-42"]
-    assert d["resumed"] and not d["can_resume"] and d["can_update"]
+    assert d["resumed"] and d["can_refresh"]
     assert "Email sent" in d["milestones"] and "Ticket created" not in d["milestones"]
     assert "Reports present" in d["milestones"] and "Reports sent" not in d["milestones"]
     assert d["workflow_status"] == "generated" and d["workflow_summary"].startswith("Resume collection")  # noqa: E501
     b = cases["Bad-wc-id-43"]
-    assert "unreadable" in b["workflow_summary"] and b["can_resume"]
+    assert "unreadable" in b["workflow_summary"] and b["can_refresh"]
     manager = _manager(config)
-    with pytest.raises(RunError, match="already resumed"):
-        manager.start("risk-issues", {"case_folder": "Done-wc-id-42"}, "resume-case")
-    with pytest.raises(RunError, match="Resume this case first"):
-        manager.start("risk-issues", {"case_folder": "Fresh-wc-id-41"}, "update-case")
-    run = manager.start("risk-issues", {"case_folder": "Done-wc-id-42"}, "update-case")
-    assert run.status == "awaiting_gate" and "delta" in run.prompt
+    # Refresh is repeatable (no one-time gate); legacy ids map to refresh-case.
+    for action in ("refresh-case", "refresh-case", "resume-case"):
+        for name in ("Done-wc-id-42", "Fresh-wc-id-41"):
+            run = manager.start("risk-issues", {"case_folder": name}, action)
+            assert run.status == "awaiting_gate"
+            assert "delta" in run.prompt and "Refresh" in run.prompt
+            manager.decide_gate(run.id, "collection-plan", "reject")
     assert imports.require_case(config, "Fresh-wc-id-41", "any")["name"] == "Fresh-wc-id-41"
+    # Update deliverables: needs prepared deliverables and non-empty input; gated; no Wiz fetch.
+    assert cases["Done-wc-id-42"]["can_update_deliverables"]
+    assert not cases["Fresh-wc-id-41"]["can_update_deliverables"]
+    run = manager.start(
+        "risk-issues",
+        {"case_folder": "Done-wc-id-42", "update_text": "Client confirmed the fix"},
+        "update-deliverables",
+    )
+    assert run.status == "awaiting_gate" and "BEGIN OWNER INPUT Client confirmed" in run.prompt
+    manager.decide_gate(run.id, "collection-plan", "reject")
+    with pytest.raises(Exception):  # noqa: B017
+        manager.start(
+            "risk-issues", {"case_folder": "Fresh-wc-id-41", "update_text": "x"}, "update-case"
+        )
+    with pytest.raises(Exception):  # noqa: B017
+        manager.start(
+            "risk-issues",
+            {"case_folder": "Done-wc-id-42", "update_text": " "},
+            "update-deliverables",
+        )
 
 
 # -- approval gates ----------------------------------------------------------------------------
@@ -750,7 +773,7 @@ def test_console_doc_describes_the_new_features():
         "Waiting for approval in VS Code",
         "settings.template.json",
         "Approval gates",
-        "Resume",
+        "Refresh",
         "PRELIMINARY",
         "Wiz MCP",
         "Previous months",
@@ -845,7 +868,7 @@ def test_follow_up_milestone_client_response_and_ui_labels(env):  # noqa: F811
     # Status form is hidden by default and only toggled by the Update Status button.
     assert 'class: "manual-milestones", id: "status-form-" + c.name, hidden: true' in js
     assert '"Update Status"' in js and '"aria-controls": manualBox.id' in js
-    assert "manualBox.hidden = !open" in js and '"Update Case"' in js
+    assert "manualBox.hidden = !open" in js and '"Refresh"' in js
     assert js.index("statusButton, followUp") > js.index("manualBox,")
     for label in ("Ticket Created", "Email Sent", "Reports Sent", "Follow-up Sent"):
         assert f'"{label}", "{label}"' in js
