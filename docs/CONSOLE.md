@@ -177,7 +177,11 @@ launch, no helper).
   or `0` to disable automatic checks. The top-right console topbar includes a read-only status-sync icon
   beside the global notifications bell. Its hover/focus hint shows the last sync day and time; opening
   the console triggers the same gated status sync at most once per day when due. Activating it manually
-  runs the same sync immediately and refreshes the local run/notification view.
+  runs the same sync immediately (forced, bypassing the due check) and refreshes the local run/notification view.
+  The automatic sync does not force: the server re-checks the due window. The sync only queues gated
+  Refresh runs; it does not itself detect changes. Because only one Risk Issues run may be active, extra
+  cases are returned in `skipped` with a reason instead of failing the request; the sync is marked
+  started only when at least one Refresh was queued, so a fully blocked sync stays due.
   The global notifications bell is in the top-right console topbar
   (not a Home section, and not inside the Risk Issues menu). Its popover shows **No new notifications**
   until an event occurs, and the bell badge counts only unread notifications. Unread rows have a highlighted background, a dot and bolder text; read rows are neutral. Read and cleared state are browser-local (`localStorage`, no server or external mutation); clicking a row marks it read before routing, and compact **Mark all as read** and **Clear all** controls sit in the popover header. Clear only dismisses the currently shown rows in this browser; it does not delete runs. It then lists status-sync-triggered Refreshes and recent workflow

@@ -52,7 +52,7 @@ async function api(method, path, body) {
   if (!response.ok) throw new Error(data.error || ("HTTP " + response.status));
   return data;
 }
-function banner(text) { const b = $("banner"); if (!b) return; b.hidden = !text; clear(b); if (text) b.append(text); }
+function banner(text, kind) { const b = $("banner"); if (!b) return; b.hidden = !text; b.classList.toggle("info", kind === "info"); clear(b); if (text) b.append(text); }
 function helperRecoveryMessage(error) {
   const text = String(error && error.message || error);
   if (!/helper|reconnect|chat|trust|permission/i.test(text)) return;
@@ -496,8 +496,8 @@ function renderNotifications() {
     }
   });
 }
-async function runStatusSync(report) {
-  const result = await api("POST", "/api/imports/risk-issues/sync", { force: true });
+async function runStatusSync(report, force = true) {
+  const result = await api("POST", "/api/imports/risk-issues/sync", { force });
   recordNotifications(result.started || []);
   await refresh();
   updateSyncStatus(result.state);
@@ -541,11 +541,13 @@ async function syncFromTopbar({ silent = false } = {}) {
   button.setAttribute("aria-busy", "true");
   button.title = "Syncing Risk Issues status...";
   try {
-    const result = await runStatusSync();
+    const result = await runStatusSync(null, !silent);
     if (!silent) {
-      banner(result.started && result.started.length
-        ? "Read-only status sync queued " + result.started.length + " gated Refresh run(s)."
-        : "No eligible In-Progress Risk Issues cases required a refresh.");
+      const queued = (result.started || []).length, skipped = (result.skipped || []).length;
+      const note = skipped ? " " + skipped + " case(s) skipped (a Risk Issues run may already be active)." : "";
+      banner(queued
+        ? "Queued " + queued + " gated Refresh run(s); each Refresh performs the Wiz status comparison after approval." + note
+        : "No gated Refresh was queued." + note, "info");
     }
   } catch (e) {
     if (!silent) banner("Status sync unavailable: " + e.message);

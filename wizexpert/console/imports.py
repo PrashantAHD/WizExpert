@@ -426,6 +426,37 @@ def mark_status_sync_started(config: ConsoleConfig, cases: list[str]) -> dict[st
     return state
 
 
+def run_status_sync(config: ConsoleConfig, start: Any, *, force: bool = False) -> dict[str, Any]:
+    """Queue gated Refresh runs for eligible cases; never raises for per-case start errors.
+
+    ``start(case_name)`` returns a run-like object (``id``, ``status``) or raises (for
+    example the one-active-run guard). Failures become ``skipped`` entries. The sync is
+    marked started only when at least one Refresh was queued, so a sync blocked entirely
+    by an active run stays due and is retried.
+    """
+    if not status_sync_due(config, force=force):
+        return {"started": [], "skipped": [], "state": status_sync_state(config)}
+    candidates = [
+        case for case in scan_risk_cases(config)
+        if not case["resolved"] and not case["legacy"]
+        and case["can_refresh"] and case["issue_ids"]
+    ]
+    started: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for case in candidates:
+        try:
+            run = start(case["name"])
+        except Exception as error:  # noqa: BLE001 - reported per case, never fatal
+            skipped.append({"case": case["name"], "reason": str(error)[:300]})
+            continue
+        started.append({"case": case["name"], "run_id": run.id, "status": run.status})
+    if started or not candidates:
+        state = mark_status_sync_started(config, [item["case"] for item in started])
+    else:
+        state = status_sync_state(config)
+    return {"started": started, "skipped": skipped, "state": state}
+
+
 def require_case(config: ConsoleConfig, name: str, mode: str = "refresh") -> dict[str, Any]:
     """The scanned case with this folder name, or ValueError.
 

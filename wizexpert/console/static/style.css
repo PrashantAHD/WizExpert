@@ -356,6 +356,7 @@ textarea { resize: vertical; }
 .badge.input_needed, .badge.handed_off, .badge.interrupted { color: var(--warn); }
 .badge.stopped { color: #3b4658; }
 .banner { color: var(--bad); }
+.banner.info { color: var(--ok); background: var(--ok-soft); border-color: #b9dfc7; }
 .problems { color: var(--bad); }
 .panel th { color: var(--muted); }
 .panel td { color: var(--ink); }
