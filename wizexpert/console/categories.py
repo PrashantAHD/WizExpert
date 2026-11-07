@@ -855,7 +855,9 @@ def _case_folder(raw: Any) -> str:
 
 
 def _assignee(raw: Any) -> str:
-    if not isinstance(raw, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", raw.strip()):
+    if not isinstance(raw, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", raw.strip()
+    ):
         raise InputError("The assignee may only use letters, digits, dot, dash, underscore.")
     return raw.strip()
 

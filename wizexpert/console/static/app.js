@@ -421,7 +421,7 @@ function markNotifRead(keys) {
 }
 function notificationRow(href, title, context, status, meta, label, key) {
   const read = loadNotifRead().has(key);
-  const a = link(href, "notification-item", 
+  const a = link(href, "notification-item",
     h("span", { class: "notif-dot", "aria-hidden": "true" }),
     h("span", { class: "notif-title" }, title),
     h("span", { class: "notif-context" }, context),

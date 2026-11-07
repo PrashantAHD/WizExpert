@@ -373,7 +373,12 @@ def _all_resolved(folder: Path) -> bool:
         return False
     norm: dict[str, int] = {}
     for key, value in counts.items():
-        if not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        if (
+            not isinstance(key, str)
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
             return False
         k = key.strip().upper().replace(" ", "_")
         norm[k] = norm.get(k, 0) + value
@@ -448,7 +453,10 @@ def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
     if state.get("phase") == "failed":
         return True  # a failed check is retried at the next opportunity
     last = state.get("last_started")
-    return not isinstance(last, (int, float)) or time.time() - last >= config.status_sync_hours * 3600
+    return (
+        not isinstance(last, (int, float))
+        or time.time() - last >= config.status_sync_hours * 3600
+    )
 
 
 def _write_sync_state(config: ConsoleConfig, state: dict[str, Any]) -> dict[str, Any]:
@@ -460,7 +468,9 @@ def _write_sync_state(config: ConsoleConfig, state: dict[str, Any]) -> dict[str,
     return state
 
 
-def mark_status_sync_started(config: ConsoleConfig, cases: list[str], **extra: Any) -> dict[str, Any]:
+def mark_status_sync_started(
+    config: ConsoleConfig, cases: list[str], **extra: Any
+) -> dict[str, Any]:
     return _write_sync_state(
         config,
         {"last_started": time.time(), "cases": cases[:100], "mode": "status-check", **extra},
@@ -481,7 +491,9 @@ def eligible_sync_cases(config: ConsoleConfig) -> list[str]:
     ]
 
 
-def _read_status_result(config: ConsoleConfig, token: str, allowed: list[str]) -> dict[str, Any] | None:
+def _read_status_result(
+    config: ConsoleConfig, token: str, allowed: list[str]
+) -> dict[str, Any] | None:
     """The status-check run's JSON result, restricted to the cases that were asked for."""
     if not re.fullmatch(r"[A-Za-z0-9-]{8,40}", token or ""):
         return None
@@ -590,8 +602,11 @@ def run_status_sync(
             },
         )
     except Exception as error:  # noqa: BLE001 - reported, sync stays due
-        return {"started": [], "skipped": [{"case": "Wiz status check", "reason": str(error)[:300]}],
-                "state": status_sync_state(config)}
+        return {
+            "started": [],
+            "skipped": [{"case": "Wiz status check", "reason": str(error)[:300]}],
+            "state": status_sync_state(config),
+        }
     state = mark_status_sync_started(
         config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token
     )
