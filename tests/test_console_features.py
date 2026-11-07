@@ -165,6 +165,122 @@ def test_risk_case_resolved_only_when_all_wiz_issues_resolved(env):  # noqa: F81
             assert scanned[name]["status"] == "In-Progress", name
 
 
+def test_resolved_case_exposes_rule_ids_and_per_rule_reasons(env):  # noqa: F811
+    config, workspace, _ = env
+    res = {"RESOLVED": 3}
+    folder = workspace / "deliverables" / "Risk-Issues" / "Combined-Gateway"
+    _touch(folder / "x.workflow.json", json.dumps({
+        "issue_ids": ["wc-id-1", "wc-id-2"],
+        "collection": {"status_counts": res},
+        "resolution_reasons": {
+            "wc-id-1": "  Role   removed ",
+            "wc-id-2": "Assignment deleted",
+            "bad id": "x",
+            "wc-id-3": 5,
+        },
+    }))
+    _touch(folder / "Analysis.html")
+    _case_with_counts(workspace, "Plain-wc-id-9", {"status_counts": res})
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases["Combined-Gateway"]["issue_ids"] == ["wc-id-1", "wc-id-2"]
+    assert cases["Combined-Gateway"]["resolution_reasons"] == {
+        "wc-id-1": "Role removed", "wc-id-2": "Assignment deleted"}
+    assert cases["Combined-Gateway"]["rule_names"] == {}
+    assert cases["Plain-wc-id-9"]["resolution_reasons"] == {"wc-id-9": "Resolved"}
+    assert cases["Plain-wc-id-9"]["rule_names"] == {}
+
+
+def test_resolved_case_exposes_sanitized_per_rule_titles_with_safe_fallback(env):  # noqa: F811
+    config, workspace, _ = env
+    folder = workspace / "deliverables" / "Risk-Issues" / "Gateway-ZZZ0000-assigned"
+    _touch(folder / "x.workflow.json", json.dumps({
+        "issue_ids": ["wc-id-21", "wc-id-22"],
+        "collection": {"status_counts": {"RESOLVED": 2}},
+        "rule_names": {
+            "wc-id-21": "  Synthetic   public gateway rule title  ",
+            "wc-id-22": "A" * 400,
+            "bad id": "Ignored",
+            "wc-id-23": 5,
+        },
+    }))
+    _touch(folder / "Analysis.html")
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases[folder.name]["rule_names"] == {
+        "wc-id-21": "Synthetic public gateway rule title",
+        "wc-id-22": "A" * 300,
+    }
+
+
+def test_resolved_case_preserves_per_rule_title(env):  # noqa: F811
+    config, workspace, _ = env
+    folder = (
+        workspace / "deliverables" / "Risk-Issues"
+        / "Synthetic-public-gateway-rules-ZZZ0000-assigned"
+    )
+    title = "Synthetic public gateway rule title"
+    _touch(folder / "wc-id-9001.workflow.json", json.dumps({
+        "rule_ids": ["wc-id-9001"],
+        "rule_names": {"wc-id-9001": title},
+        "collection": {"status_counts": {"RESOLVED": 1}},
+    }))
+    _touch(folder / "Analysis.html")
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases[folder.name]["rule_names"]["wc-id-9001"] == title
+
+
+def test_resolved_case_uses_rule_title_not_folder_title(env):  # noqa: F811
+    config, workspace, _ = env
+    title = "Synthetic public gateway rule title"
+    folder = (
+        workspace / "deliverables" / "Risk-Issues"
+        / "Synthetic-public-gateway-rules-ZZZ0000-assigned"
+    )
+    _touch(folder / "wc-id-9001.workflow.json", json.dumps({
+        "issue_ids": ["wc-id-9001"],
+        "collection": {"status_counts": {"RESOLVED": 1}},
+        "rule_names": [{"rule_id": "WC-ID-9001", "title": title}],
+        "resolution_reasons": {"WC-ID-9001": "Public access was removed."},
+    }))
+    _touch(folder / "Analysis.html")
+    case = {c["name"]: c for c in imports.scan_risk_cases(config)}[folder.name]
+    assert case["issue_ids"] == ["wc-id-9001"]
+    assert case["rule_names"] == {"wc-id-9001": title}
+    assert case["resolution_reasons"] == {"wc-id-9001": "Public access was removed."}
+
+
+def test_resolved_case_expands_compound_reasons_and_uses_status_fallbacks(env):  # noqa: F811
+    config, workspace, _ = env
+    base = workspace / "deliverables" / "Risk-Issues"
+    folder = base / "Compound-Gateway"
+    _touch(folder / "x.workflow.json", json.dumps({
+        "rule_ids": ["wc-id-12-13", "wc-id-14"],
+        "collection": {"status_counts": {"RESOLVED": 3}},
+        "resolution_reasons": {"wc-id-12-13": "Resource deleted"},
+    }))
+    _touch(folder / "Analysis.html")
+    rejected = _case_with_counts(workspace, "Rejected-wc-id-15", {"REJECTED": 1})
+    accepted = _case_with_counts(workspace, "Accepted-wc-id-16", {"RISK_ACCEPTED": 1})
+    mixed = _case_with_counts(workspace, "Mixed-wc-id-17", {"RESOLVED": 1, "IGNORED": 1})
+    for case, rule_id in ((rejected, "wc-id-15"), (accepted, "wc-id-16"), (mixed, "wc-id-17")):
+        counts = {"REJECTED": 1} if rule_id == "wc-id-15" else (
+            {"RISK_ACCEPTED": 1} if rule_id == "wc-id-16" else {"RESOLVED": 1, "IGNORED": 1}
+        )
+        _touch(
+            case / "x.workflow.json",
+            json.dumps({"rule_ids": [rule_id], "collection": {"status_counts": counts}}),
+        )
+    cases = {c["name"]: c for c in imports.scan_risk_cases(config)}
+    assert cases["Compound-Gateway"]["issue_ids"] == ["wc-id-12", "wc-id-13", "wc-id-14"]
+    assert cases["Compound-Gateway"]["resolution_reasons"] == {
+        "wc-id-12": "Resource deleted",
+        "wc-id-13": "Resource deleted",
+        "wc-id-14": "Resolved",
+    }
+    assert cases[rejected.name]["resolution_reasons"] == {"wc-id-15": "Ignored"}
+    assert cases[accepted.name]["resolution_reasons"] == {"wc-id-16": "Risk accepted"}
+    assert cases[mixed.name]["resolution_reasons"] == {"wc-id-17": "Resolved"}
+
+
 def test_risk_case_resolved_uses_latest_refresh_not_sorted_first(env):  # noqa: F811
     config, workspace, _ = env
     res = {"OPEN": 0, "IN_PROGRESS": 0, "RESOLVED": 2, "REJECTED": 0}
@@ -206,6 +322,17 @@ def test_risk_cases_panel_has_resolved_section():
     js = (Path(__file__).resolve().parents[1] / "wizexpert" / "console" / "static" / "app.js").read_text("utf-8")  # noqa: E501
     assert '"Resolved cases"' in js and "c.resolved" in js and '"RESOLVED"' in js
     assert "renderResolved" in js and 'stage.id === "resolved"' in js
+    assert '"Issue rule ID: "' in js and '"Resolution notes: "' in js
+    assert 'replace(/-[A-Z]{3}\\d{4}-assigned$/, "")' in js and 'class: "case-title"' in js
+    from pathlib import Path as _P
+    assert "overflow-wrap: anywhere" in (
+        _P(__file__).parents[1] / "wizexpert/console/static/style.css"
+    ).read_text(encoding="utf-8")
+    assert (
+        "resolvedRuleTitle(c, rule)" in js
+        and "Issue Title-" not in js
+        and "rule_titles" not in js
+    )
 
 
 def test_risk_cases_panel_shows_empty_notification_state():
