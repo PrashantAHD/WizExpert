@@ -15,6 +15,7 @@ import contextlib
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ MONTHLY_DIR = "Monthly-Governance-Reporting"
 MAX_ITEMS = 100
 MAX_JSON_BYTES = 5 * 1024 * 1024
 VIEWABLE = frozenset({*DELIVERABLE_EXTENSIONS, ".txt"})
-SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,149}")
 ISSUE_TOKEN = re.compile(r"(?i)\b(wc-id)-(\d+(?:-\d+)*)")
 MONTHS = {
     m: i + 1
@@ -119,19 +120,42 @@ def _metadata_ids(folder: Path) -> list[str]:
     for candidate in candidates:
         data = _load_json(candidate)
         if isinstance(data, dict):
-            for key in ("issue_ids", "rule_ids", "issue_id", "rule_id"):
+            for key in (
+                "issue_ids",
+                "rule_ids",
+                "control_ids",
+                "issue_id",
+                "rule_id",
+                "control_id",
+                "finding_id",
+            ):
                 value = data.get(key)
                 if isinstance(value, str):
                     value = [value]
                 if isinstance(value, list):
-                    ids = [
-                        str(v)
-                        for v in value
-                        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", str(v))
-                    ]
+                    ids: list[str] = []
+                    for v in value:
+                        text = str(v)
+                        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}", text):
+                            continue
+                        # Expand compound IDs such as "wc-id-12-13" into wc-id-12, wc-id-13.
+                        for ident in issue_ids_from_name(text) or [text]:
+                            if ident not in ids:
+                                ids.append(ident)
                     if ids:
                         return ids[:10]
     return []
+
+
+def _file_name_ids(folder: Path, config: ConsoleConfig) -> list[str]:
+    """Rule IDs from direct-child file names such as ``wc-id-870_Analysis.html`` (names only)."""
+    found: list[str] = []
+    for entry in _children(folder, config):
+        if entry.is_file():
+            for ident in issue_ids_from_name(entry.name):
+                if ident not in found:
+                    found.append(ident)
+    return found[:10]
 
 
 def _artifacts(folder: Path, config: ConsoleConfig) -> dict[str, Any]:
@@ -363,8 +387,15 @@ def _latest_status_counts(folder: Path) -> Any:
     return best_counts
 
 
+# Owner rule: Ignored (Wiz REJECTED) and Risk Accepted count as Resolved.
+CLOSED_STATUSES = frozenset({"RESOLVED", "REJECTED", "IGNORED", "RISK_ACCEPTED"})
+
+
 def _all_resolved(folder: Path) -> bool:
-    """True only when the latest retained refresh counts show every issue RESOLVED in Wiz."""
+    """True only when the latest retained refresh counts show every issue closed in Wiz.
+
+    Closed means Resolved, Ignored/Rejected or Risk Accepted (all treated as Resolved).
+    """
     counts = _latest_status_counts(folder)
     if not isinstance(counts, dict) or not counts:
         return False
@@ -377,9 +408,10 @@ def _all_resolved(folder: Path) -> bool:
             or value < 0
         ):
             return False
-        k = key.strip().upper().replace(" ", "_")
+        k = key.strip().upper().replace(" ", "_").replace("-", "_")
         norm[k] = norm.get(k, 0) + value
-    return norm.get("RESOLVED", 0) > 0 and all(v == 0 for k, v in norm.items() if k != "RESOLVED")
+    closed = sum(v for k, v in norm.items() if k in CLOSED_STATUSES)
+    return closed > 0 and all(v == 0 for k, v in norm.items() if k not in CLOSED_STATUSES)
 
 
 def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
@@ -392,7 +424,11 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
         if not folder.is_dir() or not SAFE_NAME.fullmatch(folder.name):
             continue
         art = _artifacts(folder, config)
-        ids = _metadata_ids(folder) or issue_ids_from_name(folder.name)
+        ids = (
+            _metadata_ids(folder)
+            or issue_ids_from_name(folder.name)
+            or _file_name_ids(folder, config)
+        )
         modified = max([_mtime(folder), *[f["modified"] for f in art["files"]]])
         # "Legacy": created before the rebuilt case workflow, i.e. no workflow record / gate
         # plan and no retained evidence folder to resume from.
@@ -432,6 +468,18 @@ def scan_risk_cases(config: ConsoleConfig) -> list[dict[str, Any]]:
     return cases[:MAX_ITEMS]
 
 
+class StartRefused(Exception):
+    """The console refused to start a run (message is safe to show)."""
+
+
+class StartBlocked(StartRefused):
+    """Refused only for a transient reason; queued work is retried later."""
+
+
+# Serializes every status-sync read-modify-write so concurrent requests cannot double-queue.
+_SYNC_LOCK = threading.RLock()
+
+
 def status_sync_state(config: ConsoleConfig) -> dict[str, Any]:
     path = config.state_dir / "status-sync.json"
     try:
@@ -447,8 +495,8 @@ def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
     if config.status_sync_hours <= 0:
         return False
     state = status_sync_state(config)
-    if state.get("phase") == "failed":
-        return True  # a failed check is retried at the next opportunity
+    # A failed check also counts as an attempt (last_started), so automatic retries are at most
+    # one per interval; a manual (forced) sync retries immediately.
     last = state.get("last_started")
     return (
         not isinstance(last, (int, float))
@@ -513,10 +561,17 @@ def _read_status_result(
 
 
 def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+    with _SYNC_LOCK:
+        return _finish_status_check(config, start, run_status)
+
+
+def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
     """Advance a started status check: read its result, then queue Refresh for changed cases.
 
     ``run_status(run_id)`` returns the check run's status. Refresh runs that the one-active-run
-    guard blocks stay in ``pending`` and are retried by the next call, so none are lost.
+    guard blocks stay in ``pending`` and are retried by the next call, so none are lost. A start
+    refused for any other reason is recorded in ``skipped`` and dropped from ``pending`` so it
+    cannot block the queue forever.
     Returns ``{"state": ..., "queued": [newly queued refreshes]}``.
     """
     state = status_sync_state(config)
@@ -524,7 +579,7 @@ def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> d
     if state.get("phase") == "checking":
         try:
             status = run_status(state.get("check_run_id", ""))
-        except Exception:  # noqa: BLE001 - an unknown run ends the check
+        except (StartRefused, ValueError):  # an unknown run ends the check
             status = "not_started"
         if status in _RUN_ACTIVE:
             return {"state": state, "queued": queued}
@@ -545,10 +600,17 @@ def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> d
     if state.get("phase") == "refreshing":
         pending = list(state.get("pending", []))
         while pending:
+            case = pending[0]
             try:
-                run = start("refresh-case", {"case_folder": pending[0]})
-            except Exception:  # noqa: BLE001 - guard blocked: keep pending, retry later
-                break
+                run = start("refresh-case", {"case_folder": case})
+            except StartBlocked:
+                break  # transient (active-run guard): keep pending, retry on the next POST
+            except (StartRefused, ValueError) as error:
+                pending.pop(0)  # not retryable: record it and move on
+                state.setdefault("skipped", []).append(
+                    {"case": case, "reason": str(error)[:300]}
+                )
+                continue
             item = {"case": pending.pop(0), "run_id": run.id, "status": run.status,
                     "kind": "refresh-case"}
             queued.append(item)
@@ -570,15 +632,25 @@ def run_status_sync(
     ``start(action_id, inputs)`` returns a run-like object (``id``, ``status``) or raises (for
     example the one-active-run guard); ``run_status(run_id)`` returns a run's status. The sync
     is marked started only when the check run started, so a blocked sync stays due. Raises
-    ValueError when no ``status_sync_assignee`` is configured.
+    ValueError when no ``status_sync_assignee`` is configured. Only this POST-side function may
+    start or advance runs; it holds the sync lock for the whole read-modify-write.
     """
+    with _SYNC_LOCK:
+        return _run_status_sync(config, start, force=force, run_status=run_status)
+
+
+def _run_status_sync(
+    config: ConsoleConfig, start: Any, *, force: bool, run_status: Any
+) -> dict[str, Any]:
+    advanced_started: list[dict[str, Any]] = []
     if run_status is not None:
-        advanced = finish_status_check(config, start, run_status)
+        advanced = _finish_status_check(config, start, run_status)
+        advanced_started = list(advanced["queued"])
         state = advanced["state"]
         if state.get("phase") in ("checking", "refreshing"):
-            return {"started": advanced["queued"], "skipped": [], "state": state, "busy": True}
+            return {"started": advanced_started, "skipped": [], "state": state, "busy": True}
     if not status_sync_due(config, force=force):
-        return {"started": [], "skipped": [], "state": status_sync_state(config)}
+        return {"started": advanced_started, "skipped": [], "state": status_sync_state(config)}
     if not config.status_sync_assignee:
         raise ValueError(
             "Status sync needs the owner assignee: set status_sync_assignee in the private "
@@ -598,11 +670,18 @@ def run_status_sync(
                 "result_name": token,
             },
         )
-    except Exception as error:  # noqa: BLE001 - reported, sync stays due
+    except (StartRefused, ValueError) as error:
+        reason = str(error)[:300]
+        # Record the attempt so automatic retries back off to one per interval.
+        state = _write_sync_state(
+            config,
+            {"last_started": time.time(), "cases": [], "mode": "status-check",
+             "phase": "failed", "error": reason},
+        )
         return {
-            "started": [],
-            "skipped": [{"case": "Wiz status check", "reason": str(error)[:300]}],
-            "state": status_sync_state(config),
+            "started": advanced_started,
+            "skipped": [{"case": "Wiz status check", "reason": reason}],
+            "state": state,
         }
     state = mark_status_sync_started(
         config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token

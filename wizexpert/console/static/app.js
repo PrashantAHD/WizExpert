@@ -270,6 +270,7 @@ async function route() {
   }
   renderAll();
   updateNav();
+  applySyncScope();
   restoreScroll();
   applyFocus();
 }
@@ -509,7 +510,7 @@ async function runStatusSync(report, force = true) {
 }
 function syncStatusText(syncState) {
   const last = syncState && syncState.last_started;
-  if (!Number.isFinite(last)) return "Not synced yet \u00b7 automatic sync runs daily.";
+  if (!Number.isFinite(last)) return "Risk Issues only \u00b7 Not synced yet \u00b7 automatic sync runs daily.";
   const date = new Date(last * 1000);
   const now = new Date();
   const day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -520,7 +521,7 @@ function syncStatusText(syncState) {
   if (syncState.phase === "checking") result = " \u00b7 Wiz status check running.";
   else if (syncState.phase === "failed") result = " \u00b7 Last status check failed.";
   else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
-  return "Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
+  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
 }
 function updateSyncStatus(syncState) {
   const button = $("sync-btn"), tooltip = $("sync-tooltip");
@@ -544,21 +545,34 @@ async function loadTopbarSync() {
 }
 async function pollSyncProgress() {
   try {
-    const status = await api("GET", "/api/imports/risk-issues/sync");
-    updateSyncStatus(status.state);
-    if ((status.queued || []).length) {
-      recordNotifications([...(status.state.queued || [])]);
+    const result = await api("POST", "/api/imports/risk-issues/sync", { force: false });
+    updateSyncStatus(result.state);
+    if ((result.started || []).length) {
+      recordNotifications(result.started);
       await refresh();
     }
   } catch (e) { /* the next tick retries */ }
 }
 setInterval(() => {
   const btn = $("sync-btn");
-  if (btn && /status check running|Refresh pending/.test(btn.title)) pollSyncProgress();
+  if (btn && syncAllowedHere() && /status check running|Refresh pending/.test(btn.title)) pollSyncProgress();
 }, 60000);
+// Sync is Risk Issues-only: Monthly Governance and Weekly Progress pages never expose or trigger it.
+const SYNC_EXCLUDED_WORKFLOWS = ["weekly-progress-reporting", "monthly-governance-reporting"];
+function syncAllowedHere() {
+  const m = ROUTE_WF.exec(location.pathname);
+  return !(m && SYNC_EXCLUDED_WORKFLOWS.includes(m[1]));
+}
+function applySyncScope() {
+  const button = $("sync-btn"), tooltip = $("sync-tooltip");
+  if (!button) return;
+  const allowed = syncAllowedHere();
+  button.hidden = !allowed;
+  if (tooltip) tooltip.hidden = !allowed;
+}
 async function syncFromTopbar({ silent = false } = {}) {
   const button = $("sync-btn");
-  if (!button || button.disabled) return;
+  if (!button || button.disabled || !syncAllowedHere()) return;
   button.disabled = true;
   button.setAttribute("aria-busy", "true");
   button.title = "Starting read-only Wiz status check...";
@@ -580,7 +594,7 @@ async function syncFromTopbar({ silent = false } = {}) {
   } finally {
     button.disabled = false;
     button.removeAttribute("aria-busy");
-    if (!button.title.startsWith("Last synced")) updateSyncStatus({});
+    if (!button.title.startsWith("Risk Issues only \u00b7 Last synced")) updateSyncStatus({});
   }
 }
 (function bindNotifications() {
@@ -1052,7 +1066,8 @@ function riskCasesPanel(category, resolvedOnly) {
     const renderResolved = (c, target) => {
       target.append(h("div", { class: "item-row case-card" },
         h("div", {}, h("strong", {}, c.name),
-          h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
+          c.issue_ids.length ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + c.issue_ids.join(", ")) : null,
+          h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown")),
           h("span", {}, h("span", { class: "badge done" }, "RESOLVED"), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
         h("div", { class: "row-actions" }, deliverablesButton("risk-issues", c.name, message))));
@@ -1130,7 +1145,8 @@ function riskCasesPanel(category, resolvedOnly) {
       }
       target.append(h("div", { class: "item-row case-card" },
         h("div", {}, h("strong", {}, c.name),
-          h("span", { class: "meta" }, (c.issue_ids.length ? c.issue_ids.join(", ") + " \u00b7 " : "") + "Last modified " + fmtDate(c.modified)),
+          c.issue_ids.length ? h("span", { class: "case-subtitle" }, "Issue rule ID: " + c.issue_ids.join(", ")) : null,
+          h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified)),
           h("span", { class: "meta" }, "Status: " + (c.workflow_status || "unknown") + (c.client_response ? " \u00b7 Client response received" : "")),
           manualBox,
           h("span", {}, (c.resolved ? h("span", { class: "badge done" }, "RESOLVED") : h("span", { class: "badge running" }, c.status)), c.legacy ? h("span", { class: "badge legacy" }, "legacy") : null)),
@@ -1274,8 +1290,8 @@ function renderMcp() {
   const box = $("mcp"); if (!box) return;
   clear(box);
   const m = state.mcp || { state: "unknown", detail: "", servers: [] };
-  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {}, MCP_TEXT[m.state] || m.state)),
-    m.detail ? h("p", { class: "help" }, m.detail) : null);
+  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {},   MCP_TEXT[m.state] || m.state)));
+    if (m.detail) box.append(h("p", { class: "help" }, m.detail));
   if (m.servers && m.servers.length) {
     const running = m.state === "connected" || m.state === "needs_auth";
     box.append(h("p", { class: "help" }, "Status: " + (running ? "Running" : "Stopped")));

@@ -50,8 +50,13 @@ ACTION_CASE_MODES = {
 MCP_SERVER = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 
 
-class RunError(Exception):
+class RunError(imports.StartRefused):
     """A request the manager refuses (message is safe to show)."""
+
+
+class RunBusyError(RunError, imports.StartBlocked):
+    """A start refused only for a transient reason (active-run guard, helper not connected);
+    queued work that hits it is retried later."""
 
 
 @dataclass
@@ -298,10 +303,10 @@ class RunManager:
         with self._lock:
             runs = list(self._runs.values())
         if any(r.status == "starting" for r in runs):
-            raise RunError("Another run is still starting; wait for it to appear first.")
+            raise RunBusyError("Another run is still starting; wait for it to appear first.")
         for r in runs:
             if category_id and r.category_id == category_id and self._still_active(r):
-                raise RunError(
+                raise RunBusyError(
                     "A run of this workflow is already active (run "
                     + r.id
                     + "). Open it from Recent activity instead of starting a duplicate."
@@ -378,7 +383,7 @@ class RunManager:
             self._refuse_if_starting(category_id)
             helper_ready = helper_ready or self.bridge.helper_connected(workspace)
             if not helper_ready and not self.config.allow_cli_fallback:
-                raise RunError(
+                raise RunBusyError(
                     "The VS Code helper is not connected for this workspace. Install it "
                     "(wizexpert console install-helper); the console opens a standard VS Code "
                     "window for the workspace automatically, or open one yourself (the Agents "
@@ -945,7 +950,7 @@ class RunManager:
         hint = self._mcp_hint
         now = self._clock()
         if tools > 0:
-            out.update(state="connected", detail=f"{tools} Wiz tool(s) available in VS Code.")
+            out.update(state="connected", detail="")
             self._mcp_hint = None
         elif hint and hint["action"] in ("start", "auth") and now - hint["at"] < MCP_HINT_SECONDS:
             out.update(

@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .config import ASSIGNEE_PATTERN
+
 MAX_PROMPT = 600
 ISSUE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{1,63}")
 ISO_DATE = re.compile(r"20[2-9][0-9]-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])")
@@ -28,7 +30,7 @@ MAX_EMAIL = 1500
 EMAIL_CHARS = re.compile(r"[A-Za-z0-9 .,;:()/_'?!@%-]{1,1500}")
 ACTION_SAFE = re.compile(r"[A-Za-z0-9 .,;:()/_'?!@%-]+")
 FOLDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}(/[A-Za-z0-9][A-Za-z0-9._-]{0,39}){0,2}")
-CASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+CASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,149}")
 
 
 class InputError(ValueError):
@@ -588,13 +590,13 @@ CATEGORIES: dict[str, Category] = {
         "{snow_response}. "
         "This category depends on the Risk Issues and Daily Progress Reporting categories. "
         "Update the previous weekly report instead of recreating the inventory. Follow "
-        "retain-first evidence reuse: before any Wiz fetch, inspect the selected previous "
-        "weekly folder and the retained local Risk Issues and Daily Progress evidence for "
-        "rule, status, count, remediation progress, SNOW ticket response and email response "
-        "data, and do not re-collect them unnecessarily or re-fetch already retained rule, "
-        "status or count data. "
-        "Fetch from Wiz read-only only missing or conflicting details, then reconcile new "
-        "responses. Assignee optimization: when a Wiz issue rule ID has multiple underlying "
+        "retain-first reuse for history: inspect the selected previous weekly folder and the "
+        "retained local Risk Issues and Daily Progress evidence for rule, remediation "
+        "progress, SNOW ticket and email response context, and do not re-collect that "
+        "history. Always do a fresh read-only Wiz status fetch for the current reporting "
+        "scope (never rely only on sync state or stale retained status), then reconcile "
+        "it with the retained context and new responses. "
+        "Assignee optimization: when a Wiz issue rule ID has multiple underlying "
         "IN_PROGRESS issues and assignee evidence is absent or conflicting, inspect one "
         "representative underlying issue only, and apply its assignee to that rule grouped "
         "rows only when the evidence is clearly rule consistent; otherwise retain the "
@@ -664,7 +666,8 @@ STAGE_PROMPTS = {
 }
 CATEGORY_STAGE_NOTES = {
     ("weekly-progress-reporting", "collection-plan"): (
-        " Use the previous report as the baseline and follow the reuse-first collection"
+        " Use the previous report as the baseline and follow the reuse-first collection for "
+        "history, plus a fresh read-only Wiz status fetch"
     ),
     ("monthly-governance-reporting", "collection-plan"): (
         " Follow the governance runbook: plan collection from retained evidence, reconcile, "
@@ -855,10 +858,8 @@ def _case_folder(raw: Any) -> str:
 
 
 def _assignee(raw: Any) -> str:
-    if not isinstance(raw, str) or not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", raw.strip()
-    ):
-        raise InputError("The assignee may only use letters, digits, dot, dash, underscore.")
+    if not isinstance(raw, str) or not ASSIGNEE_PATTERN.fullmatch(raw.strip()):
+        raise InputError("The assignee may only use letters, digits, dot, dash, underscore, @.")
     return raw.strip()
 
 
@@ -1003,7 +1004,7 @@ def validate(
         "note": _note,
         "item_ids": _item_ids,
         "output_folder": _folder,
-        "report_folder": _folder,
+        "report_folder": _report_folder,
         "email_text": _email,
         "update_text": _update_text,
         "work_item_name": _work_item_text,

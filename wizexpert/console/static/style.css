@@ -347,6 +347,8 @@ textarea { resize: vertical; }
 #v-workflow .item-row { background: linear-gradient(135deg, rgba(15,33,71,.9), rgba(10,58,92,.7)); border: 1px solid #36588c; border-left: 5px solid var(--gold); border-radius: 12px; padding: .9rem 1.1rem; }
 #v-workflow .item-row strong { color: #fff; font-size: 1.05rem; }
 #v-workflow .item-row .meta { color: #b4c5e4; }
+.case-subtitle { display: block; font-size: .9rem; font-weight: 600; color: var(--muted); margin: 2px 0 4px; }
+#v-workflow .case-subtitle { color: #d3def2; }
 @media (max-width: 760px) { #v-workflow { padding: 1rem; } .wf-head .back-btn { width: auto; } }
 
 /* Contrast guard: explicit text colours on tinted surfaces. */

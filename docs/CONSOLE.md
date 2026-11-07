@@ -169,6 +169,7 @@ launch, no helper).
   `templates/risk-issues`. There is no one-time gate; it is disabled only when the case has no
   `evidence` folder. Archive before replacing, retained evidence is never modified, no
   Wiz/SNOW/cloud change, no email.
+  Sync is Risk Issues-only: the topbar control is labelled "Risk Issues only", is hidden on the Weekly Progress Reporting and Monthly Governance Reporting pages, and the client guard refuses to call the endpoint there; no category-page sync controls exist. Weekly report generation does its own fresh read-only Wiz status fetch for the reporting scope (retained Risk Issues/Daily evidence is only history and remediation context) and Monthly is independent of both.
   the homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
   the last sync is older than 24 hours. Sync starts ONE `status-check` run (hidden `system` stage
   action, not gated) in the VS Code WizExpert chat, because only that chat has read-only Wiz MCP
@@ -180,11 +181,17 @@ launch, no helper).
   owner. Assignee exists only in Wiz, so the owner id is passed in the prompt and the check run filters
   read-only. Set it in the private console config (`--config`) as `status_sync_assignee`
   (never committed to the public repo); with it unset the sync refuses and starts nothing.
-  When the check run completes (the next sync request or the 60 s progress poll while a sync is
-  in progress), the console queues the existing gated Refresh ONLY for changed cases, one at a
+  When the check run completes (the next sync POST, or the 60 s progress poll, which is also a POST,
+  while a sync is in progress), the console queues the existing gated Refresh ONLY for changed cases, one at a
   time; cases blocked by the one-active-run guard stay `pending` in the sync state and are
-  retried, not lost. Sync state records `phase` (checking/refreshing/done/failed), `checked`,
-  `changed`, `pending` and `queued`; a failed check stays due. Set private config `status_sync_hours` to change the cadence,
+  retried, not lost; a Refresh start refused for any other reason is recorded in `skipped` and dropped
+  from `pending` so it cannot wedge the queue. `GET /api/imports/risk-issues/sync` is side-effect free (it only
+  reports state); only `POST` starts or advances runs, serialized by a lock so concurrent requests cannot
+  double-queue. Sync state records `phase` (checking/refreshing/done/failed), `checked`,
+  `changed`, `pending`, `queued` and `skipped`; a failed check counts as an attempt, so automatic checks
+  retry at most once per interval (a manual forced sync retries immediately). Resolved cases are not
+  rechecked by the sync (owner-requested Resolved stage); rechecking resolved cases for reopening is an
+  explicit follow-up, not implemented. Set private config `status_sync_hours` to change the cadence,
   or `0` to disable automatic checks. The top-right console topbar includes a read-only status-sync icon
   beside the global notifications bell. Its hover/focus hint shows the last sync day and time and the last result (checked N, changed M); opening
   the console triggers the same sync at most once per day when due and an assignee is configured. Activating it manually
@@ -195,7 +202,7 @@ launch, no helper).
   runs from every category. Each notification row is itself clickable and routes directly
   to its run or Refresh outcome page. Each row also shows the actual action performed (the run's canonical `action_id` and action title,
   exposed through bootstrap/history; runs saved before this field existed fall back to a generic line).
-  Status-sync notifications state that the queued action is the gated Refresh. There is no background polling.
+  Status-sync notifications state that the queued action is the gated Refresh. The only polling is the browser's 60 s POST while a sync is in progress; the server runs no background job.
   **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
   is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
   response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and
