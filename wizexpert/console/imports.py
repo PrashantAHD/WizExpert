@@ -353,14 +353,11 @@ def _latest_status_counts(folder: Path) -> Any:
     best: tuple[float, str] | None = None
     best_counts: Any = None
     for path in folder.glob("*.workflow.json"):
-        try:
-            data = _load_json(path)
-            collection = data["collection"] if isinstance(data, dict) else None
-            if not isinstance(collection, dict):
-                continue
-            key = (_collection_time(collection, path), path.name)
-        except Exception:
+        data = _load_json(path)
+        collection = data.get("collection") if isinstance(data, dict) else None
+        if not isinstance(collection, dict):
             continue
+        key = (_collection_time(collection, path), path.name)
         if best is None or key > best:
             best, best_counts = key, collection.get("status_counts")
     return best_counts
