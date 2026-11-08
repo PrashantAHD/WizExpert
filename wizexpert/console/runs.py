@@ -84,6 +84,7 @@ class Run:
     parent: str = ""  # earlier run of the same gated flow
     child: str = ""  # run started by the last approved gate
     action_id: str = ""  # canonical action id ("" for runs saved before this field existed)
+    final: dict[str, Any] | None = None  # frozen end-of-run checklist/outcome (None = not frozen)
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -144,6 +145,19 @@ class RunManager:
                 run.decisions = [d for d in item.get("decisions", []) if isinstance(d, dict)][:20]
                 run.parent = str(item.get("parent") or "")
                 run.child = str(item.get("child") or "")
+                final = item.get("final")
+                if (
+                    isinstance(final, dict)
+                    and isinstance(final.get("checklist"), list)
+                    and final.get("outcome") in FINAL_OUTCOMES
+                    and run.status in INACTIVE
+                ):
+                    reason = final.get("reason")
+                    run.final = {
+                        "checklist": clean_checklist(final["checklist"]),
+                        "outcome": final["outcome"],
+                        "reason": reason[:FINAL_REASON_MAX] if isinstance(reason, str) else "",
+                    }
                 self._runs[run.id] = run
         except (OSError, ValueError, KeyError, TypeError):
             return
@@ -274,6 +288,7 @@ class RunManager:
                 "parent": r.parent,
                 "child": r.child,
                 "action_id": r.action_id,
+                "final": r.final,
             }
             for r in items
         ]
@@ -334,7 +349,7 @@ class RunManager:
         for r in runs:
             self._rebind_late_session(r)
         return [
-            _brief(r)
+            _brief(r, self._outcome(r))
             for r in runs
             if self._still_active(r)
         ]
@@ -546,7 +561,7 @@ class RunManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.created, reverse=True)[:limit]
         return [
-            _brief(r)
+            _brief(r, self._outcome(r))
             for r in runs
         ]
 
@@ -583,6 +598,7 @@ class RunManager:
         data: dict[str, Any] = {
             "id": run.id,
             "category": categories.CATEGORIES[run.category_id].title,
+            "subject": run_subject(run),
             "prompt": run.prompt,
             "created": run.created,
             "message": run.message,
@@ -613,6 +629,9 @@ class RunManager:
                 if run.status in ("running", "input_needed", "handed_off", "completed", "stopped"):
                     changed = run.status != state
                     run.status = state
+                    if state in ACTIVE and run.final is not None:
+                        run.final = None  # resumed chat: the old frozen result no longer applies
+                        changed = True
                     if changed:
                         self._save()
                 status = run.status
@@ -655,7 +674,73 @@ class RunManager:
                     data["waiting_approval"], data["waiting_reason"] = True, "stalled"
                 data["can_focus"] = True
         data["status"] = status
+        sync = self._sync_for(run)
+        frozen = run.final if status in INACTIVE else None
+        if frozen is not None:  # an ended run keeps the result it finished with
+            data["checklist"] = [dict(s) for s in frozen["checklist"]]
+            data["outcome"], reason = frozen["outcome"], frozen.get("reason", "")
+        else:
+            data["checklist"], data["outcome"] = build_checklist(
+                status, data["gates"], bool(data["files"]), sync, run.action_id
+            )
+            reason = outcome_reason(data["checklist"])
+            if status in INACTIVE and _is_settled(status, sync, run.action_id):
+                with run.lock:
+                    run.final = {"checklist": data["checklist"], "outcome": data["outcome"],
+                                 "reason": reason}
+                    self._save()
+        if data["outcome"] == "incomplete":
+            data["message"] = "Incomplete: " + (
+                reason or "changed cases have no queued Refresh yet (see checklist)."
+            )
         return data
+
+    def settle_status_check(self, sync: dict[str, Any]) -> None:
+        """Freeze an ended status-check run's result as soon as its sync settles, so a later
+        sync overwriting the shared state cannot change it even if nobody viewed the run."""
+        try:
+            run = self.get(str(sync.get("check_run_id") or ""))
+        except (RunError, KeyError):
+            return
+        if run.action_id != "status-check":
+            return
+        if run.final is not None or run.status not in INACTIVE:
+            return
+        if not _is_settled(run.status, sync, run.action_id):
+            return
+        try:  # the run may never have been viewed: compute outputs the same way view() does
+            with run.lock:
+                if run.session_id and run.view is None:
+                    run.view = self._make_view(run, seed=True)
+                sv = run.view
+            if sv is not None:
+                sv.poll()
+                has_files = bool(self._files(run, sv, run.status))
+            else:
+                has_files = bool(run.files)
+        except Exception:  # noqa: BLE001 - fall back to what is already known
+            has_files = bool(run.files)
+        with run.lock:
+            if run.final is not None or run.status not in INACTIVE:
+                return
+            checklist, outcome = build_checklist(
+                run.status, run.gates, has_files, sync, run.action_id
+            )
+            run.final = {"checklist": checklist, "outcome": outcome,
+                         "reason": outcome_reason(checklist)}
+            self._save()
+
+    def _sync_for(self, run: Run) -> dict[str, Any] | None:
+        if run.action_id != "status-check":
+            return None
+        state = imports.status_sync_state(self.config)
+        return state if state.get("check_run_id") == run.id else None
+
+    def _outcome(self, run: Run) -> str:
+        """Outcome for lists (history/active/notifications); frozen once the run has ended."""
+        if run.final is not None:
+            return str(run.final["outcome"])
+        return build_checklist(run.status, run.gates, False, self._sync_for(run), run.action_id)[1]
 
     def _files(self, run: Run, sv: SessionView, status: str) -> list[dict[str, Any]]:
         now = self._clock()
@@ -1059,13 +1144,170 @@ class RunManager:
             raise RunError("VS Code could not press the button: " + _result_text(result))
 
 
-def _brief(r: Run) -> dict[str, Any]:
+def _step(id: str, label: str, state: str, detail: str = "") -> dict[str, str]:
+    return {"id": id, "label": label, "state": state, "detail": detail}
+
+
+def build_checklist(
+    status: str,
+    gates: list[dict[str, Any]],
+    has_files: bool,
+    sync: dict[str, Any] | None,
+    action_id: str,
+) -> tuple[list[dict[str, str]], str]:
+    """End-of-run checklist (completed / skipped / blocked / not_applicable) and the outcome.
+
+    A status check whose changed cases have no queued Refresh is 'incomplete', never a success.
+    """
+    done = status == "completed"
+    steps = [_step("run", "Run finished", "completed" if done else "blocked",
+                   "" if done else f"Run ended as {status}")]
+    states = [g.get("state") for g in gates]
+    if not gates:
+        gate_state = "not_applicable"
+    elif any(s in ("rejected", "pending") for s in states):
+        gate_state = "blocked"
+    elif any(s == "skipped" for s in states):
+        gate_state = "skipped"
+    else:
+        gate_state = "completed"
+    steps.append(_step("gates", "Approval gates", gate_state))
+    if has_files:
+        out = "completed"
+    elif done:
+        out = "not_applicable"
+    else:
+        out = "skipped"
+    steps.append(_step("outputs", "Outputs produced", out))
+    outcome = "completed" if done else status
+    if action_id == "status-check":
+        steps.append(
+            _step("readonly", "Read-only status check", "completed" if done else "blocked")
+        )
+        label0 = "Refresh for changed cases"
+        if sync is None:
+            steps.append(_step("refresh", label0, "not_applicable"))
+        elif sync.get("phase") == "checking":
+            steps.append(_step("refresh", label0, "blocked",
+                               "Status check result not read yet; sync again to read it"))
+            if done:
+                outcome = "incomplete"
+        elif sync.get("phase") == "failed":
+            steps.append(_step("refresh", label0, "blocked",
+                               str(sync.get("error") or "Status check failed")))
+            outcome = "incomplete"
+        else:
+            changed = [str(c) for c in sync.get("changed") or []]
+            queued = {str(i.get("case")) for i in sync.get("queued") or [] if isinstance(i, dict)}
+            skipped = {str(i.get("case")): str(i.get("reason", ""))
+                       for i in sync.get("skipped") or [] if isinstance(i, dict)}
+            if not changed:
+                steps.append(_step("refresh", label0, "not_applicable", "No changed cases"))
+            for case in changed:
+                label = f"Refresh queued: {case}"
+                if case in queued:
+                    steps.append(_step(f"refresh:{case}", label, "completed"))
+                elif case in skipped:
+                    steps.append(_step(f"refresh:{case}", label, "skipped", skipped[case]))
+                else:
+                    steps.append(_step(f"refresh:{case}", label, "blocked",
+                                       "Waiting for the one-active-run guard"))
+            if done and any(c not in queued for c in changed):
+                outcome = "incomplete"
+    return steps, outcome
+
+
+FINAL_OUTCOMES = frozenset((*INACTIVE, "incomplete"))
+FINAL_REASON_MAX = 300
+CHECKLIST_STATES = frozenset(("completed", "skipped", "blocked", "not_applicable"))
+CHECKLIST_MAX = 60
+CHECKLIST_FIELD_MAX = 80
+CHECKLIST_DETAIL_MAX = 300
+
+
+def clean_checklist(items: Any) -> list[dict[str, str]]:
+    """Loaded checklist entries: only dicts with string id/label/state, bounded detail."""
+    out: list[dict[str, str]] = []
+    if not isinstance(items, list):
+        return out
+    for s in items:
+        if not (isinstance(s, dict) and all(isinstance(s.get(k), str) and s[k]
+                                            for k in ("id", "label", "state"))):
+            continue
+        if s["state"] not in CHECKLIST_STATES:
+            continue
+        detail = s.get("detail", "")
+        if not isinstance(detail, str):
+            continue
+        out.append({"id": s["id"][:CHECKLIST_FIELD_MAX],
+                    "label": s["label"][:CHECKLIST_DETAIL_MAX],
+                    "state": s["state"][:CHECKLIST_FIELD_MAX],
+                    "detail": detail[:CHECKLIST_DETAIL_MAX]})
+        if len(out) >= CHECKLIST_MAX:
+            break
+    return out
+
+
+def outcome_reason(steps: list[dict[str, str]]) -> str:
+    """Why a run did not finish cleanly: the run's own end reason and the blocked/skipped Refresh
+    details (failed check, refused or stopped start, guard wait), de-duplicated and capped."""
+    parts: list[str] = []
+    for s in steps:
+        relevant = s["id"] == "run" or s["id"].startswith("refresh")
+        if relevant and s["state"] in ("blocked", "skipped") and s.get("detail"):
+            label = s["label"].replace("Refresh queued: ", "")
+            text = s["detail"] if s["id"] in ("run", "refresh") else f"{label}: {s['detail']}"
+            if text not in parts:
+                parts.append(text)
+    return short("; ".join(parts), 300)
+
+
+def _is_settled(status: str, sync: dict[str, Any] | None, action_id: str) -> bool:
+    """True when later syncs can no longer change this ended run's result."""
+    if action_id != "status-check" or status != "completed":
+        return True
+    return sync is not None and sync.get("phase") in ("done", "failed")
+
+
+SUBJECT_TITLE_MAX = 60
+SUBJECT_TITLES_SHOWN = 2
+SUBJECT_MAX = 160
+
+
+def _title(slug: str, limit: int = SUBJECT_TITLE_MAX) -> str:
+    text = re.sub(r"[-_]+", " ", slug).strip()
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def run_subject(r: Run) -> str:
+    """Issue/rule title a run applies to, from its case folder name (the issue title slug) or
+    issue IDs; no evidence is read. Empty when the run has no specific subject."""
+    values = r.values or {}
+    folder = (values.get("case_folder") or "").strip()
+    if folder:
+        return _title(folder, SUBJECT_MAX)
+    ids = (values.get("issue_ids") or "").strip()
+    if ids:
+        text = "Wiz issue(s) " + ids
+        return text if len(text) <= SUBJECT_MAX else text[: SUBJECT_MAX - 3].rstrip() + "..."
+    cases = [c for c in re.split(r"[,\s]+", values.get("case_list") or "") if c]
+    if cases:
+        shown = "; ".join(_title(c) for c in cases[:SUBJECT_TITLES_SHOWN])
+        more = len(cases) - SUBJECT_TITLES_SHOWN
+        text = shown + (f" (+{more} more)" if more > 0 else "")
+        return text if len(text) <= SUBJECT_MAX else text[: SUBJECT_MAX - 3].rstrip() + "..."
+    return ""
+
+
+def _brief(r: Run, outcome: str = "") -> dict[str, Any]:
     """Safe public summary of a run; older runs without an action fall back to the category."""
     action_id, title = categories.action_summary(r.category_id, r.action_id)
     return {
+        "subject": run_subject(r),
         "id": r.id,
         "category_id": r.category_id,
         "status": r.status,
+        "outcome": outcome or r.status,
         "created": r.created,
         "action_id": action_id,
         "action_title": title,
