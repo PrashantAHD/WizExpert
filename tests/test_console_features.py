@@ -1456,3 +1456,168 @@ def test_sync_get_is_side_effect_free():
     src = (root / "wizexpert" / "console" / "server.py").read_text("utf-8")
     get_part = src.split('"/api/imports/risk-issues/sync":')[1].split('"/api/imports/files"')[0]
     assert "finish_status_check" not in get_part and "manager.start" not in get_part
+
+def test_run_view_and_active_show_issue_title_when_waiting(env):  # noqa: F811
+    from wizexpert.console.runs import Run, run_subject
+
+    def mk(values):
+        return Run(id="r", category_id="risk-issues", values=values, prompt="", created=0.0)
+
+    folder = "Synthetic-Widget-Service-sample-title"
+    assert run_subject(mk({"case_folder": folder})) == (
+        "Synthetic Widget Service sample title"
+    )
+    assert run_subject(mk({"issue_ids": "wc-id-1"})) == "Wiz issue(s) wc-id-1"
+    assert run_subject(mk({"case_list": "A-b, C-d"})) == "A b; C d"
+    assert run_subject(mk({})) == ""
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    now = [time.time()]
+    manager = RunManager(
+        config, bridge, run_async=False, sleep=lambda _s: None, clock=lambda: now[0]
+    )
+    with FakeHelper(bridge, workspace, home) as helper:
+        run = manager.start("risk-issues", {"issue_ids": "wc-id-1"})
+        assert manager.view(run.id)["subject"] == "Wiz issue(s) wc-id-1"
+        assert manager.active()[0]["subject"] == "Wiz issue(s) wc-id-1"
+        append(helper.events_path, tool_start("powershell", {"command": "x"}, "c1"))
+        now[0] += 120
+        view = manager.view(run.id)
+        assert view["waiting_approval"] and view["subject"] == "Wiz issue(s) wc-id-1"
+
+
+def test_ended_run_result_is_frozen_and_old_runs_still_load(env):  # noqa: F811
+    from wizexpert.console.runs import Run
+
+    config, _workspace, _home = env
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    run = Run(id="r1", category_id="risk-issues", values={}, prompt="p", created=1.0,
+              status="completed", action_id="status-check")
+    manager._runs["r1"] = run
+    base = {"last_started": 1.0, "cases": ["CaseA"], "mode": "status-check", "check_run_id": "r1",
+            "phase": "done", "changed": ["CaseA"], "queued": [{"case": "CaseA", "run_id": "x"}],
+            "skipped": []}
+    imports._write_sync_state(config, dict(base))
+    assert manager.view("r1")["outcome"] == "completed"
+    assert manager.history()[0]["outcome"] == "completed"
+    # A later sync rewrites the shared state; the ended run keeps its recorded result.
+    imports._write_sync_state(config, dict(base, phase="failed", error="later failure", queued=[]))
+    view = manager.view("r1")
+    assert view["outcome"] == "completed" and view["checklist"][-1]["state"] == "completed"
+    assert manager.history()[0]["outcome"] == "completed"
+    reloaded = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    assert reloaded.get("r1").final["outcome"] == "completed"
+    # Older runs saved without the field recompute the way they always did.
+    run.final = None
+    manager._save()
+    old = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    assert old.get("r1").final is None
+    data = old.view("r1")
+    assert data["outcome"] == "incomplete" and "later failure" in data["message"]
+    assert old.history()[0]["outcome"] == "incomplete"
+
+
+def test_status_check_frozen_at_settle_without_view(env):  # noqa: F811
+    from wizexpert.console.runs import Run
+
+    config, _workspace, _home = env
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    manager._runs["r1"] = Run(id="r1", category_id="risk-issues", values={}, prompt="p",
+                              created=1.0, status="completed", action_id="status-check")
+    base = {"last_started": 1.0, "cases": ["CaseA"], "mode": "status-check", "check_run_id": "r1",
+            "phase": "done", "changed": ["CaseA"], "queued": [], "skipped": []}
+    manager.settle_status_check(dict(base))  # sync settled; nobody calls view()
+    imports._write_sync_state(config, dict(base, check_run_id="other", phase="checking"))
+    mine = [h for h in manager.history() if h["id"] == "r1"]
+    assert len(mine) == 1 and mine[0]["outcome"] == "incomplete"
+    assert all(a["id"] != "r1" for a in manager.active())  # ended runs are not active
+    data = manager.view("r1")
+    assert data["outcome"] == "incomplete" and data["message"].startswith("Incomplete")
+    reloaded = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    assert reloaded.get("r1").final["outcome"] == "incomplete"
+
+
+def test_issue_ids_subject_capped_and_loaded_checklist_validated(env):  # noqa: F811
+    from wizexpert.console.runs import SUBJECT_MAX, Run, clean_checklist, run_subject
+
+    run = Run(id="r", category_id="risk-issues", values={"issue_ids": "x" * 500}, prompt="",
+              created=0.0)
+    assert len(run_subject(run)) <= SUBJECT_MAX
+    out = clean_checklist([
+        {"id": "a", "label": "L", "state": "completed", "detail": "d" * 900},
+        {"id": "z", "label": "L", "state": "weird"},
+        {"id": 1, "label": "L", "state": "s"}, {"id": "b", "label": "L"}, "junk",
+        {"id": "c", "label": "L", "state": "blocked", "detail": 5},
+    ])
+    assert [s["id"] for s in out] == ["a"] and len(out[0]["detail"]) <= 300
+    assert len(clean_checklist([{"id": "i", "label": "l", "state": "skipped"}] * 99)) == 60
+
+
+def test_loaded_final_validated_and_resume_clears_final(env):  # noqa: F811
+    import json
+
+    from wizexpert.console.runs import Run
+
+    config, _workspace, _home = env
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    good = {"checklist": [{"id": "run", "label": "Run", "state": "completed"}],
+            "outcome": "completed", "reason": "r" * 900}
+    for rid, status, final in (
+        ("a", "completed", good),
+        ("b", "completed", dict(good, outcome="<script>")),
+        ("c", "running", good),
+        ("d", "completed", dict(good, reason=["x"])),
+    ):
+        manager._runs[rid] = Run(id=rid, category_id="risk-issues", values={}, prompt="p",
+                                 created=1.0, status=status)
+        manager._runs[rid].final = final
+    manager._save()
+    loaded = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    assert len(loaded.get("a").final["reason"]) == 300
+    assert loaded.get("b").final is None
+    assert loaded.get("c").final is None  # active run never keeps a stale frozen result
+    assert loaded.get("d").final["reason"] == ""
+    assert json.loads(loaded._index.read_text(encoding="utf-8"))
+
+
+def test_resumed_chat_drops_frozen_final_and_settle_checks_outputs(env):  # noqa: F811
+    from wizexpert.console.runs import Run
+
+    config, _workspace, _home = env
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+
+    class StubView:
+        def __init__(self, state):
+            self.state, self.written, self.final, self.progress = state, {}, "", []
+            self.seq, self.lock, self.handoff = 0, __import__("threading").RLock(), None
+
+        def poll(self):
+            pass
+
+        def status(self, _now):
+            return self.state
+
+        def pending(self, _now):
+            return None
+
+        def stalled(self, _now):
+            return False
+
+    run = Run(id="r1", category_id="risk-issues", values={}, prompt="p", created=1.0,
+              status="completed", session_id="s1")
+    run.final = {"checklist": [], "outcome": "completed", "reason": ""}
+    run.view = StubView("running")
+    manager._runs["r1"] = run
+    data = manager.view("r1")
+    assert run.final is None and data["status"] == "running"
+    assert data["outcome"] == "running"
+    # A callback-saved settle for a never-viewed run still reports output presence via _files.
+    run2 = Run(id="r2", category_id="risk-issues", values={}, prompt="p", created=1.0,
+               status="completed", action_id="status-check", session_id="s2")
+    run2.view = StubView("completed")
+    manager._runs["r2"] = run2
+    manager._files = lambda r, sv, status: [{"name": "out.xlsx"}]  # type: ignore[method-assign]
+    manager.settle_status_check({"check_run_id": "r2", "phase": "done", "changed": [],
+                                 "queued": [], "skipped": []})
+    states = {s["id"]: s["state"] for s in run2.final["checklist"]}
+    assert states["outputs"] == "completed"
