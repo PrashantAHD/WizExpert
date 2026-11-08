@@ -248,6 +248,15 @@ launch, no helper).
   count deltas (`GET /api/imports/monthly-compare?month=YYYY-MM`). **New month** is gated and its
   stage prompts follow the governance runbook (`docs/GOVERNANCE-RUNBOOK.md`).
 
+## Signed-in profile (display only)
+
+```powershell
+wizexpert console setup                      # prompts for display name and User ID
+wizexpert console setup --name "Ann" --id USER123 [--state-dir PATH]
+```
+
+Saved to `profile.json` in the console state directory (outside the repository). Rerun to change it. The header shows an initials avatar (grey "?" when not set up); hover shows the name and clicking opens a small card with the name, User ID and the setup command; `GET /api/profile` returns `{configured, name, user_id, has_photo}`. **Photo (optional):** use "Upload photo" / "Remove photo" in the popover, or `wizexpert console setup --photo <file>`. Only PNG or JPEG (checked by magic bytes), at most 1 MB, saved as `profile-photo.png|.jpg` in the console state directory (never the repository). `POST /api/profile/photo` (raw image body, Content-Length required, CSRF + same-origin), `DELETE /api/profile/photo` and `GET /api/profile/photo` (nosniff, no-store; 404 if none) need a configured profile. Display only: it is display only and never filters or changes cases, cards, status sync, notifications or actions. Without a profile the console prints a hint and still starts.
+
 ## Navigation, drafts and accessibility
 
 - Real, shareable URLs (`history.pushState`): `/`, `/workflow/<id>[/<stage>[/<action>]]`, `/run/<id>`. Back and Forward work; old `#workflow=` / `#run=` links are upgraded in place.

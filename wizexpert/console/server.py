@@ -19,6 +19,7 @@ import json
 import re
 import secrets
 import subprocess  # nosec B404
+import sys
 import threading
 import time
 import webbrowser
@@ -31,7 +32,19 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
-from .config import ConsoleConfig, load_overrides
+from .config import (
+    MAX_PHOTO_BYTES,
+    PHOTO_TYPES,
+    ConsoleConfig,
+    default_state_dir,
+    find_photo,
+    load_overrides,
+    load_profile,
+    photo_extension,
+    remove_photo,
+    save_photo,
+    save_profile,
+)
 from .runs import RunError, RunManager
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -46,6 +59,7 @@ STATIC_FILES = {
     "assets/workflow-monthly-governance.svg": "image/svg+xml",
 }
 MAX_BODY = 256 * 1024
+PHOTO_UPLOAD_TIMEOUT = 15.0  # seconds, overall deadline for one photo upload body
 WINDOW_WAIT_SECONDS = 45.0  # time for a freshly opened window to start the helper
 WINDOW_COOLDOWN_SECONDS = 90.0  # at most one window launch per cooldown
 RECENT_CONNECT_SECONDS = 120.0  # a helper seen this recently gets a reconnect grace first
@@ -54,7 +68,7 @@ RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{6}")
 AGENT_NAME = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "img-src 'self' data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 )
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
@@ -343,6 +357,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.FORBIDDEN, "Cross-origin request refused.")
         if not self._csrf_ok():
             return self._error(HTTPStatus.FORBIDDEN, "Missing or invalid CSRF token.")
+        if path == "/api/profile/photo":
+            return self._photo_upload()
         body = self._json_body()
         if body is None:
             return None
@@ -351,10 +367,76 @@ class ConsoleHandler(BaseHTTPRequestHandler):
         except RunError as error:
             return self._error(HTTPStatus.BAD_REQUEST, str(error))
 
+    def _photo_upload(self) -> None:
+        if not load_profile(self.app.config.state_dir)["configured"]:
+            return self._error(HTTPStatus.CONFLICT, "Set up a profile first.")
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else -1
+        except ValueError:
+            length = -1
+        if length < 0:
+            return self._error(HTTPStatus.LENGTH_REQUIRED, "Content-Length required.")
+        if length == 0 or length > MAX_PHOTO_BYTES:
+            return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Photo must be at most 1 MB.")
+        self._body_read = True
+        data = self._read_photo_body(length)
+        if data is None:
+            self.close_connection = True
+            return self._error(HTTPStatus.REQUEST_TIMEOUT, "Photo upload timed out.")
+        try:
+            save_photo(self.app.config.state_dir, data)
+        except ValueError as error:  # fixed validation messages, safe to show
+            return self._error(HTTPStatus.BAD_REQUEST, str(error))
+        except OSError:  # never expose filesystem paths
+            return self._error(HTTPStatus.BAD_REQUEST, "Photo could not be saved.")
+        self._json(HTTPStatus.OK, load_profile(self.app.config.state_dir))
+
+    def _read_photo_body(self, length: int) -> bytes | None:
+        """Read the upload under an overall deadline; None if it is too slow.
+
+        Only this connection's socket is affected (one thread per connection), so other
+        console requests are never delayed.
+        """
+        deadline = time.monotonic() + PHOTO_UPLOAD_TIMEOUT
+        chunks: list[bytes] = []
+        remaining = length
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return None
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(remaining, 65536))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        except OSError:  # includes socket timeouts and resets
+            return None
+        finally:
+            with contextlib.suppress(OSError):
+                self.connection.settimeout(None)
+        return b"".join(chunks)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        if not self._host_ok():
+            return self._error(HTTPStatus.MISDIRECTED_REQUEST, "Unexpected Host header.")
+        if urlsplit(self.path).path != "/api/profile/photo":
+            return self._method_not_allowed()
+        if not self._origin_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "Cross-origin request refused.")
+        if not self._csrf_ok():
+            return self._error(HTTPStatus.FORBIDDEN, "Missing or invalid CSRF token.")
+        if not load_profile(self.app.config.state_dir)["configured"]:
+            return self._error(HTTPStatus.CONFLICT, "Set up a profile first.")
+        remove_photo(self.app.config.state_dir)
+        self._json(HTTPStatus.OK, load_profile(self.app.config.state_dir))
+
     def _method_not_allowed(self) -> None:
         self._error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed.")
 
-    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _method_not_allowed  # noqa: N815
+    do_PUT = do_PATCH = do_OPTIONS = _method_not_allowed  # noqa: N815
 
     # -- static ---
     def _index(self) -> None:
@@ -430,6 +512,20 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     "active": manager.active(),
                 },
             )
+        if path == "/api/profile/photo":
+            photo = find_photo(self.app.config.state_dir)
+            if photo is None or not load_profile(self.app.config.state_dir)["configured"]:
+                return self._error(HTTPStatus.NOT_FOUND, "No photo.")
+            try:
+                data = photo.read_bytes()
+            except OSError:
+                return self._error(HTTPStatus.NOT_FOUND, "No photo.")
+            return self._send(
+                HTTPStatus.OK, data, PHOTO_TYPES[photo.suffix],
+                {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"},
+            )
+        if path == "/api/profile":
+            return self._json(HTTPStatus.OK, load_profile(self.app.config.state_dir))
         if path == "/api/weekly-progress/previous-reports":
             reports = sessions.list_previous_weekly_reports(self.app.config)
             return self._json(
@@ -648,6 +744,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else []
     if args_list[:1] == ["install-helper"]:
         return install_helper(args_list[1:])
+    if args_list[:1] == ["setup"]:
+        return setup_profile(args_list[1:])
     parser = argparse.ArgumentParser(
         prog="wizexpert console",
         description="Local frontend for the reporting categories (127.0.0.1). The work runs in a "
@@ -737,6 +835,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "workspace automatically when the helper is not connected.",
             flush=True,
         )
+    if not load_profile(config.state_dir)["configured"]:
+        print("Not signed in (display only). Run: wizexpert console setup", flush=True)
     try:
         server = build_server(config, port=args.port)
     except OSError as error:
@@ -751,6 +851,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         pass
     finally:
         server.server_close()
+    return 0
+
+
+def setup_profile(argv: list[str]) -> int:
+    """Save the display-only signed-in profile (name and user ID) to the console state dir."""
+    parser = argparse.ArgumentParser(prog="wizexpert console setup")
+    parser.add_argument("--name", default=None, help="Display name.")
+    parser.add_argument("--id", dest="user_id", default=None, help="User ID.")
+    parser.add_argument("--photo", type=Path, default=None, help="Optional PNG/JPEG photo.")
+    parser.add_argument("--state-dir", type=Path, default=None)
+    args = parser.parse_args(argv)
+    name = args.name if args.name is not None else input("Display name: ")
+    user_id = args.user_id if args.user_id is not None else input("User ID: ")
+    state_dir = args.state_dir or default_state_dir()
+    try:
+        photo_bytes = None
+        if args.photo is not None:
+            if args.photo.stat().st_size > MAX_PHOTO_BYTES:
+                raise ValueError("Photo must be at most 1 MB.")
+            photo_bytes = args.photo.read_bytes()
+            photo_extension(photo_bytes)
+        save_profile(state_dir, name, user_id)
+        if photo_bytes is not None:
+            save_photo(state_dir, photo_bytes)
+    except (ValueError, OSError) as error:
+        print(f"Setup failed: {error}", file=sys.stderr)
+        return 2
+    print(f"Saved profile for {name.strip()} (display only).")
     return 0
 
 
