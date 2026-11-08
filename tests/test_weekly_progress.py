@@ -149,6 +149,13 @@ def test_validator_flags_rule_breaks():
     assert len(errs) == 3
 
 
+def test_validator_rejects_item_resolved_before_period():
+    data = build(prev(), [row("a", "RESOLVED", resolved_at="2026-10-30", resolution_evidence="[e]")])
+    assert wp.validate_weekly_dataset(data) == []
+    data["items"][0]["resolved_at"] = "2026-10-20"
+    assert any("outside the reporting period" in e for e in wp.validate_weekly_dataset(data))
+
+
 def test_rule_aggregated_rows_contribute_weighted_counts():
     uuid = "0b1c2d3e-4f50-6172-8394-a5b6c7d8e9f0"
     rows = [row("r1", rule_id="wc-id-1", issue_count=2700, rule_name="[n1]"),
