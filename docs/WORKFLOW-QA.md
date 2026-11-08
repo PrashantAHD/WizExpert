@@ -53,6 +53,8 @@ Closure rule (owner decision): Ignored (Wiz `REJECTED`) and Risk Accepted are tr
 Resolved. A case is Resolved when its latest refresh counts are all Resolved/Ignored/Risk
 Accepted with at least one such issue; any Open or In Progress issue keeps it In-Progress.
 
+**Weekly inclusion (rule).** Weekly in-progress tables list only rows whose fresh Wiz status is In Progress; rows whose issues are all Open are not in progress and are left out. Items resolved before the reporting period are excluded entirely (rows and summary text); only items resolved inside the period may appear, with resolution evidence. `validate_weekly_dataset` fails closed otherwise.
+
 **Sync / status check (rule).** Sync is Risk Issues-only; Weekly Progress and Monthly Governance never trigger or are targets of it. Weekly generation reuses retained evidence for history only and always performs a fresh read-only Wiz status fetch for the current scope (never sync state alone). The console Sync button never queues Refresh directly. It first
 starts one read-only `status-check` run (owner-assigned eligible cases only; owner id comes from
 private config `status_sync_assignee`, never the public repo; refuse if unset). The run fetches

@@ -14,6 +14,8 @@ Rules enforced here:
 * The full owner-scoped IN_PROGRESS population as of report day is always included;
   RESOLVED items are included only when resolved_at falls inside the window AND they are
   assigned to the same approved owners (Prashant, Syed, Kimrah); other owners are excluded.
+  Items resolved before the window are never listed (not even as in-progress rows);
+  validate_weekly_dataset fails closed on any resolved row outside the window.
 * The previous weekly report is the baseline; the inventory is updated, not rebuilt.
 * Items whose current Wiz status is IN_PROGRESS are included whether or not they appear
   in the previous report: those in it are 'carried'; historical IN_PROGRESS rows absent
@@ -277,6 +279,13 @@ def validate_weekly_dataset(data: Mapping[str, Any], *, placeholder: bool = Fals
             item.get("status") == RESOLVED and item.get("resolution_evidence")
         ):
             errs.append(f"{iid}: resolved item lacks current-status resolution evidence")
+        if state == "resolved" and not placeholder and item.get("resolved_at"):
+            try:
+                where = _in_window(item["resolved_at"], period)
+            except (TypeError, ValueError):
+                where = "invalid"
+            if where != "in":
+                errs.append(f"{iid}: resolved outside the reporting period; exclude it")
     text = repr(data).casefold()
     errs += [f"forbidden text: {p}" for p in FORBIDDEN_PHRASES if p in text]
     return errs
