@@ -29,7 +29,8 @@ local tools turn that into reviewed reports.
 > WizExpert does not create a Wiz connection or an unattended service.
 
 > [!NOTE]
-> The Risk Issues (wiz-issue-rule-id) workflow is being rebuilt.
+> The Risk Issues (wiz-issue-rule-id) workflow is rebuilt on owner-approved templates
+> and supports a repeatable **Refresh** and a separate **Update deliverables** action.
 
 ## Risk Issues, in beats
 
@@ -143,6 +144,19 @@ Pick a category, enter that category's input, press Start: the console opens a *
 agent-mode chat** with your custom agent and the prompt you would have typed, then mirrors
 that session (progress, "input needed", final summary, files). The console adds no workflow
 rules; everything else is the normal agent session. See [docs/CONSOLE.md](docs/CONSOLE.md).
+
+### Console features
+
+| Feature | What it does |
+|---|---|
+| **Category cards** | Each private case/campaign folder is a work-item card grouped by category. |
+| **Refresh** (`refresh-case`) | Repeatable, gated Risk Issues action: latest read-only Wiz status → delta vs retained evidence → new snapshot and change summary → deliverables regenerated from templates. |
+| **Update deliverables** (`update-deliverables`) | Owner free-text input saved verbatim, applied to the latest deliverables (previous versions archived first). No Wiz fetch. |
+| **Status sync** | Risk Issues-only check; queues a gated Refresh only for changed cases, one at a time. No background job. |
+| **Notifications** | Bell with unread badge, mark-all-read and clear (browser-local only); each row links to its run and shows the action performed. |
+| **Resolved stage** | Cases whose latest refresh shows every issue resolved in Wiz move to a Resolved section: one card per rule ID with its Wiz rule title, `Issue rule ID` and a short `Resolution notes` line. |
+| **Profile avatar** | Initials avatar or an optional photo (PNG/JPEG, max 1 MB, uploaded from the avatar popover or `console setup --photo`; stored in the console state dir, never the repo). Hover shows the name; click shows name and User ID. Display only — filters nothing. |
+| **Approval gates** | Weekly/Monthly runs, Weekly Update and Risk Issues Refresh need explicit approval before starting. |
 
 ## Guardrails worth knowing
 

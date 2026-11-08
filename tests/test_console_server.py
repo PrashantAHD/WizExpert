@@ -81,6 +81,7 @@ def test_binds_loopback_only_and_headers(console):
     status, headers, body = request(server, "GET", "/")
     assert status == 200 and b"__CSRF_TOKEN__" not in body
     assert "script-src 'self'" in headers["Content-Security-Policy"]
+    assert "img-src 'self' data: blob:" in headers["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
     assert headers["X-Content-Type-Options"] == "nosniff" and headers["Cache-Control"] == "no-store"
 
