@@ -150,7 +150,8 @@ def test_validator_flags_rule_breaks():
 
 
 def test_validator_rejects_item_resolved_before_period():
-    data = build(prev(), [row("a", "RESOLVED", resolved_at="2026-10-30", resolution_evidence="[e]")])
+    r = row("a", "RESOLVED", resolved_at="2026-10-30", resolution_evidence="[e]")
+    data = build(prev(), [r])
     assert wp.validate_weekly_dataset(data) == []
     data["items"][0]["resolved_at"] = "2026-10-20"
     assert any("outside the reporting period" in e for e in wp.validate_weekly_dataset(data))
