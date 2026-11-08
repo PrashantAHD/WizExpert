@@ -6,6 +6,7 @@ JSON config file kept in private storage.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -87,6 +88,93 @@ class ConsoleConfig:
 
 
 ASSIGNEE_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,63}")
+
+
+PROFILE_NAME_PATTERN = re.compile(r"[A-Za-z0-9 ._'-]{1,60}")
+PROFILE_ID_PATTERN = re.compile(r"[A-Za-z0-9._@-]{1,64}")
+
+
+def profile_path(state_dir: Path) -> Path:
+    return Path(state_dir) / "profile.json"
+
+
+def validate_profile(name: str, user_id: str) -> tuple[str, str]:
+    """Return the cleaned (name, user_id) or raise ValueError. Display only."""
+    name, user_id = str(name).strip(), str(user_id).strip()
+    if not PROFILE_NAME_PATTERN.fullmatch(name) or not name:
+        raise ValueError("Name must be 1-60 characters: letters, digits, space . _ ' -")
+    if not PROFILE_ID_PATTERN.fullmatch(user_id):
+        raise ValueError("User ID must be 1-64 characters: letters, digits . _ @ -")
+    return name, user_id
+
+
+def save_profile(state_dir: Path, name: str, user_id: str) -> Path:
+    name, user_id = validate_profile(name, user_id)
+    path = profile_path(state_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"name": name, "user_id": user_id}), encoding="utf-8")
+    return path
+
+
+MAX_PHOTO_BYTES = 1024 * 1024
+PHOTO_TYPES = {".png": "image/png", ".jpg": "image/jpeg"}
+
+
+def photo_extension(data: bytes) -> str:
+    """Return '.png' or '.jpg' from magic bytes, or raise ValueError."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    raise ValueError("Photo must be a PNG or JPEG image.")
+
+
+def find_photo(state_dir: Path) -> Path | None:
+    for ext in PHOTO_TYPES:
+        path = Path(state_dir) / f"profile-photo{ext}"
+        if path.is_file():
+            return path
+    return None
+
+
+def remove_photo(state_dir: Path) -> None:
+    for ext in PHOTO_TYPES:
+        with contextlib.suppress(OSError):
+            (Path(state_dir) / f"profile-photo{ext}").unlink()
+
+
+def save_photo(state_dir: Path, data: bytes) -> Path:
+    """Validate and atomically store the display-only profile photo."""
+    if not data or len(data) > MAX_PHOTO_BYTES:
+        raise ValueError("Photo must be between 1 byte and 1 MB.")
+    ext = photo_extension(data)
+    state_dir = Path(state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    target = state_dir / f"profile-photo{ext}"
+    tmp = state_dir / f"profile-photo{ext}.tmp"
+    tmp.write_bytes(data)
+    os.replace(tmp, target)
+    for other in PHOTO_TYPES:
+        if other != ext:
+            with contextlib.suppress(OSError):
+                (state_dir / f"profile-photo{other}").unlink()
+    return target
+
+
+def load_profile(state_dir: Path) -> dict[str, Any]:
+    """Never raises; a missing or invalid profile reads as not configured."""
+    empty: dict[str, Any] = {"configured": False, "name": "", "user_id": "", "has_photo": False}
+    try:
+        data = json.loads(profile_path(state_dir).read_text(encoding="utf-8"))
+        name, user_id = validate_profile(data["name"], data["user_id"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return empty
+    return {
+        "configured": True,
+        "name": name,
+        "user_id": user_id,
+        "has_photo": find_photo(state_dir) is not None,
+    }
 
 
 def load_overrides(config: ConsoleConfig, path: Path) -> ConsoleConfig:

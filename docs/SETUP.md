@@ -160,3 +160,7 @@ Use approved storage **outside this public repository**. Keep evidence, reports
 and drafts together for the investigation, with access controls appropriate to
 their sensitivity.
 
+
+## Optional: console profile
+
+Run `wizexpert console setup` (or `--name X --id Y`) to save a display-only name and User ID in the console state directory. The console header shows it; nothing is filtered. Rerun to change.

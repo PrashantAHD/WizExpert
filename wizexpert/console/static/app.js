@@ -42,7 +42,8 @@ function h(tag, attrs, ...kids) {
 function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
 async function api(method, path, body) {
   const options = { method, headers: { "X-CSRF-Token": csrf } };
-  if (method === "POST") { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body || {}); }
+  if (method === "POST" && body instanceof Blob) { options.headers["Content-Type"] = body.type || "application/octet-stream"; options.body = body; }
+  else if (method === "POST") { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body || {}); }
   const response = await fetch(path, options);
   let data = {};
   try { data = await response.json(); } catch (_e) { /* not JSON */ }
@@ -317,6 +318,84 @@ function refresh() {
   return inflight;
 }
 function loadData() { refresh().catch(() => {}); }
+let profilePhotoUrl = "";
+async function loadProfile(photoError) {
+  const btn = document.getElementById("profile-btn");
+  const panel = document.getElementById("profile-panel");
+  if (!btn || !panel) return;
+  const line = (cls, text) => { const p = document.createElement("p"); p.className = cls; p.textContent = text; return p; };
+  let p = null;
+  try { p = await api("GET", "/api/profile"); } catch (_e) { p = null; }
+  panel.replaceChildren();
+  if (profilePhotoUrl) { URL.revokeObjectURL(profilePhotoUrl); profilePhotoUrl = ""; }
+  if (p && p.configured) {
+    const initial = String(p.name).trim().charAt(0).toUpperCase() || "?";
+    btn.textContent = initial;
+    btn.classList.remove("unset");
+    btn.title = p.name;
+    btn.setAttribute("aria-label", "Profile: " + p.name);
+    let big = null;
+    if (p.has_photo) {
+      try {
+        const res = await fetch("/api/profile/photo?v=" + Date.now(), { headers: { "X-CSRF-Token": csrf }, cache: "no-store" });
+        if (res.ok) profilePhotoUrl = URL.createObjectURL(await res.blob());
+      } catch (_e) { /* fall back to initials */ }
+    }
+    if (profilePhotoUrl) {
+      const small = document.createElement("img");
+      small.className = "profile-photo"; small.alt = ""; small.src = profilePhotoUrl;
+      small.onerror = () => { small.remove(); btn.textContent = initial; };
+      btn.textContent = ""; btn.append(small);
+      big = document.createElement("img");
+      big.className = "profile-photo-large"; big.alt = "Profile photo"; big.src = profilePhotoUrl;
+      big.onerror = () => big.remove();
+    }
+    if (big) panel.append(big);
+    panel.append(line("profile-name", p.name), line("profile-id", "User ID: " + p.user_id));
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/png,image/jpeg"; input.hidden = true;
+    const err = line("profile-error", photoError || ""); err.hidden = !photoError; err.setAttribute("role", "alert");
+    const up = document.createElement("button");
+    up.type = "button"; up.className = "profile-action"; up.textContent = "Upload photo";
+    up.addEventListener("click", () => input.click());
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      if (file.size > 1048576) { err.textContent = "Photo must be at most 1 MB."; err.hidden = false; return; }
+      try { await api("POST", "/api/profile/photo", file); await loadProfile(); panel.hidden = false; }
+      catch (e) { err.textContent = e.message; err.hidden = false; }
+    });
+    panel.append(up, input);
+    if (p.has_photo) {
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "profile-action"; rm.textContent = "Remove photo";
+      rm.addEventListener("click", async () => {
+        try { await api("DELETE", "/api/profile/photo"); await loadProfile(); panel.hidden = false; }
+        catch (e) { err.textContent = e.message; err.hidden = false; }
+      });
+      panel.append(rm);
+    }
+    panel.append(err, line("profile-hint", "To change name or ID, run: wizexpert console setup"));
+  } else {
+    btn.textContent = "?";
+    btn.classList.add("unset");
+    btn.title = "Profile not set up";
+    btn.setAttribute("aria-label", "Profile not set up");
+    panel.append(line("profile-name", "Profile not set up"), line("profile-hint", "Run: wizexpert console setup"));
+  }
+  if (!btn.dataset.bound) {
+    btn.dataset.bound = "1";
+    const close = () => { panel.hidden = true; btn.setAttribute("aria-expanded", "false"); };
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      panel.hidden = !panel.hidden;
+      btn.setAttribute("aria-expanded", String(!panel.hidden));
+    });
+    document.addEventListener("click", (e) => { if (!panel.hidden && !panel.contains(e.target)) close(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { close(); btn.focus(); } });
+  }
+}
+loadProfile();
 function makeDataBar() {
   state.dataBars = state.dataBars.filter((b) => b.node.isConnected);
   const text = h("span", { class: "databar-text", role: "status", "aria-live": "polite" });
