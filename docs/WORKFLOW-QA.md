@@ -403,3 +403,20 @@ checks and detects observable deviations in the supplied evidence; it does not
 make invented approvals trustworthy. Retain the real review and authoritative
 approval records. If evidence cannot establish compliance, stop the affected
 stage, report the gap and correct it rather than backdating approval.
+
+
+## Risk Issues delta auto-approval (owner-approved, persistent rule)
+
+Applies to the Risk Issues workflow only (console Refresh, Approvals card with the
+Collection plan and Generation stages); PHP2Shell, governance and weekly keep manual approval.
+
+- A scan/Refresh that detects any delta versus retained evidence (new, resolved or
+  status-changed issues) auto-approves both stages; the run proceeds and hands off to the next
+  VS Code chat exactly as a manual approval does.
+- No delta: refresh and generation are not triggered; no approve buttons; the run records
+  "no change - not triggered".
+- The Approvals card shows each stage's lifecycle (started / running / completed / stopped /
+  failed, with timestamp) and whether it was "auto-approved (change detected)" or manual.
+- The audit record (run decisions) is identical to a manual approval plus `auto: true` and the
+  delta summary `reason`. If auto-approval cannot start, the gate stays pending for manual approval.
+- Never sends email, mutates Wiz/ServiceNow, commits or pushes.

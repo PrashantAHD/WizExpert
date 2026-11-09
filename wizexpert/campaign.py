@@ -39,6 +39,8 @@ MAX_CALL_ATTEMPTS = 3
 UNRETURNED_RESOURCE_LABEL = "Not returned by Wiz / requires reconciliation"
 ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 ABORT_MARKER = "aborted.json"
+ABORT_ACTIONS = {"abort_unable_to_fetch", "stop_reconnect", "abort_invalid_pagination"}
+CURSOR_FAULTS = ("repeated a cursor", "has no endCursor", "Empty finding page with more data")
 LOCK_NAME = "save.lock"
 EMPTY_ATTEMPTS = "empty-attempts.json"  # empty-batch retries; never aborts a run
 EVIDENCE_PREFIXES = ("catalog-", "grouped-", "findings-", "resources-")
@@ -249,6 +251,29 @@ def _write_marker(directory: Path, action: str, reason: str) -> None:
         write_json(marker, {"action": action, "reason": reason, "at": iso(utc_now())})
 
 
+def _invalid_pagination(detail: str) -> str:
+    return (
+        f"INCOMPLETE/ABORTED: invalid finding pagination ({detail.strip()}). Collection is not "
+        "complete; never assemble or publish a partial pack, and recollect in a new "
+        "staging directory."
+    )
+
+
+def _pagination_fault(files: dict) -> str:
+    """Describe a repeated or stalled cursor in saved finding pages, else return empty."""
+    seen: set = {None}
+    for _, record in _pages(files, "findings-"):
+        info = record["response"]["vulnerabilityFindings"]["pageInfo"]
+        if record["request"]["parameters"].get("after") not in seen:
+            return "saved page chain is broken"
+        if info["hasNextPage"]:
+            cursor = info.get("endCursor")
+            if not isinstance(cursor, str) or not cursor or cursor in seen:
+                return "saved finding pagination repeated a cursor; it is not advancing"
+            seen.add(cursor)
+    return ""
+
+
 def _unable(tool: str) -> str:
     return (
         f"{tool} failed {MAX_CALL_ATTEMPTS} times: unable to fetch. Abort this run, report it, "
@@ -383,6 +408,10 @@ def next_call(config: CampaignConfig, directory: Path | str, now: datetime | Non
             if count >= MAX_CALL_ATTEMPTS:
                 _write_marker(directory, "abort_unable_to_fetch", _unable(key.split(":")[0]))
                 return next_call(config, directory, now=now)
+    fault = _pagination_fault(files)
+    if fault:
+        _write_marker(directory, "abort_invalid_pagination", _invalid_pagination(fault))
+        return next_call(config, directory, now=now)
     idle = seconds_since_last_save(meta, files, now)
     result = _plan(config, directory, files, idle)
     return result
@@ -526,7 +555,7 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
     if (directory / ABORT_MARKER).is_file() or exhausted:
         current = next_call(config, directory, now=now)
         require(
-            current["action"] not in {"abort_unable_to_fetch", "stop_reconnect"},
+            current["action"] not in ABORT_ACTIONS,
             current.get("reason", ""),
         )
     ids = list(config.vulnerability_ids)
@@ -591,6 +620,10 @@ def _save_locked(config, directory, meta, files, tool, params, response, now):
         if tool == "list_vulnerability_findings":
             _check_cursor_progress(_pages(files, "findings-"), params, body)
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as error:
+        if tool == "list_vulnerability_findings" and any(f in str(error) for f in CURSOR_FAULTS):
+            reason = _invalid_pagination(str(error))
+            _write_marker(directory, "abort_invalid_pagination", reason)
+            raise ValueError(f"{error} {reason}") from None
         if _is_empty_batch(tool, error):
             if not _accept_empty_after_retries(directory, tool, params):
                 _refuse_empty_counted(directory, tool, params, error)
