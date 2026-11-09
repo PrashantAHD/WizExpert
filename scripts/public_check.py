@@ -21,6 +21,7 @@ ROOT_FILES = {
 }
 PUBLIC_FILES = {
     ".github/copilot-instructions.md",
+    ".vscode/mcp.json",
     ".vscode/stop-workflow-console.ps1",
     ".vscode/tasks.json",
     "scripts/console-workspace/tasks.json",
