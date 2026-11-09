@@ -532,10 +532,10 @@ function notificationBar() {
     if (cleared.has(key)) continue;
     const status = STATUS_TEXT[item.status] || item.status;
   const check = item.kind === "status-check";
-  events.push(notificationRow(runPath(item.run_id), check ? "Read-only Wiz status check" : item.case + " queued",
-    check ? "Status check: read-only Wiz status comparison against retained evidence; no case files are written."
-      : "Refresh case: the read-only status check found a change and queued the gated Refresh workflow.", status, item.run_id,
-    (check ? "Read-only Wiz status check" : item.case + " queued") + ", " + status + ", run " + item.run_id, key));
+  events.push(notificationRow(runPath(item.run_id), check ? "Phase 1: Read-only Wiz status check" : "Phase 2: " + item.case + " Refresh",
+    check ? "Phase 1 status check: read-only Wiz status comparison against retained evidence; no case files are written."
+      : "Phase 2 Refresh: the status check found a change; Refresh and deliverable regeneration started automatically (no approval step, drafts only).", status, item.run_id,
+    (check ? "Phase 1 status check" : "Phase 2 Refresh " + item.case) + ", " + status + ", run " + item.run_id, key));
   }
   for (const run of runs) {
     if (seen.has(run.id)) continue;
@@ -602,7 +602,22 @@ function syncStatusText(syncState) {
   if (syncState.phase === "checking") result = " \u00b7 Wiz status check running.";
   else if (syncState.phase === "failed") result = " \u00b7 Last status check failed.";
   else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
-  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
+  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result + syncPhaseText(syncState);
+}
+const PHASE_LABEL = { started: "started", running: "running", completed: "completed", failed: "failed", not_started: "not started" };
+function syncPhaseText(syncState) {
+  const one = syncState.phase1, two = syncState.phase2;
+  if (!one && !two) return "";
+  const label = (p) => (p && (PHASE_LABEL[p.status] || p.status)) || "not started";
+  return " \u00b7 Phase 1 status check: " + label(one) + " \u00b7 Phase 2 Refresh and deliverables: " + label(two) + ".";
+}
+function renderSyncPhases(syncState) {
+  const box = $("sync-phases");
+  if (!box) return;
+  const rows = [["Phase 1 \u2013 Status check", syncState && syncState.phase1], ["Phase 2 \u2013 Refresh and deliverables", syncState && syncState.phase2]];
+  box.replaceChildren(...rows.map(([title, p]) => h("div", { class: "sync-phase " + ((p && p.status) || "not_started") },
+    h("strong", {}, title + ": "), (p && (PHASE_LABEL[p.status] || p.status)) || "not started",
+    p && p.error ? " \u2013 " + p.error : "")));
 }
 function updateSyncStatus(syncState) {
   const button = $("sync-btn"), tooltip = $("sync-tooltip");
@@ -611,6 +626,7 @@ function updateSyncStatus(syncState) {
   button.title = text + " \u00b7 Click to sync now";
   button.setAttribute("aria-label", "Sync Risk Issues status. " + text);
   if (tooltip) tooltip.textContent = text;
+  renderSyncPhases(syncState);
 }
 async function loadTopbarSync() {
   try {
@@ -636,7 +652,7 @@ async function pollSyncProgress() {
 }
 setInterval(() => {
   const btn = $("sync-btn");
-  if (btn && syncAllowedHere() && /status check running|Refresh pending/.test(btn.title)) pollSyncProgress();
+  if (btn && syncAllowedHere() && /status check running|Refresh pending|Phase \d [^:]*: (started|running)/.test(btn.title)) pollSyncProgress();
 }, 60000);
 // Sync is Risk Issues-only: Monthly Governance and Weekly Progress pages never expose or trigger it.
 const SYNC_EXCLUDED_WORKFLOWS = ["weekly-progress-reporting", "monthly-governance-reporting"];
