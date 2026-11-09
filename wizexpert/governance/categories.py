@@ -78,10 +78,22 @@ RISK_ISSUES = Category(
     (
         Slot("internal-analysis", "Internal analysis", "document"),
         Slot("client-assessment", "Client assessment", "document"),
-        Slot("stakeholder-email", "Stakeholder email draft (not sent)", "email-draft"),
+        Slot("stakeholder-email", "Email 1 initial stakeholder email (not sent)", "email-draft"),
+        Slot(
+            "stakeholder-status-request-email",
+            "Email 2 status-update request email (not sent)",
+            "email-draft",
+        ),
+        Slot(
+            "stakeholder-refresh-email",
+            "Email 3 refresh email for new findings (not sent)",
+            "email-draft",
+        ),
         Slot("detailed-report", "Detailed report", "document"),
         Slot(
-            "internal-follow-up-email", "Internal follow-up email draft (not sent)", "email-draft"
+            "internal-follow-up-email",
+            "Email 4 follow-up response email (not sent)",
+            "email-draft",
         ),
         Slot("updated-detailed-report", "Updated detailed report", "document"),
     ),

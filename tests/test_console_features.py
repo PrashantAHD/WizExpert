@@ -518,8 +518,58 @@ def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: 
     assert first["queued"] == [] and first["state"]["pending"] == [cases[0]]  # guard: pending kept
     block["on"] = False
     second = imports.finish_status_check(config, start, lambda _i: "completed")
-    assert started == [("refresh-case", {"case_folder": cases[0]})]
+    assert started == [("sync-refresh", {"case_folder": cases[0]})]
     assert second["state"]["phase"] == "done" and second["state"]["changed"] == [cases[0]]
+    assert second["state"]["phase1"]["status"] == "completed"
+    assert second["state"]["phase2"]["status"] == "completed"
+
+
+def test_sync_refresh_is_ungated_and_phases_are_recorded(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
+    assert imports.status_sync_state(config)["phase1"]["status"] == "started"
+    imports.finish_status_check(config, lambda a, i: None, lambda _i: "running")
+    assert imports.status_sync_state(config)["phase1"]["status"] == "running"
+    token = imports.status_sync_state(config)["result_name"]
+    out = workspace / "deliverables" / "Status-Check"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / (token + ".json")).write_text(json.dumps({
+        "checked": cases, "changed": [{"case": cases[0], "reason": "moved"}],
+    }), encoding="utf-8")
+    statuses = {"chk": "completed", "ref1": "running"}
+
+    def start(action, inputs):
+        return type("R", (), {"id": "ref1", "status": "starting"})
+
+    result = imports.finish_status_check(config, start, lambda i: statuses[i])
+    state = result["state"]
+    assert result["queued"][0]["kind"] == "sync-refresh"
+    assert state["phase1"]["status"] == "completed" and state["phase2"]["status"] == "running"
+    assert state["phase"] == "refreshing"
+    statuses["ref1"] = "completed"
+    state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
+    assert state["phase"] == "done" and state["phase2"]["status"] == "completed"
+    statuses["ref1"] = "stopped"
+    state = imports.status_sync_state(config)
+    state.update(phase="refreshing")
+    imports._write_sync_state(config, state)
+    state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
+    assert state["phase2"]["status"] == "failed"
+
+
+def test_sync_refresh_action_has_no_gate_and_spec_is_no_send():
+    assert categories.gate_ids("risk-issues", "sync-refresh", False) == []
+    assert categories.gate_ids("risk-issues", "refresh-case", False)
+    values = categories.validate("risk-issues", {"case_folder": "Case-wc-id-1"}, "sync-refresh")
+    prompt = categories.build_prompt("risk-issues", values, {}, "sync-refresh")
+    for text in ("PDF change summary", "INC was created", "never use the words Wiz detected",
+                 "recommended remediation approach", "print CSS footer", "send no email",
+                 "status update request", "refresh email"):
+        assert text in prompt
+    assert "Confidential -" not in prompt
 
 
 def test_status_check_without_result_fails_and_retries(env):  # noqa: F811
