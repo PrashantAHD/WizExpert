@@ -40,7 +40,22 @@ Wiz access by itself: your identity still needs the required Wiz permissions.
 Follow your client's policy if a different browser or authentication method is
 required.
 
-### First-time connection in VS Code
+### Preconfigured workspace server (default)
+
+This repository ships [`.vscode/mcp.json`](../.vscode/mcp.json), which registers
+the Wiz MCP server (`https://mcp.app.wiz.io`) for this workspace only. It holds
+no credentials. After cloning and opening the folder in VS Code:
+
+1. Sign in to your organization's SSO in your browser (see above).
+2. Run **Ctrl+Shift+P → MCP: List Servers → wiz → Start**, trust the server
+   and complete the Wiz sign-in with your own identity.
+
+Don't also add Wiz to your user/global MCP configuration; keeping it in the
+workspace limits Wiz tools to this project. If your administrator gives you a
+different endpoint, change it in your local copy of `.vscode/mcp.json` and
+don't commit that change.
+
+### Manual connection in VS Code (alternative)
 
 1. Press **Ctrl+Shift+P** to open the Command Palette.
 2. Run **MCP: Add Server**.
