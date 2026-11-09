@@ -105,6 +105,11 @@ such as author identities are not comprehensively classified. A passing guard
    every outgoing ref/history before publication. Verify again and manually
    review the rewritten history. Do not automatically force-push a cleanup.
 5. Only after explicit human approval perform the intended `git push`.
+6. After a pull request is merged into `main`, delete its head branch on the
+   remote and locally (`gh pr merge --delete-branch`, or `git push origin
+   --delete <branch>` plus `git branch -d <branch>`), then `git fetch --prune`.
+   Before deleting, confirm the branch has no commits missing from `main`; if
+   it does, open a new pull request for them first.
 
 ## Precisely what the optional audit sends
 
