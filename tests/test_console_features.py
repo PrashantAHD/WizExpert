@@ -1671,3 +1671,82 @@ def test_resumed_chat_drops_frozen_final_and_settle_checks_outputs(env):  # noqa
                                  "queued": [], "skipped": []})
     states = {s["id"]: s["state"] for s in run2.final["checklist"]}
     assert states["outputs"] == "completed"
+
+
+# -- Risk Issues delta auto-approval -----------------------------------------------------------
+
+
+def _case(config):
+    base = config.resolved_workspace() / config.output_roots[0] / "Risk-Issues" / "Auto-wc-id-9"
+    _touch(base / "evidence" / "raw.json")
+    return "Auto-wc-id-9"
+
+
+def test_risk_refresh_with_no_delta_is_not_triggered(env):  # noqa: F811
+    config, workspace, home = env
+    case = _case(config)
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    run = manager.start(
+        "risk-issues", {"case_folder": case}, "refresh-case",
+        delta={"changed": False, "reason": "no change"},
+    )
+    assert run.status == "not_started" and run.gates == []
+    assert "not triggered" in run.message
+    view = manager.view(run.id)
+    assert view["auto"]["triggered"] is False
+    assert view["decisions"][0]["auto"] is True
+    assert view["decisions"][0]["decision"] == "not-triggered"
+    assert manager.active() == []
+
+
+def test_risk_refresh_with_delta_auto_approves_both_gates(env):  # noqa: F811
+    config, workspace, home = env
+    case = _case(config)
+    bridge = Bridge("t" * 64)
+    manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
+    with FakeHelper(bridge, workspace, home) as helper:
+        run = manager.start(
+            "risk-issues", {"case_folder": case}, "refresh-case",
+            delta={"changed": True, "reason": "1 new issue"},
+        )
+        assert [g["state"] for g in run.gates] == ["approved", "pending"]
+        assert run.gates[0]["auto"] is True
+        assert run.decisions[0] == {**run.decisions[0], "gate": "collection-plan",
+                                    "decision": "approve", "auto": True, "reason": "1 new issue"}
+        stages = manager.view(run.id)["stages"]
+        assert stages[0]["lifecycle"] in ("started", "running")
+        assert stages[0]["mode"] == "auto-approved (change detected)"
+        append(
+            helper.events_path,
+            event("assistant.message", {"content": "Plan ready."}),
+            event("hook.end", {"hookType": "agentStop"}),
+        )
+        view = manager.view(run.id)  # completes and auto-approves generation
+        assert view["status"] == "completed"
+        child = manager.get(manager.get(run.id).child)
+    assert [g["state"] for g in child.gates] == ["approved", "approved"]
+    assert [d.get("auto") for d in child.decisions] == [True, True]
+    assert child.decisions[1]["gate"] == "generation"
+    assert child.decisions[1]["reason"] == "1 new issue"
+
+
+def test_other_workflows_stay_manual_even_with_delta(env):  # noqa: F811
+    config, workspace, home = env
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    run = manager.start(
+        "weekly-progress-reporting", {"reporting_monday": "2026-11-03"}, "new", gated=True,
+        delta={"changed": True, "reason": "x"},
+    )
+    assert run.status == "awaiting_gate" and run.auto == {}
+    assert [g["state"] for g in run.gates] == ["pending", "pending"]
+
+
+def test_case_delta_from_status_sync_state(env):  # noqa: F811
+    config, workspace, home = env
+    imports._write_sync_state(config, {
+        "phase": "refreshing", "checked_cases": ["A-wc-id-1", "B-wc-id-2"],
+        "changed": ["A-wc-id-1"], "reasons": {"A-wc-id-1": "status changed"},
+    })
+    assert imports.case_delta(config, "A-wc-id-1") == {"changed": True, "reason": "status changed"}
+    assert imports.case_delta(config, "B-wc-id-2") == {"changed": False, "reason": "no change"}
+    assert imports.case_delta(config, "C-wc-id-3") is None

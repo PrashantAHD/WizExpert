@@ -80,7 +80,14 @@ CATEGORY_DIRS: dict[str, str] = {
     "risk-issues": imports.RISK_DIR,
     "weekly": imports.WEEKLY_DIR,
     "monthly": imports.MONTHLY_DIR,
+    "daily": imports.DAILY_DIR,
+    "status-check": imports.STATUS_CHECK_DIR,
 }
+#: Flat categories: files sit directly in the category folder and the only folder name is fixed.
+FLAT_FOLDERS: dict[str, str] = {"status-check": "results"}
+#: Extra extensions per category (status-check results are small JSON files;
+#: evidence JSON stays hidden).
+EXTRA_EXTENSIONS: dict[str, frozenset[str]] = {"status-check": frozenset({".json"})}
 _NO_FOLDER = "No such deliverables folder."
 
 
@@ -89,6 +96,10 @@ def _category_folder(config: ConsoleConfig, category: str, folder: str) -> Path:
     base = imports._base(config, directory) if directory else None
     if base is None or not isinstance(folder, str):
         raise ValueError(_NO_FOLDER)
+    if category in FLAT_FOLDERS:
+        if folder != FLAT_FOLDERS[category] or base.is_symlink():
+            raise ValueError(_NO_FOLDER)
+        return base
     if category == "monthly":
         if not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", folder):
             raise ValueError(_NO_FOLDER)
@@ -99,6 +110,10 @@ def _category_folder(config: ConsoleConfig, category: str, folder: str) -> Path:
     if found is None or not found.is_dir() or (base / folder).is_symlink() or found == base:
         raise ValueError(_NO_FOLDER)
     return found
+
+
+def _allowed(category: str) -> frozenset[str]:
+    return ALLOWED_EXTENSIONS | EXTRA_EXTENSIONS.get(category, frozenset())
 
 
 def _case_folder(config: ConsoleConfig, case: str) -> Path:
@@ -114,7 +129,7 @@ def list_files(config: ConsoleConfig, category: str, folder_name: str) -> list[d
     out: list[dict[str, Any]] = []
     for entry in imports._children(folder, config):
         ext = entry.suffix.lower()
-        if not entry.is_file() or ext not in ALLOWED_EXTENSIONS:
+        if not entry.is_file() or ext not in _allowed(category):
             continue
         if category == "monthly" and imports.month_of(entry.name) != folder_name:
             continue
@@ -156,7 +171,7 @@ def resolve_file(config: ConsoleConfig, category: str, folder_name: str, name: s
         or is_denied(path.relative_to(workspace), config)
     ):
         raise ValueError("That file is not available.")
-    if path.suffix.lower() not in ALLOWED_EXTENSIONS:
+    if path.suffix.lower() not in _allowed(category):
         raise ValueError("That file type cannot be opened from the console.")
     if category == "monthly" and imports.month_of(path.name) != folder_name:
         raise ValueError("That file is not available.")
@@ -185,8 +200,10 @@ def open_relative(config: ConsoleConfig, relative: str) -> str:
         raise ValueError("Unsupported path.")
     parts = relative.split("/")
     root = Path(config.output_roots[0]).as_posix().split("/")
-    by_dir = {v: k for k, v in CATEGORY_DIRS.items()}
+    by_dir = {v: k for k, v in CATEGORY_DIRS.items() if k not in FLAT_FOLDERS}
     n = len(root)
+    if len(parts) == n + 2 and parts[:n] == root and parts[n] == imports.STATUS_CHECK_DIR:
+        return open_file(config, "status-check", "results", parts[-1])
     if len(parts) == n + 2 and parts[:n] == root and parts[n] == imports.MONTHLY_DIR:
         month = imports.month_of(parts[-1])  # flat monthly file
         return open_file(config, "monthly", month, parts[-1])
