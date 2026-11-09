@@ -12,6 +12,7 @@ const STATUS_TEXT = {
   starting: "Starting the chat in VS Code", running: "Running", input_needed: "Input needed in VS Code",
   completed: "Finished", stopped: "Stopped", not_started: "Did not start", interrupted: "Interrupted",
   handed_off: "Handed off \u2013 waiting for new chat", awaiting_gate: "Waiting for your approval", rejected: "Rejected",
+  incomplete: "Incomplete",
 };
 const TERMINAL = new Set(["completed", "stopped", "not_started", "interrupted", "rejected"]);
 const NEEDS_ATTENTION = new Set(["input_needed", "handed_off", "awaiting_gate"]);
@@ -63,6 +64,7 @@ function helperRecoveryMessage(error) {
 function when(t) { return t ? new Date(t * 1000).toLocaleTimeString() : ""; }
 const catTitle = (id) => { const c = state.categories.find((x) => x.id === id); return c ? c.title : id; };
 const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleString() : "");
+function effStatus(r) { return r && r.outcome === "incomplete" ? "incomplete" : (r ? r.status : ""); }
 function badge(status) { return h("span", { class: "badge " + status }, STATUS_TEXT[status] || status); }
 
 // ---- VS Code helper (sidebar) -----------------------------------------------------------------------
@@ -192,7 +194,7 @@ function clearDraft(categoryId, key) { saveDraft(categoryId, key, {}); }
 function activeRuns() {
   const list = (state.active || []).filter((r) => !TERMINAL.has(r.status) && r.id !== state.runId);
   if (state.runId && state.runStatus && !TERMINAL.has(state.runStatus)) {
-    list.unshift({ id: state.runId, status: state.runStatus, category_id: state.runCategory });
+    list.unshift({ id: state.runId, status: state.runStatus, category_id: state.runCategory, subject: state.runSubject });
   }
   return list;
 }
@@ -213,7 +215,7 @@ function updateIndicator() {
   const label = list.length === 1 ? "1 task running" : list.length + " tasks running";
   el.append(h("span", { class: "pulse", "aria-hidden": "true" }), label);
   el.setAttribute("href", runPath(list[0].id));
-  el.setAttribute("aria-label", label + ". Open " + (catTitle(list[0].category_id) || "the run") + " (" + (STATUS_TEXT[list[0].status] || list[0].status) + ")");
+  el.setAttribute("aria-label", label + ". Open " + (list[0].subject || catTitle(list[0].category_id) || "the run") + " (" + (STATUS_TEXT[effStatus(list[0])] || effStatus(list[0])) + ")");
 }
 function updateNav() {
   const here = state.view === "home" ? "/" : state.view === "dashboard" ? "/dashboard" : state.view === "progress" ? "/in-progress" : state.view === "history" ? "/history"
@@ -281,7 +283,7 @@ async function route() {
 // else from the server, no helper details and no form values ever enter this cache.
 const CACHE_KEY = "wizexpert.cache.v2";
 const CACHE_MAX_AGE = 24 * 3600 * 1000;
-const pickRun = (r) => ({ id: String(r.id), category_id: String(r.category_id), status: String(r.status), created: Number(r.created) || 0 });
+const pickRun = (r) => ({ id: String(r.id), category_id: String(r.category_id), status: String(r.status), outcome: r.outcome ? String(r.outcome) : "", created: Number(r.created) || 0 });
 function readCache() {
   try {
     const c = JSON.parse(sessionStorage.getItem(CACHE_KEY) || "null");
@@ -448,7 +450,7 @@ function runCard(r) {
   const attention = NEEDS_ATTENTION.has(r.status);
   return h("article", { class: "run-card" + (attention ? " attention" : "") },
     h("div", { class: "run-card-main" }, h("strong", {}, catTitle(r.category_id)), h("span", { class: "mono meta" }, r.id), h("span", { class: "meta" }, "Started " + fmtDate(r.created))),
-    badge(r.status),
+    badge(effStatus(r)),
     h("button", { type: "button", "aria-label": "Open run " + r.id, onclick: () => go(runPath(r.id)) }, "Open"));
 }
 function runTable(rows) {
@@ -456,7 +458,7 @@ function runTable(rows) {
     h("caption", { class: "sr-only" }, "Runs"),
     h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Workflow"), h("th", { scope: "col" }, "Run"), h("th", { scope: "col" }, "Status"), h("th", { scope: "col" }, "Started"), h("th", { scope: "col" }, h("span", { class: "sr-only" }, "Open")))),
     h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, catTitle(r.category_id)), h("td", { class: "mono" }, r.id),
-      h("td", {}, badge(r.status)), h("td", {}, fmtDate(r.created)),
+      h("td", {}, badge(effStatus(r))), h("td", {}, fmtDate(r.created)),
       h("td", { class: "right" }, h("button", { class: "secondary small", type: "button", "aria-label": "Open run " + r.id, onclick: () => go(runPath(r.id)) }, "Open")))))));
 }
 
@@ -538,13 +540,13 @@ function notificationBar() {
   for (const run of runs) {
     if (seen.has(run.id)) continue;
     seen.add(run.id);
-    const key = "run:" + run.id + ":" + run.status;
+    const key = "run:" + run.id + ":" + effStatus(run);
     if (cleared.has(key)) continue;
-    const status = STATUS_TEXT[run.status] || run.status;
+    const status = STATUS_TEXT[effStatus(run)] || effStatus(run);
     const meta = [fmtDate(run.created), run.id].filter(Boolean).join(" \u00b7 ");
     events.push(notificationRow(runPath(run.id), catTitle(run.category_id),
       runContext(run), status, meta,
-      catTitle(run.category_id) + (run.action_title ? " \u2013 " + run.action_title : "") + ", " + status + ", run " + run.id, key));
+      catTitle(run.category_id) + (run.action_title ? " \u2013 " + run.action_title : "") + (run.subject ? " \u2013 " + run.subject : "") + ", " + status + ", run " + run.id, key));
   }
   const count = events.filter((e) => e.dataset.unread === "true").length;
   return { events, count };
@@ -940,7 +942,7 @@ function renderCategoryActivity() {
   mount(box, JSON.stringify([id, runs, live, state.loaded, state.refreshError]), (b) => {
     b.append(h("h2", {}, "Previous runs"));
     for (const r of live) {
-      b.append(h("div", { class: "live-card", role: "status" }, h("strong", {}, "Running now"), badge(r.status),
+      b.append(h("div", { class: "live-card", role: "status" }, h("strong", {}, "Running now"), badge(effStatus(r)),
         h("button", { type: "button", onclick: () => go(runPath(r.id)) }, "Open running task")));
     }
     if (!state.loaded && !live.length) { dataGate(b); return; }
@@ -949,7 +951,7 @@ function renderCategoryActivity() {
       return;
     }
     b.append(h("ul", { class: "run-list" }, runs.map((r) => h("li", {},
-      h("div", {}, badge(r.status), h("span", { class: "meta" }, fmtDate(r.created))),
+      h("div", {}, badge(effStatus(r)), h("span", { class: "meta" }, fmtDate(r.created))),
       h("button", { class: "secondary small", type: "button", "aria-label": "Open run " + r.id, onclick: () => go(runPath(r.id)) }, "Open")))));
   });
 }
@@ -1367,7 +1369,7 @@ async function focusVsCode(run) {
 function approvalBanner(run) {
   if (!run.waiting_approval) return null;
   return h("div", { class: "wait-banner", role: "status" },
-    h("strong", {}, "Waiting for approval in VS Code"),
+    h("strong", {}, "Waiting for approval in VS Code" + (run.subject ? " \u2013 " + run.subject : "")),
     h("span", {}, run.waiting_reason === "stalled"
       ? " The chat has been silent with a tool call open, so a confirmation prompt is probably waiting."
       : " A tool call needs your confirmation."),
@@ -1542,11 +1544,18 @@ async function poll() {
     banner("Lost contact with the console: " + e.message); state.timer = setTimeout(poll, 4000);
   }
 }
+function checklistBlock(run) {
+  if (!run.checklist || !run.checklist.length) return null;
+  if (!(TERMINAL.has(run.status) || run.outcome === "incomplete")) return null;
+  const items = run.checklist.map((s) => h("li", {}, h("strong", {}, s.label), " \u2013 " + s.state + (s.detail ? " \u2013 " + s.detail : "")));
+  return h("section", { class: "card checklist", "aria-label": "End-of-run checklist" }, h("h2", {}, "Checklist"), h("ul", { class: "gate-list" }, ...items));
+}
+
 function renderRun(run) {
-  state.runStatus = run.status; state.runCategory = run.category_id || run.category;
+  state.runStatus = run.status; state.runCategory = run.category_id || run.category; state.runSubject = run.subject || "";
   updateIndicator();
   // Rebuild only when something changed, so button messages and scroll position survive polling.
-  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output, run.waiting_approval, run.gates, run.child]);
+  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output, run.waiting_approval, run.gates, run.child, run.checklist, run.outcome]);
   if (sig === state.shown) return;
   const first = !state.shown;
   state.shown = sig;
@@ -1564,8 +1573,8 @@ function renderRun(run) {
   toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go("/history") }, "All history"));
   root.append(runCrumbs(run), h("header", { class: "page-head" },
     h("h1", { class: "route-heading", tabindex: "-1" }, run.category),
-    h("p", { class: "status-line", role: "status" }, badge(run.status), h("span", {}, run.message))), toolbar);
-  for (const extra of [approvalBanner(run), gatesBlock(run)]) if (extra) root.append(extra);
+    h("p", { class: "status-line", role: "status" }, badge(run.outcome === "incomplete" ? "incomplete" : run.status), h("span", {}, (run.subject && !TERMINAL.has(run.status) ? run.subject + ": " : "") + run.message))), toolbar);
+  for (const extra of [approvalBanner(run), gatesBlock(run), checklistBlock(run)]) if (extra) root.append(extra);
   if (run.category_id === "weekly-progress-reporting" && run.status === "completed") {
     toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(run.category_id, "previous")) }, "Week-over-week diff"));
   }

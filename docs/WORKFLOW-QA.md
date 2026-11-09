@@ -66,6 +66,8 @@ refused starts are recorded as skipped. GET of the sync endpoint is read-only; o
 state (under a lock). Failed checks back off to the configured interval. Follow-up: resolved cases
 are not rechecked for reopening.
 
+**End-of-run checklist (rule).** Every console run ends with a checklist whose steps are `completed`, `skipped`, `blocked` or `not_applicable`. For Sync the read-only status check comes first, then a gated Refresh is queued for every changed case, one at a time. A changed case with no queued or started Refresh (waiting, skipped, refused or failed check) makes the outcome `incomplete`; it must not appear as a successful completed run.
+
 Record each such request in the optional top-level review field `owner_changes`
 (missing means none). Values below are illustrative only:
 
