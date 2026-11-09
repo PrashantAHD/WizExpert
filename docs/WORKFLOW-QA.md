@@ -61,8 +61,20 @@ private config `status_sync_assignee`, never the public repo; refuse if unset). 
 Wiz status read-only, compares with each case's latest retained evidence, writes nothing to case
 deliverables or evidence, changes nothing in Wiz/ServiceNow/cloud, sends no email, and saves only
 `deliverables/Status-Check/<token>.json` (`checked`, `changed[{case, reason}]`). Only changed
-cases then get a gated Refresh queued, one at a time; guard-blocked ones stay pending, other
-refused starts are recorded as skipped. GET of the sync endpoint is read-only; only POST advances
+cases then get an automatic Refresh run (`sync-refresh`, **no approval gate**, queued one at a time; guard-blocked ones stay pending, other
+refused starts are recorded as skipped). Sync records two phases in its state, each with `started`/`running`/`completed`/`failed`
+(plus timestamps and error): `phase1` (status check) and `phase2` (Refresh plus deliverable regeneration; closes only when every queued run is terminal).
+Both are shown in the console. The ungated Refresh still makes no Wiz/ServiceNow/cloud change and sends no email (drafts only); the manual `refresh-case` action stays gated.
+Every sync Refresh must also save a **PDF change summary**: what changed since the previous reporting, including when the INC was created
+and when it was communicated by email (never "Wiz detected" wording), the risk descriptions and the recommended remediation approach.
+The confidentiality footer is injected from private config/templates as a print-CSS footer on every page, and the in-page footer is hidden in print.
+The client name and footer text never enter the public repo.
+Risk Issues email lifecycle (templates in `templates/risk-issues/`, one slot and file name per stage; validators run per slot):
+(1) `stakeholder-email` -> `{rule}-Email-1-InitialStakeholder.html` when work starts on a wiz-issue-id;
+(2) `stakeholder-status-request-email` -> `{rule}-Email-2-StatusUpdateRequest.html`, asking for a status update on the previously shared communication;
+(3) `stakeholder-refresh-email` -> `{rule}-Email-3-Refresh.html` for newly identified findings, asking which remediation approach they want to follow or for approval for AHEAD to make the change using the approved approach, and offering assistance;
+(4) `internal-follow-up-email` -> `{rule}-Email-4-FollowUpResponse.html`, the unchanged follow-up response flow (takes their reply, drafts a reply email, stores it for other workflows).
+All are local HTML drafts, never sent. GET of the sync endpoint is read-only; only POST advances
 state (under a lock). Failed checks back off to the configured interval. Follow-up: resolved cases
 are not rechecked for reopening.
 

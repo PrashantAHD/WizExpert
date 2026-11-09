@@ -686,6 +686,9 @@ def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> 
         except (StartRefused, ValueError):  # an unknown run ends the check
             status = "not_started"
         if status in _RUN_ACTIVE:
+            if state.get("phase1", {}).get("status") != "running":
+                _set_phase(state, "phase1", "running")
+                _write_sync_state(config, state)
             return {"state": state, "queued": queued}
         result = (
             _read_status_result(config, state.get("result_name", ""), state.get("cases", []))
@@ -694,6 +697,8 @@ def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> 
         if result is None:
             state.update(phase="failed", error="The Wiz status check did not produce a result; "
                          "nothing was refreshed. Sync again to retry.")
+            _set_phase(state, "phase1", "failed", state["error"])
+            _set_phase(state, "phase2", "not_started")
         else:
             state.update(
                 phase="refreshing", checked=len(result["checked"]),
@@ -701,12 +706,13 @@ def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> 
                 reasons={c["case"]: c["reason"] for c in result["changed"]},
                 pending=[c["case"] for c in result["changed"]],
             )
+            _set_phase(state, "phase1", "completed")
     if state.get("phase") == "refreshing":
         pending = list(state.get("pending", []))
         while pending:
             case = pending[0]
             try:
-                run = start("refresh-case", {"case_folder": case})
+                run = start("sync-refresh", {"case_folder": case})
             except StartBlocked:
                 break  # transient (active-run guard): keep pending, retry on the next POST
             except (StartRefused, ValueError) as error:
@@ -716,22 +722,59 @@ def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> 
                 )
                 continue
             item = {"case": pending.pop(0), "run_id": run.id, "status": run.status,
-                    "kind": "refresh-case"}
+                    "kind": "sync-refresh"}
             queued.append(item)
             state.setdefault("queued", []).append(item)
-            break  # one gated Refresh at a time; the rest follow on later calls
+            break  # one Refresh run at a time (active-run guard); the rest follow on later calls
         state["pending"] = pending
+        if state.get("changed") and not state.get("phase2"):
+            _set_phase(state, "phase2", "started")
         if not pending:
-            state["phase"] = "done"
+            _settle_refresh_phase(state, run_status)
     if state.get("phase") in ("failed", "refreshing", "done"):
         _write_sync_state(config, state)
     return {"state": state, "queued": queued}
 
 
+def _set_phase(state: dict[str, Any], key: str, status: str, error: str = "") -> None:
+    """Record a sync phase as started/running/completed/failed (plus timestamps and error)."""
+    now = time.time()
+    phase = dict(state.get(key) or {})
+    phase.setdefault("started_at", now)
+    phase["status"] = status
+    if status in ("completed", "failed"):
+        phase["finished_at"] = now
+    if error:
+        phase["error"] = error[:300]
+    state[key] = phase
+
+
+def _settle_refresh_phase(state: dict[str, Any], run_status: Any) -> None:
+    """Close the Refresh phase once every queued run reached a terminal state."""
+    statuses = []
+    for item in state.get("queued", []):
+        try:
+            statuses.append(run_status(item.get("run_id", "")))
+        except (StartRefused, ValueError):
+            statuses.append("not_started")
+    if any(s in _RUN_ACTIVE for s in statuses):
+        _set_phase(state, "phase2", "running")
+        return
+    failed = [s for s in statuses if s != "completed"] or state.get("skipped")
+    state["phase"] = "done"
+    if not state.get("changed"):
+        _set_phase(state, "phase2", "completed")
+    elif failed:
+        _set_phase(state, "phase2", "failed", "One or more Refresh runs did not complete.")
+    else:
+        _set_phase(state, "phase2", "completed")
+
+
 def run_status_sync(
     config: ConsoleConfig, start: Any, *, force: bool = False, run_status: Any = None
 ) -> dict[str, Any]:
-    """Start ONE read-only Wiz status check run; Refresh is queued later for changed cases.
+    """Start ONE read-only Wiz status check run (phase 1); changed cases then get an automatic,
+    ungated Refresh run (phase 2). Both phases record started/running/completed/failed.
 
     ``start(action_id, inputs)`` returns a run-like object (``id``, ``status``) or raises (for
     example the one-active-run guard); ``run_status(run_id)`` returns a run's status. The sync
@@ -762,7 +805,11 @@ def _run_status_sync(
         )
     candidates = eligible_sync_cases(config)
     if not candidates:
-        state = mark_status_sync_started(config, [], phase="done", checked=0, changed=[])
+        state = mark_status_sync_started(
+            config, [], phase="done", checked=0, changed=[],
+            phase1={"status": "completed", "started_at": time.time(), "finished_at": time.time()},
+            phase2={"status": "completed", "started_at": time.time(), "finished_at": time.time()},
+        )
         return {"started": [], "skipped": [], "state": state}
     token = "sc-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(3).hex()
     try:
@@ -780,7 +827,10 @@ def _run_status_sync(
         state = _write_sync_state(
             config,
             {"last_started": time.time(), "cases": [], "mode": "status-check",
-             "phase": "failed", "error": reason},
+             "phase": "failed", "error": reason,
+             "phase1": {"status": "failed", "started_at": time.time(),
+                        "finished_at": time.time(), "error": reason},
+             "phase2": {"status": "not_started"}},
         )
         return {
             "started": advanced_started,
@@ -788,7 +838,8 @@ def _run_status_sync(
             "state": state,
         }
     state = mark_status_sync_started(
-        config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token
+        config, candidates[:40], phase="checking", check_run_id=run.id, result_name=token,
+        phase1={"status": "started", "started_at": time.time()},
     )
     item = {"case": "Read-only Wiz status check", "run_id": run.id, "status": run.status,
             "kind": "status-check"}
