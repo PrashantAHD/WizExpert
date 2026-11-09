@@ -41,3 +41,6 @@ reports/
 uploads/
 backups/
 instance/
+
+# Shared workspace MCP config (no secrets; users sign in via Wiz SSO)
+!.vscode/mcp.json
