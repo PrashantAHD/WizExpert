@@ -554,6 +554,7 @@ CATEGORIES: dict[str, Category] = {
         stages=(("new", "New Issue"), ("in-progress", "In-Progress")),
         actions=DAILY_ACTIONS,
         work_items=("PHP2SHELL Campaign",),
+        imports="daily",
     ),
     "weekly-progress-reporting": Category(
         "weekly-progress-reporting",

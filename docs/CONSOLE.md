@@ -141,12 +141,23 @@ only names, dates and counts are returned (plus the small `weekly-progress-data.
 Deliverables panel below (`.pdf .pptx .docx .xlsx .html .eml .msg .md .csv .txt` and images only,
 confined to `deliverables`).
 
-**Deliverables button (every category view: Risk Issues, Weekly, Monthly):** one shared
+**Deliverables button (every category view: Risk Issues, Daily, Weekly, Monthly):** one shared
 component replaces all per-file *View* buttons (the UI renders none; a guard test enforces it).
 It opens a panel listing the folder's direct files (name, type, modified time; `evidence`/archives,
 secrets and unsupported types are never listed) via
-`GET /api/imports/files?category=<risk-issues|weekly|monthly>&folder=<case|report folder|YYYY-MM>`
-(Monthly files are flat, so its folder is the month). **Open**
+`GET /api/imports/files?category=<risk-issues|daily|weekly|monthly>&folder=<case|campaign|report folder|YYYY-MM>`
+(Daily campaigns are listed by `GET /api/imports/daily`, read-only, dot-folders skipped; a test
+enforces that every category with `imports` has a `launcher.CATEGORY_DIRS` entry.)
+**Status-Check results:** category `status-check`, fixed folder `results` (flat `deliverables/Status-Check`;
+the read-only status-check run's small `.json` result files are additionally allowed for this category
+only; evidence/archives stay hidden). The button sits under the sync phases panel. Email drafts,
+follow-ups, replies, change summaries and update-deliverables outputs are direct files in the case
+folder (`inputs/` and `archives/` sub-folders are intentionally not listed). A test
+(`test_console_deliverables.py`) enforces a CATEGORY_DIRS entry plus an app.js button for every generated location.
+(Monthly files are flat, so its folder is the month). The **run detail page** shows the same
+button for the exact folder that run produced: the server resolves `deliverables`
+`{category, folder, reason}` in the run view (from the run's case/report/month input, else from
+the files it wrote); with no folder yet the button is disabled with "No files generated yet". **Open**
 calls `POST /api/imports/files/open` (`{category, folder, name, with?}`), which re-resolves the name
 inside that one folder (no traversal, symlinks or sub-paths) and launches the local app
 directly (no shell, argument list): PDF/HTML -> Chrome, xlsx/xls/csv -> Excel, pptx/ppt ->
@@ -503,3 +514,20 @@ rebinds or times out; it never waits silently.
 
 `python -m pytest tests/test_console_*.py` uses fake session-state folders, a fake helper
 poll and a loopback HTTP server; no VS Code, Wiz or agent run is needed.
+
+
+## Risk Issues delta auto-approval (owner-approved, persistent rule)
+
+Applies to the Risk Issues workflow only (console Refresh, Approvals card with the
+Collection plan and Generation stages); PHP2Shell, governance and weekly keep manual approval.
+
+- A scan/Refresh that detects any delta versus retained evidence (new, resolved or
+  status-changed issues) auto-approves both stages; the run proceeds and hands off to the next
+  VS Code chat exactly as a manual approval does.
+- No delta: refresh and generation are not triggered; no approve buttons; the run records
+  "no change - not triggered".
+- The Approvals card shows each stage's lifecycle (started / running / completed / stopped /
+  failed, with timestamp) and whether it was "auto-approved (change detected)" or manual.
+- The audit record (run decisions) is identical to a manual approval plus `auto: true` and the
+  delta summary `reason`. If auto-approval cannot start, the gate stays pending for manual approval.
+- Never sends email, mutates Wiz/ServiceNow, commits or pushes.

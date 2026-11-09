@@ -60,6 +60,18 @@ class RunBusyError(RunError, imports.StartBlocked):
     queued work that hits it is retried later."""
 
 
+_STAGE_STATE = {
+    "starting": "started", "running": "running", "input_needed": "running",
+    "handed_off": "running", "completed": "completed", "stopped": "stopped",
+    "interrupted": "stopped", "not_started": "failed",
+}
+
+
+def _delta_reason(delta: dict[str, Any] | None) -> str:
+    text = str((delta or {}).get("reason") or "").strip()
+    return (text or "change detected versus retained evidence")[:200]
+
+
 @dataclass
 class Run:
     id: str
@@ -86,6 +98,7 @@ class Run:
     child: str = ""  # run started by the last approved gate
     action_id: str = ""  # canonical action id ("" for runs saved before this field existed)
     final: dict[str, Any] | None = None  # frozen end-of-run checklist/outcome (None = not frozen)
+    auto: dict[str, Any] = field(default_factory=dict)  # Risk Issues delta auto-approval record
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -146,7 +159,9 @@ class RunManager:
                 run.decisions = [d for d in item.get("decisions", []) if isinstance(d, dict)][:20]
                 run.parent = str(item.get("parent") or "")
                 run.child = str(item.get("child") or "")
-                final = item.get("final")
+                auto = item.get("auto")
+                run.auto = dict(auto) if isinstance(auto, dict) else {}
+                final =  item.get("final")
                 if (
                     isinstance(final, dict)
                     and isinstance(final.get("checklist"), list)
@@ -290,6 +305,7 @@ class RunManager:
                 "child": r.child,
                 "action_id": r.action_id,
                 "final": r.final,
+                "auto": r.auto,
             }
             for r in items
         ]
@@ -362,7 +378,11 @@ class RunManager:
         action_id: str | None = None,
         ensure_helper: Callable[[], bool] | None = None,
         gated: bool = False,
+        delta: dict[str, Any] | None = None,
     ) -> Run:
+        """Start a run. ``delta`` ({"changed": bool, "reason": str}) is the scan result against
+        retained evidence and only applies to the Risk Issues workflow's gated runs: a change
+        auto-approves both gates, no change does not trigger the run at all."""
         action_id = categories.canonical_action(action_id)
         try:
             values = categories.validate(category_id, raw, action_id)
@@ -374,6 +394,21 @@ class RunManager:
             raise RunError(str(error)) from None
         self._check_sources(values, action_id)
         if gate_list:
+            auto_scope = category_id == "risk-issues" and isinstance(delta, dict)
+            if auto_scope and not delta.get("changed"):
+                with self._lock:
+                    run = Run(self._new_id(), category_id, values, prompt, self._clock())
+                    run.action_id = action_id or categories.CATEGORIES[category_id].default_action
+                    run.status = "not_started"
+                    run.message = "No change - not triggered."
+                    reason = _delta_reason(delta)
+                    run.auto = {"changed": False, "reason": reason, "triggered": False}
+                    run.decisions.append({"gate": "scan", "decision": "not-triggered",
+                                          "auto": True, "reason": reason,
+                                          "at": run.created})
+                    self._runs[run.id] = run
+                    self._save()
+                return run
             self._refuse_if_starting(category_id)
             with self._lock:
                 self._refuse_if_starting(category_id)
@@ -385,8 +420,16 @@ class RunManager:
                 run.gates = [
                     {"id": g, "label": labels[g], "state": "pending", "at": 0.0} for g in gate_list
                 ]
+                if auto_scope:
+                    run.auto = {"changed": True, "reason": _delta_reason(delta), "triggered": True}
                 self._runs[run.id] = run
                 self._save()
+            if auto_scope:  # change detected: approve the collection plan without a click
+                try:
+                    self.decide_gate(run.id, gate_list[0], "approve", ensure_helper, auto=run.auto)
+                except RunError as error:
+                    run.message = f"Auto-approval could not start: {error}"
+                    self._save()
             return run
         workspace = str(self.config.resolved_workspace())
         self._refuse_if_starting(category_id)
@@ -609,6 +652,7 @@ class RunManager:
             "pending": None,
             "summary": "",
             "files": [],
+            "deliverables": run_deliverables(self.config, run, []),
             "can_open_chat": False,
             "can_stop": False,
             "can_open_output": False,
@@ -665,6 +709,7 @@ class RunManager:
                 else None
             )
             data["files"] = self._files(run, sv, status)
+            data["deliverables"] = run_deliverables(self.config, run, data["files"])
             data["can_open_chat"] = bool(ahp)
             data["can_stop"] = status not in INACTIVE
             data["can_open_output"] = status == "completed" and bool(data["files"])
@@ -675,6 +720,9 @@ class RunManager:
                     data["waiting_approval"], data["waiting_reason"] = True, "stalled"
                 data["can_focus"] = True
         data["status"] = status
+        data["auto"] = dict(run.auto)
+        data["stages"] = self._stages(run, status)
+        self._auto_advance(run, status)
         sync = self._sync_for(run)
         frozen = run.final if status in INACTIVE else None
         if frozen is not None:  # an ended run keeps the result it finished with
@@ -695,6 +743,47 @@ class RunManager:
                 reason or "changed cases have no queued Refresh yet (see checklist)."
             )
         return data
+
+    def _stages(self, run: Run, status: str) -> list[dict[str, Any]]:
+        """Lifecycle of each approval stage: started/running/completed/stopped/failed."""
+        out: list[dict[str, Any]] = []
+        approved = [g for g in run.gates if g.get("state") == "approved"]
+        current = approved[-1] if approved else None
+        for g in run.gates:
+            if g.get("state") == "approved" and g is not current:
+                lifecycle = "completed"  # a later stage only starts after this one finished
+            elif g is current:
+                lifecycle = _STAGE_STATE.get(status, "started")
+                with run.lock:
+                    if g.get("stage_state") != lifecycle:
+                        g["stage_state"], g["stage_at"] = lifecycle, self._clock()
+                        self._save()
+            else:
+                lifecycle = {"rejected": "stopped"}.get(g.get("state", ""), "")
+            at = g.get("stage_at") if g is current else g.get("at", 0.0)
+            out.append({
+                "id": g["id"], "label": g.get("label", g["id"]), "gate_state": g.get("state"),
+                "lifecycle": lifecycle, "at": at or 0.0, "auto": bool(g.get("auto")),
+                "mode": "auto-approved (change detected)" if g.get("auto") else
+                "manual" if g.get("state") in ("approved", "rejected") else "",
+            })
+        return out
+
+    def _auto_advance(self, run: Run, status: str) -> None:
+        """Auto-approve the next gate once an auto-approved stage completed (Risk Issues)."""
+        auto = run.auto
+        if not (auto.get("triggered") and status == "completed") or run.child:
+            return
+        nxt = next((g for g in run.gates if g["state"] == "pending"), None)
+        if nxt is None or auto.get("advance_tried") == nxt["id"]:
+            return
+        with run.lock:
+            auto["advance_tried"] = nxt["id"]  # one attempt per gate; a failure stays manual
+            self._save()
+        try:
+            self.decide_gate(run.id, nxt["id"], "approve", None, auto=auto)
+        except RunError as error:
+            run.message = f"Auto-approval could not start: {error}"
 
     def settle_status_check(self, sync: dict[str, Any]) -> None:
         """Freeze an ended status-check run's result as soon as its sync settles, so a later
@@ -851,8 +940,12 @@ class RunManager:
         gate: str,
         decision: str,
         ensure_helper: Callable[[], bool] | None = None,
+        auto: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Approve or reject the next gate; approval hands that stage's prompt to the agent.
+
+        ``auto`` marks an automatic approval (Risk Issues, change detected); the record is the
+        same as a manual one plus ``auto`` and the delta ``reason``.
 
         The decision is recorded in the run record. The first gate approves the run itself (it
         starts its chat); later gates start a follow-up run (a new chat) once the earlier stage
@@ -878,7 +971,11 @@ class RunManager:
             now = self._clock()
             target["state"] = "approved" if decision == "approve" else "rejected"
             target["at"] = now
-            run.decisions.append({"gate": gate, "decision": decision, "at": now})
+            record: dict[str, Any] = {"gate": gate, "decision": decision, "at": now}
+            if auto:
+                target["auto"] = True
+                record.update(auto=True, reason=str(auto.get("reason", ""))[:200])
+            run.decisions.append(record)
             if decision == "reject":
                 for g in pending[1:]:
                     g["state"] = "skipped"
@@ -904,6 +1001,7 @@ class RunManager:
         child.decisions = [dict(d) for d in run.decisions]
         child.parent = run.id
         child.action_id = run.action_id
+        child.auto = dict(run.auto)
         with self._lock:
             self._runs[child.id] = child
             run.child = child.id
@@ -920,6 +1018,7 @@ class RunManager:
     def _undo_gate(self, run: Run, gate: dict[str, Any]) -> None:
         with run.lock:
             gate["state"], gate["at"] = "pending", 0.0
+            gate.pop("auto", None)
             if run.decisions:
                 run.decisions.pop()
             self._save()
@@ -1298,6 +1397,59 @@ def run_subject(r: Run) -> str:
         text = shown + (f" (+{more} more)" if more > 0 else "")
         return text if len(text) <= SUBJECT_MAX else text[: SUBJECT_MAX - 3].rstrip() + "..."
     return ""
+
+
+_DELIVERABLE_CATEGORY = {
+    "risk-issues": "risk-issues",
+    "daily-progress-reporting": "daily",
+    "weekly-progress-reporting": "weekly",
+    "monthly-governance-reporting": "monthly",
+}
+_NO_FILES = "No files generated yet"
+
+
+def run_deliverables(
+    config: ConsoleConfig, run: Run, files: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Resolve the output folder this run produced: {category, folder, reason}.
+
+    ``folder`` is empty (with a ``reason``) when nothing can be opened yet. Inputs (case,
+    report folder, month) win; otherwise the folder is taken from the files the run wrote.
+    """
+    from . import launcher
+
+    category = _DELIVERABLE_CATEGORY.get(run.category_id, "")
+    out: dict[str, Any] = {"category": category, "folder": "", "reason": _NO_FILES}
+    if not category or category not in launcher.CATEGORY_DIRS:
+        return out
+    values = run.values or {}
+    candidates: list[str] = []
+    if category == "risk-issues":
+        candidates += [values.get("case_folder") or ""]
+        candidates += [c for c in re.split(r"[,\s]+", values.get("case_list") or "") if c][:1]
+    elif category == "weekly":
+        candidates += [values.get("report_folder") or ""]
+    elif category == "monthly":
+        candidates += [values.get("month") or ""]
+    directory = launcher.CATEGORY_DIRS[category]
+    for f in files:
+        parts = str(f.get("location") or "").split("/")
+        if directory in parts:
+            i = parts.index(directory)
+            if category == "monthly":
+                candidates.append(imports.month_of(str(f.get("name") or "")) or "")
+            elif i + 1 < len(parts):
+                candidates.append(parts[i + 1])
+    for cand in candidates:
+        name = cand.strip().replace("\\", "/").rstrip("/").split("/")[-1] if cand else ""
+        if not name:
+            continue
+        try:
+            launcher._category_folder(config, category, name)
+        except ValueError:
+            continue
+        return {"category": category, "folder": name, "reason": ""}
+    return out
 
 
 def _brief(r: Run, outcome: str = "") -> dict[str, Any]:
