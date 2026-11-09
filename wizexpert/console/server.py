@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import imports, launcher, sessions, stakeholder
+from . import categories, imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import (
     MAX_PHOTO_BYTES,
@@ -587,6 +587,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     HTTPStatus.OK,
                     {"responses": stakeholder.list_responses(config, arg("work_item"))},
                 )
+            if path == "/api/imports/daily":
+                return self._json(HTTPStatus.OK, {"campaigns": imports.scan_daily(config)})
             if path == "/api/imports/weekly":
                 return self._json(HTTPStatus.OK, {"reports": imports.scan_weekly(config)})
             if path == "/api/imports/monthly":
@@ -621,12 +623,18 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
+            delta = None
+            if category == "risk-issues" and categories.canonical_action(action) == "refresh-case":
+                case = inputs.get("case_folder")
+                if isinstance(case, str):
+                    delta = imports.case_delta(self.app.config, case)
             run = manager.start(
                 category,
                 inputs,
                 action,
                 ensure_helper=ensure_helper,
                 gated=body.get("gated") is True,
+                delta=delta,
             )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
         if path == "/api/imports/risk-issues/sync":

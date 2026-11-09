@@ -26,6 +26,7 @@ from .sessions import DELIVERABLE_EXTENSIONS, confine, is_denied
 RISK_DIR = "Risk-Issues"
 WEEKLY_DIR = "Weekly-Progress-Reporting"
 MONTHLY_DIR = "Monthly-Governance-Reporting"
+DAILY_DIR = "Daily-Progress-Reporting"
 MAX_ITEMS = 100
 MAX_JSON_BYTES = 5 * 1024 * 1024
 VIEWABLE = frozenset({*DELIVERABLE_EXTENSIONS, ".txt"})
@@ -630,6 +631,22 @@ STATUS_CHECK_DIR = "Status-Check"
 _RUN_ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
 
 
+def case_delta(config: ConsoleConfig, case: str) -> dict[str, Any] | None:
+    """Delta of a case from the latest read-only status check, or None if it was not checked.
+
+    {"changed": bool, "reason": str}; used to auto-approve (change) or skip (no change) a
+    Risk Issues Refresh.
+    """
+    state = status_sync_state(config)
+    if state.get("phase") not in ("refreshing", "done") or case not in (
+        state.get("checked_cases") or []
+    ):
+        return None
+    changed = case in (state.get("changed") or [])
+    reason = str((state.get("reasons") or {}).get(case, "")) if changed else "no change"
+    return {"changed": changed, "reason": reason}
+
+
 def eligible_sync_cases(config: ConsoleConfig) -> list[str]:
     """Open, non-legacy cases with retained evidence and issue IDs (assignee is checked in Wiz)."""
     return [
@@ -706,6 +723,7 @@ def _finish_status_check(
         else:
             state.update(
                 phase="refreshing", checked=len(result["checked"]),
+                checked_cases=list(result["checked"]),
                 changed=[c["case"] for c in result["changed"]],
                 reasons={c["case"]: c["reason"] for c in result["changed"]},
                 pending=[c["case"] for c in result["changed"]],
@@ -935,6 +953,22 @@ def scan_weekly(config: ConsoleConfig) -> list[dict[str, Any]]:
     for index, report in enumerate(reports):
         report["latest"] = index == 0
     return reports
+
+
+def scan_daily(config: ConsoleConfig) -> list[dict[str, Any]]:
+    """Daily campaign folders (read-only; dot-folders skipped), newest modified first."""
+    base = _base(config, DAILY_DIR)
+    if base is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for folder in _children(base, config):
+        if folder.name.startswith(".") or not folder.is_dir():
+            continue
+        if folder.is_symlink() or not SAFE_NAME.fullmatch(folder.name):
+            continue
+        out.append({"name": folder.name, "modified": _mtime(folder)})
+    out.sort(key=lambda r: r["modified"], reverse=True)
+    return out[:MAX_ITEMS]
 
 
 def latest_weekly(config: ConsoleConfig) -> dict[str, Any] | None:

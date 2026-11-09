@@ -783,46 +783,60 @@ def test_more_than_one_hundred_finding_pages_complete_in_numeric_order(tmp_path)
     assert first == [f"a{i:03d}" for i in range(40)]
 
 
-def test_repeated_or_empty_cursors_and_empty_pages_are_refused(tmp_path):
+def _save_finding(cfg, directory, params, page, seconds):
+    return campaign.save(
+        cfg, directory, "list_vulnerability_findings", params, page, now=at(seconds=seconds)
+    )
+
+
+def _assert_aborted(cfg, directory):
+    nxt = campaign.next_call(cfg, directory, now=at(seconds=50))
+    assert nxt["action"] == "abort_invalid_pagination"
+    assert nxt["aborted"] is True
+    assert "INCOMPLETE/ABORTED" in nxt["reason"]
+    assert nxt["action"] != "assemble"
+    with pytest.raises(ValueError, match="INCOMPLETE/ABORTED"):
+        campaign.assemble(cfg, directory, Path(directory).parent / "m.json")
+    with pytest.raises(ValueError, match="INCOMPLETE/ABORTED"):
+        _save_finding(
+            cfg, directory, finding_params(), finding_page([("a9", "OPEN")], False, "c9"), 51
+        )
+
+
+def test_repeated_or_empty_cursors_and_empty_pages_abort_the_run(tmp_path):
     cfg = config()
-    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
-    for cursor in (None, ""):
+    for number, cursor in enumerate((None, "")):
+        directory = campaign.start(cfg, tmp_path, now=at(minutes=number))["dir"]
         page = finding_page([("a1", "OPEN")], True, cursor)
         with pytest.raises(ValueError, match="endCursor"):
-            campaign.save(
-                cfg,
-                directory,
-                "list_vulnerability_findings",
-                finding_params(),
-                page,
-                now=at(seconds=1),
-            )
-    # Refused saves count toward the retry policy, so use a fresh run for the next refusal.
-    directory = campaign.start(cfg, tmp_path, now=at(minutes=1))["dir"]
-    empty = finding_page([], True, "c1")
+            _save_finding(cfg, directory, finding_params(), page, 1)
+        _assert_aborted(cfg, directory)
+    directory = campaign.start(cfg, tmp_path, now=at(minutes=5))["dir"]
     with pytest.raises(ValueError, match="Empty finding page"):
-        campaign.save(
-            cfg,
-            directory,
-            "list_vulnerability_findings",
-            finding_params(),
-            empty,
-            now=at(seconds=1),
-        )
-    first = finding_page([("a1", "OPEN")], True, "c1")
-    campaign.save(
-        cfg, directory, "list_vulnerability_findings", finding_params(), first, now=at(seconds=2)
-    )
+        _save_finding(cfg, directory, finding_params(), finding_page([], True, "c1"), 1)
+    _assert_aborted(cfg, directory)
+    directory = campaign.start(cfg, tmp_path, now=at(minutes=6))["dir"]
+    _save_finding(cfg, directory, finding_params(), finding_page([("a1", "OPEN")], True, "c1"), 2)
     repeated = finding_page([("a2", "OPEN")], True, "c1")
     with pytest.raises(ValueError, match="repeated a cursor"):
-        campaign.save(
-            cfg,
-            directory,
-            "list_vulnerability_findings",
-            finding_params(after="c1"),
-            repeated,
-            now=at(seconds=3),
-        )
+        _save_finding(cfg, directory, finding_params(after="c1"), repeated, 3)
+    assert not list(Path(directory).glob("findings-0001.json"))
+    _assert_aborted(cfg, directory)
+
+
+def test_next_call_aborts_on_saved_non_advancing_cursor(tmp_path):
+    cfg = config()
+    directory = campaign.start(cfg, tmp_path, now=T0)["dir"]
+    _save_finding(cfg, directory, finding_params(), finding_page([("a1", "OPEN")], True, "c1"), 1)
+    # Simulate a stitched/tampered page that repeats the previous cursor.
+    page = Path(directory) / "findings-0000.json"
+    record = json.loads(page.read_text(encoding="utf-8"))
+    record["request"]["parameters"]["after"] = "c1"
+    second = json.loads(json.dumps(record))
+    page_info = {"endCursor": "c1", "hasNextPage": True}
+    second["response"]["vulnerabilityFindings"]["pageInfo"] = page_info
+    (Path(directory) / "findings-0001.json").write_text(json.dumps(second), encoding="utf-8")
+    _assert_aborted(cfg, directory)
 
 
 def test_assemble_refuses_duplicate_finding_ids(tmp_path):

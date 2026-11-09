@@ -617,7 +617,8 @@ function renderSyncPhases(syncState) {
   const rows = [["Phase 1 \u2013 Status check", syncState && syncState.phase1], ["Phase 2 \u2013 Refresh and deliverables", syncState && syncState.phase2]];
   box.replaceChildren(...rows.map(([title, p]) => h("div", { class: "sync-phase " + ((p && p.status) || "not_started") },
     h("strong", {}, title + ": "), (p && (PHASE_LABEL[p.status] || p.status)) || "not started",
-    p && p.error ? " \u2013 " + p.error : "")));
+    p && p.error ? " \u2013 " + p.error : "")),
+    deliverablesButton("status-check", "results", null));
 }
 function updateSyncStatus(syncState) {
   const button = $("sync-btn"), tooltip = $("sync-tooltip");
@@ -1011,6 +1012,7 @@ function showWorkflow(category, stageId, actionId) {
       else detail.append(monthlyPanel(category));
       return;
     }
+    if (category.imports === "daily" && stage.id === "in-progress") detail.append(dailyPanel());
     if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category, false));
     if (category.imports === "risk-issues" && stage.id === "resolved") { detail.append(riskCasesPanel(category, true)); return; }
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
@@ -1112,7 +1114,11 @@ function showWorkflow(category, stageId, actionId) {
 }
 // ---- imported local deliverables (read-only listings) and approval gates --------------------------
 // One shared Deliverables component for every category (risk-issues, weekly, monthly).
-function deliverablesButton(category, folder, message) {
+function deliverablesButton(category, folder, message, disabledReason) {
+  if (disabledReason || !folder) {
+    const why = disabledReason || "No files generated yet";
+    return h("button", { class: "secondary small", type: "button", disabled: true, title: why, "aria-label": "Deliverables unavailable: " + why }, "Deliverables");
+  }
   return h("button", { class: "secondary small", type: "button", onclick: () => showDeliverables(category, folder, message) }, "Deliverables");
 }
 async function openDeliverable(category, folder, f, withApp, status) {
@@ -1273,6 +1279,20 @@ function riskCasesPanel(category, resolvedOnly) {
   return h("section", { class: "imports" }, h("h2", {}, resolvedOnly ? "Resolved cases" : "Existing cases"),
     h("p", { class: "help" }, resolvedOnly ? "Read-only scan of deliverables/Risk-Issues for cases whose latest retained refresh shows every issue RESOLVED. Only the local deliverables can be opened; no refresh, update or email action is offered. Nothing is changed by this list." : "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
+function dailyPanel() {
+  const list = h("div", { class: "item-list" }, loadingNote("Scanning daily campaigns..."));
+  const message = h("p", { role: "status" });
+  api("GET", "/api/imports/daily").then((res) => {
+    clear(list);
+    if (!res.campaigns.length) { list.append(h("p", { class: "help" }, "No daily campaign folders were found.")); return; }
+    res.campaigns.forEach((c) => list.append(h("div", { class: "item-row" },
+      h("div", {}, h("strong", {}, c.name), h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified))),
+      h("div", { class: "row-actions" }, deliverablesButton("daily", c.name, message)))));
+  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list campaigns: " + e.message)); });
+  return h("section", { class: "imports" }, h("h2", {}, "Daily deliverables"),
+    h("p", { class: "help" }, "Read-only list of deliverables/Daily-Progress-Reporting. Only top-level report files are shown; nothing is changed."),
+    list, message);
+}
 function weeklyPanel(category) {
   const list = h("div", { class: "item-list" }, loadingNote("Scanning previous weekly reports..."));
   const message = h("p", { role: "status" });
@@ -1356,12 +1376,22 @@ async function gateDecide(run, gate, decision, message, buttons) {
   } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); buttons.forEach((b) => { b.disabled = false; }); }
 }
 function gatesBlock(run) {
+  if (run.auto && run.auto.triggered === false) {
+    return h("section", { class: "card gates", "aria-label": "Approval gates" }, h("h2", {}, "Approvals"),
+      h("p", {}, "No change - not triggered" + (run.auto.reason ? " (" + run.auto.reason + ")" : "") + ". Nothing was refreshed or generated."));
+  }
   if (!run.gates || !run.gates.length) return null;
   const message = h("p", { class: "bad", role: "alert" });
   const next = run.gates.find((g) => g.state === "pending");
   const first = run.gates[0] === next;
   const ready = next && !run.child && (first ? run.status === "awaiting_gate" : run.status === "completed");
-  const items = run.gates.map((g) => h("li", {}, h("strong", {}, g.label), " \u2013 " + g.state + (g.at ? " at " + fmtDate(g.at) : "")));
+  const stages = run.stages && run.stages.length ? run.stages : null;
+  const items = run.gates.map((g, i) => {
+    const s = stages ? stages[i] : null;
+    const life = s && s.lifecycle ? " \u2013 " + s.lifecycle + (s.at ? " at " + fmtDate(s.at) : "") : "";
+    const mode = s && s.mode ? " (" + s.mode + ")" : "";
+    return h("li", {}, h("strong", {}, g.label), " \u2013 " + g.state + (g.at ? " at " + fmtDate(g.at) : "") + life + mode);
+  });
   const box = h("section", { class: "card gates", "aria-label": "Approval gates" }, h("h2", {}, "Approvals"), h("ul", { class: "gate-list" }, ...items));
   if (ready) {
     const approve = h("button", { type: "button" }, "Approve " + next.label.toLowerCase());
@@ -1571,7 +1601,7 @@ function renderRun(run) {
   state.runStatus = run.status; state.runCategory = run.category_id || run.category; state.runSubject = run.subject || "";
   updateIndicator();
   // Rebuild only when something changed, so button messages and scroll position survive polling.
-  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output, run.waiting_approval, run.gates, run.child, run.checklist, run.outcome]);
+  const sig = JSON.stringify([run.status, run.message, run.pending, run.summary, run.files.map((f) => [f.path]), state.since, run.can_open_chat, run.can_stop, run.can_open_output, run.waiting_approval, run.gates, run.stages, run.auto, run.child, run.checklist, run.outcome, run.deliverables]);
   if (sig === state.shown) return;
   const first = !state.shown;
   state.shown = sig;
@@ -1587,6 +1617,8 @@ function renderRun(run) {
   if (run.can_focus) toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => focusVsCode(run) }, "Focus VS Code"));
   if (run.category_id) toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(run.category_id)) }, "Open workflow page"));
   toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go("/history") }, "All history"));
+  const dl = run.deliverables || {};
+  toolbar.append(deliverablesButton(dl.category, dl.folder, null, dl.folder ? "" : (dl.reason || "No files generated yet")));
   root.append(runCrumbs(run), h("header", { class: "page-head" },
     h("h1", { class: "route-heading", tabindex: "-1" }, run.category),
     h("p", { class: "status-line", role: "status" }, badge(run.outcome === "incomplete" ? "incomplete" : run.status), h("span", {}, (run.subject && !TERMINAL.has(run.status) ? run.subject + ": " : "") + run.message))), toolbar);
