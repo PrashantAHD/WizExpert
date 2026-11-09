@@ -43,6 +43,7 @@ MCP_HINT_SECONDS = 600.0
 MCP_ACTIONS = ("start", "stop", "auth", "list")
 ACTION_CASE_MODES = {
     "refresh-case": "refresh",
+    "sync-refresh": "refresh",
     "update-deliverables": "deliverables",
     "follow-up-email": "any",
     "reply-response": "any",

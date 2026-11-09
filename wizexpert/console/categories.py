@@ -278,11 +278,35 @@ RISK_ACTIONS: tuple[Action, ...] = (
         gated=True,
     ),
     Action(
+        "sync-refresh",
+        "system",
+        "Sync Refresh (automatic)",
+        "Started by Sync for a changed case: no approval gate. Read-only Wiz refresh, regenerated "
+        "deliverables, a PDF change summary and local email drafts only.",
+        (_CASE_FIELD,),
+        "Risk Issues category, Sync Refresh (automatic, no approval gate): for the existing case "
+        "folder {case_folder} (requires its retained evidence folder) fetch the latest Wiz status "
+        "of the case issues read-only, compute the delta versus the retained evidence, save the "
+        "new evidence snapshot plus a change summary and regenerate the case deliverables from "
+        "templates/risk-issues, archiving every file first and never modifying retained evidence. "
+        "Also save a PDF change summary in the case folder covering: what changed since the "
+        "previous reporting including when the INC was created and when it was communicated by "
+        "email (never use the words Wiz detected), the risk descriptions and the recommended "
+        "remediation approach. Inject the private confidentiality footer from private config as "
+        "a print CSS footer on every page and hide the in page footer in print. Draft the "
+        "lifecycle emails from templates/risk-issues as local files only: the status update "
+        "request about the previously shared communication and, for newly identified findings, "
+        "the refresh email asking which remediation approach they want to follow or for "
+        "approval for us to make the change using the approved approach, offering assistance. "
+        "Make no change in Wiz, ServiceNow or cloud and send no email",
+        max_prompt=2600,
+    ),
+    Action(
         "status-check",
         "system",
         "Read-only Wiz status check",
         "Started by Sync: read-only Wiz status check of the owner's open cases against their "
-        "retained evidence; only changed cases get a gated Refresh queued afterwards.",
+        "retained evidence; only changed cases get an automatic (ungated) Refresh afterwards.",
         (
             FieldSpec("assignee", "Assignee", "Owner whose cases are checked.", required=True,
                       max_length=64),

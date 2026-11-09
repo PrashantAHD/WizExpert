@@ -11,7 +11,7 @@ def good_binding(category: cat.Category) -> dict:
 
 
 def test_slot_counts():
-    assert len(cat.RISK_ISSUES.slots) == 6
+    assert len(cat.RISK_ISSUES.slots) == 8
     assert len(cat.DAILY_PROGRESS.slots) == 4
 
 
@@ -69,6 +69,7 @@ def test_unknown_category():
 def test_exact_slot_ids():
     assert [s.slot_id for s in cat.RISK_ISSUES.slots] == [
         "internal-analysis", "client-assessment", "stakeholder-email",
+        "stakeholder-status-request-email", "stakeholder-refresh-email",
         "detailed-report", "internal-follow-up-email", "updated-detailed-report",
     ]
     assert [s.slot_id for s in cat.DAILY_PROGRESS.slots] == [
