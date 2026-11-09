@@ -664,12 +664,16 @@ def _read_status_result(
     return {"checked": checked, "changed": changed}
 
 
-def finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+def finish_status_check(
+    config: ConsoleConfig, start: Any, run_status: Any, on_settled: Any = None
+) -> dict[str, Any]:
     with _SYNC_LOCK:
-        return _finish_status_check(config, start, run_status)
+        return _finish_status_check(config, start, run_status, on_settled)
 
 
-def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> dict[str, Any]:
+def _finish_status_check(
+    config: ConsoleConfig, start: Any, run_status: Any, on_settled: Any = None
+) -> dict[str, Any]:
     """Advance a started status check: read its result, then queue Refresh for changed cases.
 
     ``run_status(run_id)`` returns the check run's status. Refresh runs that the one-active-run
@@ -725,11 +729,15 @@ def _finish_status_check(config: ConsoleConfig, start: Any, run_status: Any) -> 
             state["phase"] = "done"
     if state.get("phase") in ("failed", "refreshing", "done"):
         _write_sync_state(config, state)
+        if on_settled is not None and state.get("phase") in ("failed", "done"):
+            with contextlib.suppress(Exception):  # bookkeeping must not block the sync
+                on_settled(dict(state))
     return {"state": state, "queued": queued}
 
 
 def run_status_sync(
-    config: ConsoleConfig, start: Any, *, force: bool = False, run_status: Any = None
+    config: ConsoleConfig, start: Any, *, force: bool = False, run_status: Any = None,
+    on_settled: Any = None,
 ) -> dict[str, Any]:
     """Start ONE read-only Wiz status check run; Refresh is queued later for changed cases.
 
@@ -740,15 +748,17 @@ def run_status_sync(
     start or advance runs; it holds the sync lock for the whole read-modify-write.
     """
     with _SYNC_LOCK:
-        return _run_status_sync(config, start, force=force, run_status=run_status)
+        return _run_status_sync(
+            config, start, force=force, run_status=run_status, on_settled=on_settled
+        )
 
 
 def _run_status_sync(
-    config: ConsoleConfig, start: Any, *, force: bool, run_status: Any
+    config: ConsoleConfig, start: Any, *, force: bool, run_status: Any, on_settled: Any = None
 ) -> dict[str, Any]:
     advanced_started: list[dict[str, Any]] = []
     if run_status is not None:
-        advanced = _finish_status_check(config, start, run_status)
+        advanced = _finish_status_check(config, start, run_status, on_settled)
         advanced_started = list(advanced["queued"])
         state = advanced["state"]
         if state.get("phase") in ("checking", "refreshing"):

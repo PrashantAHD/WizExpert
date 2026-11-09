@@ -418,6 +418,10 @@ never writes to `session-state`.
   location only. There are no open or download links and no file-serving endpoint; evidence,
   archive, log, JSON and secret-like files are never listed.
 
+## End-of-run checklist
+
+Every run that has ended (and any status check that is incomplete) shows a **Checklist** card. Each step is one of four states: `completed`, `skipped`, `blocked` or `not_applicable`. Steps: run finished, approval gates, outputs produced and, for a Risk Issues status check, the read-only check plus one `Refresh queued: <case>` step per changed case. The Risk Issues Sync rule is explicit: the read-only status check runs first, then a gated Refresh is queued for every changed case, one at a time. A status check with a changed case that has no queued or started Refresh (still waiting, skipped or refused, or a failed check) has outcome `incomplete`; it is shown as Incomplete and never as a successful completed run.
+
 ## Running tasks survive refreshes and restarts
 
 The backend is the source of truth. Runs (category, prompt, chat/session binding, status) are
