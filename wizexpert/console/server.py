@@ -637,6 +637,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                     lambda action, inputs: manager.start("risk-issues", inputs, action),
                     force=force,
                     run_status=lambda run_id: manager.view(run_id)["status"],
+                    on_settled=manager.settle_status_check,
                 )
             except ValueError as exc:
                 raise RunError(str(exc)) from None
