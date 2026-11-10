@@ -501,14 +501,16 @@ function markNotifRead(keys) {
   if (panel) delete panel.dataset.sig;
   renderNotifications();
 }
-function notificationRow(href, title, context, status, meta, label, key) {
+function notificationRow(href, title, context, status, meta, label, key, onOpen) {
   const read = loadNotifRead().has(key);
-  const a = link(href, "notification-item",
-    h("span", { class: "notif-dot", "aria-hidden": "true" }),
+  const kids = [h("span", { class: "notif-dot", "aria-hidden": "true" }),
     h("span", { class: "notif-title" }, title),
     h("span", { class: "notif-context" }, context),
     h("span", { class: "notif-meta" }, h("span", { class: "notif-status" }, status),
-      meta ? h("span", { class: "notif-sub", title: meta }, meta) : null));
+      meta ? h("span", { class: "notif-sub", title: meta }, meta) : null)];
+  const a = onOpen
+    ? h("a", { href: "#", class: "notification-item", onclick: (e) => { e.preventDefault(); onOpen(); } }, ...kids)
+    : link(href, "notification-item", ...kids);
   a.setAttribute("aria-label", (read ? "" : "Unread, ") + label);
   a.classList.add(read ? "is-read" : "is-unread");
   a.dataset.notifKey = key;
@@ -527,6 +529,12 @@ function notificationBar() {
   const seen = new Set();
   const cleared = loadNotifCleared();
   const events = [];
+  const notice = dailySyncNotice(state.syncState);
+  if (notice && !cleared.has(notice.key)) {
+    const text = notice.changed ? "Sync completed > Changes detected, click to view" : "Sync completed > No change detected";
+    events.push(notificationRow("#", "Risk Issues daily sync", text, notice.changed ? "Changes detected" : "No change", "", text, notice.key,
+      notice.changed ? showDailyChangeReport : () => {}));
+  }
   for (const item of state.notifications) {
     const key = "sync:" + item.run_id + ":" + item.status;
     if (cleared.has(key)) continue;
@@ -534,7 +542,7 @@ function notificationBar() {
   const check = item.kind === "status-check";
   events.push(notificationRow(runPath(item.run_id), check ? "Phase 1: Read-only Wiz status check" : "Phase 2: " + item.case + " Refresh",
     check ? "Phase 1 status check: read-only Wiz status comparison against retained evidence; no case files are written."
-      : "Phase 2 Refresh: the status check found a change; Refresh and deliverable regeneration started automatically (no approval step, drafts only).", status, item.run_id,
+      : "Phase 2 Refresh: started because you approved it in the daily change report (drafts only).", status, item.run_id,
     (check ? "Phase 1 status check" : "Phase 2 Refresh " + item.case) + ", " + status + ", run " + item.run_id, key));
   }
   for (const run of runs) {
@@ -560,7 +568,7 @@ function setNotifOpen(open) {
 function renderNotifications() {
   const btn = $("notif-btn"), panel = $("notif-panel"), badge = $("notif-badge");
   if (!btn || !panel) return;
-  mount(panel, JSON.stringify([state.active, state.history, state.notifications, [...loadNotifRead()], [...loadNotifCleared()]]), (box) => {
+  mount(panel, JSON.stringify([state.active, state.history, state.notifications, state.syncState, [...loadNotifRead()], [...loadNotifCleared()]]), (box) => {
     const { events, count } = notificationBar();
     const head = h("div", { class: "notif-head" }, h("strong", {}, "Notifications"));
     const actions = h("div", { class: "notif-actions" });
@@ -602,32 +610,59 @@ function syncStatusText(syncState) {
   if (syncState.phase === "checking") result = " \u00b7 Wiz status check running.";
   else if (syncState.phase === "failed") result = " \u00b7 Last status check failed.";
   else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
-  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result + syncPhaseText(syncState);
+  return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
 }
-const PHASE_LABEL = { started: "started", running: "running", completed: "completed", failed: "failed", not_started: "not started" };
-function syncPhaseText(syncState) {
-  const one = syncState.phase1, two = syncState.phase2;
-  if (!one && !two) return "";
-  const label = (p) => (p && (PHASE_LABEL[p.status] || p.status)) || "not started";
-  return " \u00b7 Phase 1 status check: " + label(one) + " \u00b7 Phase 2 Refresh and deliverables: " + label(two) + ".";
-}
+// The daily result is a console notification, not an inline phase banner; only Deliverables stays here.
 function renderSyncPhases(syncState) {
   const box = $("sync-phases");
   if (!box) return;
-  const rows = [["Phase 1 \u2013 Status check", syncState && syncState.phase1], ["Phase 2 \u2013 Refresh and deliverables", syncState && syncState.phase2]];
-  box.replaceChildren(...rows.map(([title, p]) => h("div", { class: "sync-phase " + ((p && p.status) || "not_started") },
-    h("strong", {}, title + ": "), (p && (PHASE_LABEL[p.status] || p.status)) || "not started",
-    p && p.error ? " \u2013 " + p.error : "")),
-    deliverablesButton("status-check", "results", null));
+  box.replaceChildren(deliverablesButton("status-check", "results", null));
+}
+function dailySyncNotice(syncState) {
+  if (!syncState || syncState.phase !== "done" || !Array.isArray(syncState.checked_cases)) return null;
+  const changed = (syncState.changed || []).length > 0;
+  return { key: "dailysync:" + (syncState.report || syncState.last_started) + ":" + (changed ? "changed" : "none"), changed };
+}
+function showDailyChangeReport() {
+  const syncState = state.syncState || {};
+  const changed = syncState.changed || [], approved = syncState.approved || [];
+  const status = h("p", { class: "help", role: "status" });
+  const close = h("button", { type: "button", class: "secondary", onclick: () => overlay.remove() }, "Close");
+  const body = h("div", { class: "daily-change-report" });
+  const overlay = h("div", { class: "modal-overlay", role: "dialog", "aria-modal": "true", "aria-label": "Daily change report",
+    onkeydown: (e) => { if (e.key === "Escape") overlay.remove(); } },
+    h("div", { class: "card modal-card" }, h("h2", {}, "Daily change report"), body, status, close));
+  if (!changed.length) body.append(h("p", {}, "No change detected today \u2013 nothing triggered."));
+  else {
+    body.append(h("p", { class: "help" }, changed.length + " case(s) changed. Nothing is refreshed until you approve it."));
+    const list = h("ul", {});
+    for (const c of changed) {
+      const done = approved.includes(c);
+      const btn = h("button", { type: "button", class: "small", disabled: done,
+        onclick: async () => {
+          btn.disabled = true;
+          try {
+            await api("POST", "/api/imports/risk-issues/approve-refresh", { case: c });
+            btn.textContent = "Refresh approved"; await refresh();
+            updateSyncStatus((await api("GET", "/api/imports/risk-issues/sync")).state);
+          } catch (e) { btn.disabled = false; status.textContent = e.message; status.className = "bad"; }
+        } }, done ? "Refresh approved" : "Approve refresh");
+      list.append(h("li", {}, c + " \u2013 " + ((syncState.reasons || {})[c] || "changed") + " ", btn));
+    }
+    body.append(list);
+  }
+  document.body.append(overlay); close.focus();
 }
 function updateSyncStatus(syncState) {
   const button = $("sync-btn"), tooltip = $("sync-tooltip");
   if (!button) return;
+  state.syncState = syncState || {};
   const text = syncStatusText(syncState);
   button.title = text + " \u00b7 Click to sync now";
   button.setAttribute("aria-label", "Sync Risk Issues status. " + text);
   if (tooltip) tooltip.textContent = text;
   renderSyncPhases(syncState);
+  renderNotifications();
 }
 async function loadTopbarSync() {
   try {
@@ -653,7 +688,7 @@ async function pollSyncProgress() {
 }
 setInterval(() => {
   const btn = $("sync-btn");
-  if (btn && syncAllowedHere() && /status check running|Refresh pending|Phase \d [^:]*: (started|running)/.test(btn.title)) pollSyncProgress();
+  if (btn && syncAllowedHere() && /status check running/.test(btn.title)) pollSyncProgress();
 }, 60000);
 // Sync is Risk Issues-only: Monthly Governance and Weekly Progress pages never expose or trigger it.
 const SYNC_EXCLUDED_WORKFLOWS = ["weekly-progress-reporting", "monthly-governance-reporting"];
@@ -680,9 +715,9 @@ async function syncFromTopbar({ silent = false } = {}) {
       const skipped = (result.skipped || []).length;
       const note = skipped ? " Not started: " + result.skipped[0].reason : "";
       banner(result.busy
-        ? "A Wiz status check is already running; Refresh is queued only for cases that changed." + note
+        ? "A Wiz status check is already running; changed cases wait for your Approve refresh." + note
         : (result.started || []).length
-          ? "Read-only Wiz status check started. Only cases whose Wiz status changed get a gated Refresh queued afterwards."
+          ? "Read-only Wiz status check started. Changed cases are listed in the daily change report; nothing is refreshed until you click Approve refresh."
           : "No Wiz status check was started." + note, "info");
     }
   } catch (e) {
@@ -1376,10 +1411,6 @@ async function gateDecide(run, gate, decision, message, buttons) {
   } catch (e) { message.textContent = e.message; helperRecoveryMessage(e); buttons.forEach((b) => { b.disabled = false; }); }
 }
 function gatesBlock(run) {
-  if (run.auto && run.auto.triggered === false) {
-    return h("section", { class: "card gates", "aria-label": "Approval gates" }, h("h2", {}, "Approvals"),
-      h("p", {}, "No change - not triggered" + (run.auto.reason ? " (" + run.auto.reason + ")" : "") + ". Nothing was refreshed or generated."));
-  }
   if (!run.gates || !run.gates.length) return null;
   const message = h("p", { class: "bad", role: "alert" });
   const next = run.gates.find((g) => g.state === "pending");

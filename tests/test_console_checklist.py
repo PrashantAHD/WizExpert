@@ -46,14 +46,13 @@ def test_status_check_changed_case_queued_is_completed():
     assert [s["label"] for s in steps if s["id"] == "refresh:CaseA"] == ["Refresh queued: CaseA"]
 
 
-def test_status_check_unqueued_or_skipped_is_incomplete():
+def test_status_check_unapproved_waits_for_owner_and_skipped_is_incomplete():
     steps, outcome = build_checklist(
-        "completed", [], False, _sync(phase="refreshing"), "status-check"
+        "completed", [], False, _sync(phase="done"), "status-check"
     )
-    assert outcome == "incomplete" and states(steps)["refresh:CaseA"] == "blocked"
+    assert outcome == "completed" and states(steps)["refresh:CaseA"] == "not_applicable"
     sync = _sync(skipped=[{"case": "CaseA", "reason": "refused"}])
     steps, outcome = build_checklist("completed", [], False, sync, "status-check")
-    assert outcome == "incomplete"
     step = [s for s in steps if s["id"] == "refresh:CaseA"][0]
     assert step["state"] == "skipped" and step["detail"] == "refused"
 
@@ -89,8 +88,8 @@ def test_reason_is_preserved_per_cause():
         "stopped", [], False, {"phase": "failed", "error": "boom"}, "status-check"
     )
     assert outcome == "incomplete" and outcome_reason(steps) == "Run ended as stopped; boom"
-    steps, _ = build_checklist("completed", [], False, _sync(phase="refreshing"), "status-check")
-    assert "one-active-run guard" in outcome_reason(steps)
+    steps, _ = build_checklist("completed", [], False, _sync(phase="done"), "status-check")
+    assert outcome_reason(steps) == ""  # awaiting the owner's approval is not a failure
     steps, _ = build_checklist("completed", [], False, None, "")
     assert outcome_reason(steps) == ""
 

@@ -67,11 +67,6 @@ _STAGE_STATE = {
 }
 
 
-def _delta_reason(delta: dict[str, Any] | None) -> str:
-    text = str((delta or {}).get("reason") or "").strip()
-    return (text or "change detected versus retained evidence")[:200]
-
-
 @dataclass
 class Run:
     id: str
@@ -378,11 +373,9 @@ class RunManager:
         action_id: str | None = None,
         ensure_helper: Callable[[], bool] | None = None,
         gated: bool = False,
-        delta: dict[str, Any] | None = None,
     ) -> Run:
-        """Start a run. ``delta`` ({"changed": bool, "reason": str}) is the scan result against
-        retained evidence and only applies to the Risk Issues workflow's gated runs: a change
-        auto-approves both gates, no change does not trigger the run at all."""
+        """Start a run. Every gated run waits for the owner's explicit approval; nothing is ever
+        approved automatically (the daily Risk Issues change report has its own approve action)."""
         action_id = categories.canonical_action(action_id)
         try:
             values = categories.validate(category_id, raw, action_id)
@@ -394,21 +387,6 @@ class RunManager:
             raise RunError(str(error)) from None
         self._check_sources(values, action_id)
         if gate_list:
-            auto_scope = category_id == "risk-issues" and isinstance(delta, dict)
-            if auto_scope and not delta.get("changed"):
-                with self._lock:
-                    run = Run(self._new_id(), category_id, values, prompt, self._clock())
-                    run.action_id = action_id or categories.CATEGORIES[category_id].default_action
-                    run.status = "not_started"
-                    run.message = "No change - not triggered."
-                    reason = _delta_reason(delta)
-                    run.auto = {"changed": False, "reason": reason, "triggered": False}
-                    run.decisions.append({"gate": "scan", "decision": "not-triggered",
-                                          "auto": True, "reason": reason,
-                                          "at": run.created})
-                    self._runs[run.id] = run
-                    self._save()
-                return run
             self._refuse_if_starting(category_id)
             with self._lock:
                 self._refuse_if_starting(category_id)
@@ -420,16 +398,8 @@ class RunManager:
                 run.gates = [
                     {"id": g, "label": labels[g], "state": "pending", "at": 0.0} for g in gate_list
                 ]
-                if auto_scope:
-                    run.auto = {"changed": True, "reason": _delta_reason(delta), "triggered": True}
                 self._runs[run.id] = run
                 self._save()
-            if auto_scope:  # change detected: approve the collection plan without a click
-                try:
-                    self.decide_gate(run.id, gate_list[0], "approve", ensure_helper, auto=run.auto)
-                except RunError as error:
-                    run.message = f"Auto-approval could not start: {error}"
-                    self._save()
             return run
         workspace = str(self.config.resolved_workspace())
         self._refuse_if_starting(category_id)
@@ -722,7 +692,6 @@ class RunManager:
         data["status"] = status
         data["auto"] = dict(run.auto)
         data["stages"] = self._stages(run, status)
-        self._auto_advance(run, status)
         sync = self._sync_for(run)
         frozen = run.final if status in INACTIVE else None
         if frozen is not None:  # an ended run keeps the result it finished with
@@ -768,22 +737,6 @@ class RunManager:
                 "manual" if g.get("state") in ("approved", "rejected") else "",
             })
         return out
-
-    def _auto_advance(self, run: Run, status: str) -> None:
-        """Auto-approve the next gate once an auto-approved stage completed (Risk Issues)."""
-        auto = run.auto
-        if not (auto.get("triggered") and status == "completed") or run.child:
-            return
-        nxt = next((g for g in run.gates if g["state"] == "pending"), None)
-        if nxt is None or auto.get("advance_tried") == nxt["id"]:
-            return
-        with run.lock:
-            auto["advance_tried"] = nxt["id"]  # one attempt per gate; a failure stays manual
-            self._save()
-        try:
-            self.decide_gate(run.id, nxt["id"], "approve", None, auto=auto)
-        except RunError as error:
-            run.message = f"Auto-approval could not start: {error}"
 
     def settle_status_check(self, sync: dict[str, Any]) -> None:
         """Freeze an ended status-check run's result as soon as its sync settles, so a later
@@ -1309,11 +1262,9 @@ def build_checklist(
                     steps.append(_step(f"refresh:{case}", label, "completed"))
                 elif case in skipped:
                     steps.append(_step(f"refresh:{case}", label, "skipped", skipped[case]))
-                else:
-                    steps.append(_step(f"refresh:{case}", label, "blocked",
-                                       "Waiting for the one-active-run guard"))
-            if done and any(c not in queued for c in changed):
-                outcome = "incomplete"
+                else:  # never automatic: waits for the owner's "Approve refresh" click
+                    steps.append(_step(f"refresh:{case}", f"Refresh not approved yet: {case}",
+                                       "not_applicable", "Awaiting owner approval"))
     return steps, outcome
 
 
