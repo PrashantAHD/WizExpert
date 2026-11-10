@@ -516,18 +516,22 @@ rebinds or times out; it never waits silently.
 poll and a loopback HTTP server; no VS Code, Wiz or agent run is needed.
 
 
-## Risk Issues delta auto-approval (owner-approved, persistent rule)
+## Risk Issues daily status check and owner-approved refresh (owner-approved, persistent rule)
 
-Applies to the Risk Issues workflow only (console Refresh, Approvals card with the
-Collection plan and Generation stages); PHP2Shell, governance and weekly keep manual approval.
+Replaces the earlier delta auto-approval. Applies to the Risk Issues workflow only.
 
-- A scan/Refresh that detects any delta versus retained evidence (new, resolved or
-  status-changed issues) auto-approves both stages; the run proceeds and hands off to the next
-  VS Code chat exactly as a manual approval does.
-- No delta: refresh and generation are not triggered; no approve buttons; the run records
-  "no change - not triggered".
-- The Approvals card shows each stage's lifecycle (started / running / completed / stopped /
-  failed, with timestamp) and whether it was "auto-approved (change detected)" or manual.
-- The audit record (run decisions) is identical to a manual approval plus `auto: true` and the
-  delta summary `reason`. If auto-approval cannot start, the gate stays pending for manual approval.
+- The read-only status check/sync runs at most ONCE per calendar day (IST), automatically,
+  gated by the persisted `last_started` date in the console state (`status-sync.json`); console
+  reloads, polls and reopening do not rerun it, and a failed check also counts as that day's
+  attempt. Only the owner clicking Sync (force) runs it again the same day.
+- It writes one daily change report (`daily-change-report-YYYY-MM-DD.json`, per-case delta
+  summary) under `deliverables/Status-Check`.
+- The result is a console notification, not an inline phase banner: "Sync completed > No change
+  detected", or "Sync completed > Changes detected, click to view". Clicking the latter opens the
+  daily change report, with one "Approve refresh" button per changed case. The Deliverables button
+  stays in the top bar.
+- Nothing is auto-approved or auto-started: a refresh (no-send, ungated sync-refresh) starts only
+  from "Approve refresh", once per case per day. Phase 2 shows no status (and no failure) until a
+  refresh is approved. A manual Refresh/Update is never blocked by a stale or no-change delta and
+  stays gated (Collection plan, Generation) with manual approval.
 - Never sends email, mutates Wiz/ServiceNow, commits or pushes.
