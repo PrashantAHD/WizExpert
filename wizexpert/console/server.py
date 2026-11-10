@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import categories, imports, launcher, sessions, stakeholder
+from . import imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import (
     MAX_PHOTO_BYTES,
