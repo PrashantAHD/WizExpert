@@ -623,20 +623,24 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
-            delta = None
-            if category == "risk-issues" and categories.canonical_action(action) == "refresh-case":
-                case = inputs.get("case_folder")
-                if isinstance(case, str):
-                    delta = imports.case_delta(self.app.config, case)
             run = manager.start(
                 category,
                 inputs,
                 action,
                 ensure_helper=ensure_helper,
                 gated=body.get("gated") is True,
-                delta=delta,
             )
             return self._json(HTTPStatus.OK, {"run_id": run.id})
+        if path == "/api/imports/risk-issues/approve-refresh":
+            try:
+                result = imports.approve_refresh(
+                    manager.config,
+                    lambda action, inputs: manager.start("risk-issues", inputs, action),
+                    str(body.get("case") or ""),
+                )
+            except ValueError as exc:
+                raise RunError(str(exc)) from None
+            return self._json(HTTPStatus.OK, result)
         if path == "/api/imports/risk-issues/sync":
             force = body.get("force") is True
             try:

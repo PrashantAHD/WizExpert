@@ -49,6 +49,12 @@ delta versus the retained evidence (status changes, new/resolved issues, count c
 (4) save a new evidence snapshot plus a change summary without altering retained evidence;
 (5) regenerate/update the deliverables from `templates/risk-issues/`, archiving files first.
 There is no one-time gate. No email is sent and no Wiz, ServiceNow or cloud change is made.
+Risk Issues Excel workbooks must use dark navy text for populated data rows on light blue,
+yellow or white fills; white text is reserved for headers on dark navy fills. Workbook
+generation must set the data-row font explicitly rather than inheriting the header style.
+One folder per rule under `deliverables\Risk-Issues`: never create a separate
+`-<assignee>-assigned` (or other duplicate) folder. Assignee/tracker metadata is merged
+into the existing case folder's `*.workflow.json`, never written to a second folder.
 Closure rule (owner decision): Ignored (Wiz `REJECTED`) and Risk Accepted are treated as
 Resolved. A case is Resolved when its latest refresh counts are all Resolved/Ignored/Risk
 Accepted with at least one such issue; any Open or In Progress issue keeps it In-Progress.
@@ -71,7 +77,7 @@ The confidentiality footer is injected from private config/templates as a print-
 The client name and footer text never enter the public repo.
 Risk Issues email lifecycle (templates in `templates/risk-issues/`, one slot and file name per stage; validators run per slot):
 (1) `stakeholder-email` -> `{rule}-Email-1-InitialStakeholder.html` when work starts on a wiz-issue-id;
-(2) `stakeholder-status-request-email` -> `{rule}-Email-2-StatusUpdateRequest.html`, asking for a status update on the previously shared communication;
+(2) `stakeholder-status-request-email` -> `{rule}-Email-2-StatusUpdateRequest.html`, a concise follow-up on the Wiz finding with a short finding summary, progress-update request, ServiceNow reference and assistance offer (no blame or multi-item remediation/update request);
 (3) `stakeholder-refresh-email` -> `{rule}-Email-3-Refresh.html` for newly identified findings, asking which remediation approach they want to follow or for approval for AHEAD to make the change using the approved approach, and offering assistance;
 (4) `internal-follow-up-email` -> `{rule}-Email-4-FollowUpResponse.html`, the unchanged follow-up response flow (takes their reply, drafts a reply email, stores it for other workflows).
 All are local HTML drafts, never sent. GET of the sync endpoint is read-only; only POST advances
@@ -405,18 +411,11 @@ approval records. If evidence cannot establish compliance, stop the affected
 stage, report the gap and correct it rather than backdating approval.
 
 
-## Risk Issues delta auto-approval (owner-approved, persistent rule)
+## Risk Issues daily status check and owner-approved refresh (owner-approved, persistent rule)
 
-Applies to the Risk Issues workflow only (console Refresh, Approvals card with the
-Collection plan and Generation stages); PHP2Shell, governance and weekly keep manual approval.
-
-- A scan/Refresh that detects any delta versus retained evidence (new, resolved or
-  status-changed issues) auto-approves both stages; the run proceeds and hands off to the next
-  VS Code chat exactly as a manual approval does.
-- No delta: refresh and generation are not triggered; no approve buttons; the run records
-  "no change - not triggered".
-- The Approvals card shows each stage's lifecycle (started / running / completed / stopped /
-  failed, with timestamp) and whether it was "auto-approved (change detected)" or manual.
-- The audit record (run decisions) is identical to a manual approval plus `auto: true` and the
-  delta summary `reason`. If auto-approval cannot start, the gate stays pending for manual approval.
-- Never sends email, mutates Wiz/ServiceNow, commits or pushes.
+Replaces the earlier delta auto-approval; see docs/CONSOLE.md for the full rule. Status check at
+most once per IST day (persisted last-sync date), one daily change report under
+deliverables/Status-Check, console notification ("Sync completed > No change detected" /
+"Changes detected, click to view"), per-case "Approve refresh" click required, Collection plan and
+Generation never auto-approved, Phase 2 shows no status until a refresh is approved, and a stale
+no-change delta never blocks a manual Refresh.

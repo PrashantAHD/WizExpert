@@ -12,6 +12,7 @@ snapshots used for the comparison views).
 from __future__ import annotations
 
 import contextlib
+import datetime
 import json
 import os
 import re
@@ -600,13 +601,17 @@ def status_sync_due(config: ConsoleConfig, *, force: bool = False) -> bool:
     if config.status_sync_hours <= 0:
         return False
     state = status_sync_state(config)
-    # A failed check also counts as an attempt (last_started), so automatic retries are at most
-    # one per interval; a manual (forced) sync retries immediately.
+    # At most ONE automatic check per calendar day (IST). A failed check also counts as the
+    # day's attempt (last_started); only a manual (forced) sync runs again the same day.
     last = state.get("last_started")
-    return (
-        not isinstance(last, (int, float))
-        or time.time() - last >= config.status_sync_hours * 3600
-    )
+    return not isinstance(last, (int, float)) or ist_day(last) != ist_day(time.time())
+
+
+_IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
+
+def ist_day(ts: float) -> str:
+    return datetime.datetime.fromtimestamp(ts, _IST).strftime("%Y-%m-%d")
 
 
 def _write_sync_state(config: ConsoleConfig, state: dict[str, Any]) -> dict[str, Any]:
@@ -632,10 +637,10 @@ _RUN_ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_ga
 
 
 def case_delta(config: ConsoleConfig, case: str) -> dict[str, Any] | None:
-    """Delta of a case from the latest read-only status check, or None if it was not checked.
+    """Delta of a case from today's read-only status check, or None if it was not checked.
 
-    {"changed": bool, "reason": str}; used to auto-approve (change) or skip (no change) a
-    Risk Issues Refresh.
+    {"changed": bool, "reason": str}. Informational only (daily change report); it never
+    triggers, approves or blocks a Refresh.
     """
     state = status_sync_state(config)
     if state.get("phase") not in ("refreshing", "done") or case not in (
@@ -722,43 +727,87 @@ def _finish_status_check(
             _set_phase(state, "phase2", "not_started")
         else:
             state.update(
-                phase="refreshing", checked=len(result["checked"]),
+                phase="done", checked=len(result["checked"]),
                 checked_cases=list(result["checked"]),
                 changed=[c["case"] for c in result["changed"]],
                 reasons={c["case"]: c["reason"] for c in result["changed"]},
-                pending=[c["case"] for c in result["changed"]],
+                pending=[], approved=[],
             )
             _set_phase(state, "phase1", "completed")
-    if state.get("phase") == "refreshing":
-        pending = list(state.get("pending", []))
-        while pending:
-            case = pending[0]
-            try:
-                run = start("sync-refresh", {"case_folder": case})
-            except StartBlocked:
-                break  # transient (active-run guard): keep pending, retry on the next POST
-            except (StartRefused, ValueError) as error:
-                pending.pop(0)  # not retryable: record it and move on
-                state.setdefault("skipped", []).append(
-                    {"case": case, "reason": str(error)[:300]}
-                )
-                continue
-            item = {"case": pending.pop(0), "run_id": run.id, "status": run.status,
-                    "kind": "sync-refresh"}
-            queued.append(item)
-            state.setdefault("queued", []).append(item)
-            break  # one Refresh run at a time (active-run guard); the rest follow on later calls
-        state["pending"] = pending
-        if state.get("changed") and not state.get("phase2"):
-            _set_phase(state, "phase2", "started")
-        if not pending:
-            _settle_refresh_phase(state, run_status)
+            # No automatic Refresh: the owner approves each changed case from the daily report.
+            _set_phase(state, "phase2", "awaiting_approval" if state["changed"] else "completed")
+            state["report"] = _write_daily_report(config, state)
+    if state.get("phase") == "done" and state.get("approved"):
+        _settle_approved_refreshes(state, run_status)
     if state.get("phase") in ("failed", "refreshing", "done"):
         _write_sync_state(config, state)
         if on_settled is not None and state.get("phase") in ("failed", "done"):
             with contextlib.suppress(Exception):  # bookkeeping must not block the sync
                 on_settled(dict(state))
     return {"state": state, "queued": queued}
+
+
+def _settle_approved_refreshes(state: dict[str, Any], run_status: Any) -> None:
+    """Phase 2 has no status until the owner approves a refresh; only approved runs can fail."""
+    if run_status is None:
+        return
+    statuses = []
+    for item in state.get("queued", []):
+        try:
+            statuses.append(run_status(item.get("run_id", "")))
+        except (StartRefused, ValueError):
+            statuses.append("not_started")
+    if any(s in _RUN_ACTIVE for s in statuses):
+        _set_phase(state, "phase2", "running")
+    elif any(s != "completed" for s in statuses):
+        _set_phase(state, "phase2", "failed", "An approved Refresh run did not complete.")
+    elif set(state.get("approved", [])) >= set(state.get("changed", [])):
+        _set_phase(state, "phase2", "completed")
+    else:
+        _set_phase(state, "phase2", "awaiting_approval")
+
+
+def _write_daily_report(config: ConsoleConfig, state: dict[str, Any]) -> str:
+    """One per-case delta summary per IST day under deliverables/Status-Check; returns its name."""
+    day = ist_day(time.time())
+    name = f"daily-change-report-{day}.json"
+    root = config.resolved_workspace() / config.output_roots[0] / STATUS_CHECK_DIR
+    reasons = state.get("reasons") or {}
+    report = {
+        "date": day, "checked": len(state.get("checked_cases") or []),
+        "changed": len(state.get("changed") or []),
+        "summary": "no change today" if not state.get("changed") else
+        f"{len(state['changed'])} case(s) changed; approve a refresh per case in the console",
+        "cases": [
+            {"case": c, "changed": c in (state.get("changed") or []),
+             "reason": str(reasons.get(c, "")) if c in (state.get("changed") or [])
+             else "no change"}
+            for c in state.get("checked_cases") or []
+        ],
+    }
+    with contextlib.suppress(OSError):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return name
+
+
+def approve_refresh(config: ConsoleConfig, start: Any, case: str) -> dict[str, Any]:
+    """Owner clicked "Approve refresh" for a changed case in the daily change report: start the
+    (ungated, no-send) Refresh for that case once. Raises ValueError if not an open delta."""
+    with _SYNC_LOCK:
+        state = status_sync_state(config)
+        if case not in (state.get("changed") or []):
+            raise ValueError("This case has no change in today's status check.")
+        if case in (state.get("approved") or []):
+            raise ValueError("A refresh was already approved for this case today.")
+        run = start("sync-refresh", {"case_folder": case})
+        item = {"case": case, "run_id": run.id, "status": run.status, "kind": "sync-refresh"}
+        state.setdefault("approved", []).append(case)
+        state.setdefault("queued", []).append(item)
+        if set(state["approved"]) >= set(state.get("changed") or []):
+            _set_phase(state, "phase2", "running")
+        _write_sync_state(config, state)
+        return {"started": [item], "state": state}
 
 
 def _set_phase(state: dict[str, Any], key: str, status: str, error: str = "") -> None:
