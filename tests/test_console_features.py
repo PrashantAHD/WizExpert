@@ -5,6 +5,7 @@ All fixtures are synthetic; no VS Code, Wiz or agent run is needed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -17,7 +18,7 @@ from test_console_server import api, console, token_of  # noqa: F401  (fixtures/
 
 from wizexpert.console import categories, imports
 from wizexpert.console.bridge import Bridge
-from wizexpert.console.runs import RunBusyError, RunError, RunManager
+from wizexpert.console.runs import RunError, RunManager
 from wizexpert.console.sessions import SessionView
 
 
@@ -506,56 +507,94 @@ def test_status_check_completion_queues_refresh_only_for_changed(env):  # noqa: 
         ],
     }), encoding="utf-8")
     started = []
-    block = {"on": True}
 
     def start(action, inputs):
-        if block["on"]:
-            raise RunBusyError("A run of this workflow is already active (run x).")
         started.append((action, inputs))
         return type("R", (), {"id": "ref1", "status": "awaiting_gate"})
 
     first = imports.finish_status_check(config, start, lambda _i: "completed")
-    assert first["queued"] == [] and first["state"]["pending"] == [cases[0]]  # guard: pending kept
-    block["on"] = False
-    second = imports.finish_status_check(config, start, lambda _i: "completed")
+    state = first["state"]
+    assert started == [] and first["queued"] == []  # a delta never starts a refresh by itself
+    assert state["phase"] == "done" and state["changed"] == [cases[0]]
+    assert state["phase1"]["status"] == "completed"
+    assert state["phase2"]["status"] == "awaiting_approval"
+    report = json.loads((out / state["report"]).read_text("utf-8"))
+    assert report["changed"] == 1 and report["cases"][0]["reason"] == "status moved"
+    with pytest.raises(ValueError):
+        imports.approve_refresh(config, start, "Not-Asked")
+    done = imports.approve_refresh(config, start, cases[0])
     assert started == [("sync-refresh", {"case_folder": cases[0]})]
-    assert second["state"]["phase"] == "done" and second["state"]["changed"] == [cases[0]]
-    assert second["state"]["phase1"]["status"] == "completed"
-    assert second["state"]["phase2"]["status"] == "completed"
+    assert done["state"]["approved"] == [cases[0]]
+    with pytest.raises(ValueError):
+        imports.approve_refresh(config, start, cases[0])  # once per case
 
 
-def test_sync_refresh_is_ungated_and_phases_are_recorded(env):  # noqa: F811
+def test_no_delta_writes_no_change_report_and_phase2_is_not_failed(env):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)
     config.status_sync_assignee = "owner1"
     cases = imports.eligible_sync_cases(config)
-    imports.run_status_sync(config, lambda a, i: type("R", (), {"id": "chk", "status": "running"}))
-    assert imports.status_sync_state(config)["phase1"]["status"] == "started"
-    imports.finish_status_check(config, lambda a, i: None, lambda _i: "running")
-    assert imports.status_sync_state(config)["phase1"]["status"] == "running"
-    token = imports.status_sync_state(config)["result_name"]
+    _checking_state(config, workspace, cases)
+    path = imports.status_sync_state(config)["result_name"]
     out = workspace / "deliverables" / "Status-Check"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / (token + ".json")).write_text(json.dumps({
-        "checked": cases, "changed": [{"case": cases[0], "reason": "moved"}],
-    }), encoding="utf-8")
+    (out / (path + ".json")).write_text(json.dumps({"checked": cases, "changed": []}), "utf-8")
+    state = imports.finish_status_check(config, lambda a, i: None, lambda _i: "completed")["state"]
+    assert state["phase"] == "done" and state["changed"] == []
+    assert json.loads((out / state["report"]).read_text("utf-8"))["summary"] == "no change today"
+    assert state["phase2"]["status"] == "completed"
+
+
+def test_day_gate_is_calendar_day_ist_and_unapproved_phase2_never_fails(env):  # noqa: F811
+    config, workspace, _ = env
+    now = time.time()
+    imports._write_sync_state(config, {"last_started": now})
+    assert not imports.status_sync_due(config) and imports.status_sync_due(config, force=True)
+    imports._write_sync_state(config, {"last_started": now - 2 * 86400})
+    assert imports.status_sync_due(config)
+    src = Path(imports.__file__).read_text("utf-8")
+    assert "_settle_refresh_phase(state" not in src.split("def _finish_status_check")[1].split(
+        "def _write_daily_report")[0]
+
+
+def test_manual_refresh_not_blocked_by_stale_no_change_delta(env):  # noqa: F811
+    config, workspace, _ = env
+    case = _case(config)
+    imports._write_sync_state(config, {"phase": "done", "checked_cases": [case], "changed": []})
+    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
+    run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
+    assert run.status == "awaiting_gate" and [g["state"] for g in run.gates] == ["pending"] * 2
+
+
+def test_ui_shows_daily_result_as_notification_not_inline_phases():
+    js = (Path(imports.__file__).parent / "static" / "app.js").read_text("utf-8")
+    assert "Sync completed > No change detected" in js
+    assert "Sync completed > Changes detected, click to view" in js
+    assert "Approve refresh" in js and "approve-refresh" in js
+    assert "Phase 1 \\u2013 Status check" not in js and "syncPhaseText" not in js
+    assert "PHASE_LABEL" not in js
+    assert 'deliverablesButton("status-check", "results", null)' in js
+
+
+def test_phase2_has_status_only_after_approval(env):  # noqa: F811
+    config, workspace, _ = env
+    _risk(workspace)
+    config.status_sync_assignee = "owner1"
+    cases = imports.eligible_sync_cases(config)
+    _checking_state(config, workspace, cases[:1])
     statuses = {"chk": "completed", "ref1": "running"}
 
     def start(action, inputs):
         return type("R", (), {"id": "ref1", "status": "starting"})
 
-    result = imports.finish_status_check(config, start, lambda i: statuses[i])
-    state = result["state"]
-    assert result["queued"][0]["kind"] == "sync-refresh"
-    assert state["phase1"]["status"] == "completed" and state["phase2"]["status"] == "running"
-    assert state["phase"] == "refreshing"
+    state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
+    assert state["phase2"]["status"] == "awaiting_approval"  # never "failed" before approval
+    imports.approve_refresh(config, start, cases[0])
+    state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
+    assert state["phase2"]["status"] == "running"
     statuses["ref1"] = "completed"
     state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
-    assert state["phase"] == "done" and state["phase2"]["status"] == "completed"
+    assert state["phase2"]["status"] == "completed"
     statuses["ref1"] = "stopped"
-    state = imports.status_sync_state(config)
-    state.update(phase="refreshing")
-    imports._write_sync_state(config, state)
     state = imports.finish_status_check(config, start, lambda i: statuses[i])["state"]
     assert state["phase2"]["status"] == "failed"
 
@@ -1412,35 +1451,19 @@ def _checking_state(config, workspace, cases):
     }), encoding="utf-8")
 
 
-def test_non_retryable_refresh_start_is_skipped_not_wedged(env):  # noqa: F811
+def test_delta_starts_no_refresh_run(env):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)
     config.status_sync_assignee = "owner1"
     cases = imports.eligible_sync_cases(config)
     _checking_state(config, workspace, cases)
-
-    def refuse(action, inputs):
-        raise RunError("This case has no retained evidence folder to refresh from.")
-
-    result = imports.finish_status_check(config, refuse, lambda _i: "completed")
+    started = []
+    result = imports.finish_status_check(
+        config, lambda a, i: started.append(a), lambda _i: "completed"
+    )
     state = result["state"]
-    assert state["pending"] == [] and state["phase"] == "done"
-    assert [s["case"] for s in state["skipped"]] == cases
-
-
-def test_busy_refresh_start_stays_pending(env):  # noqa: F811
-    config, workspace, _ = env
-    _risk(workspace)
-    config.status_sync_assignee = "owner1"
-    cases = imports.eligible_sync_cases(config)
-    _checking_state(config, workspace, cases)
-
-    def busy(action, inputs):
-        raise RunBusyError("A run of this workflow is already active (run x).")
-
-    result = imports.finish_status_check(config, busy, lambda _i: "completed")
-    assert result["state"]["pending"] == cases and result["state"]["phase"] == "refreshing"
-    assert not result["state"].get("skipped")
+    assert started == [] and state["phase"] == "done" and state["changed"] == cases
+    assert not state.get("queued") and not state.get("skipped")
 
 
 def test_force_recovers_when_check_run_is_gone(env):  # noqa: F811
@@ -1467,6 +1490,7 @@ def test_concurrent_posts_do_not_double_queue(env):  # noqa: F811
     config.status_sync_assignee = "owner1"
     cases = imports.eligible_sync_cases(config)
     _checking_state(config, workspace, cases[:1])
+    imports.finish_status_check(config, lambda a, i: None, lambda _i: "completed")
     started = []
 
     def start(action, inputs):
@@ -1474,13 +1498,11 @@ def test_concurrent_posts_do_not_double_queue(env):  # noqa: F811
         started.append(inputs["case_folder"])
         return type("R", (), {"id": "ref1", "status": "awaiting_gate"})
 
-    threads = [
-        threading.Thread(
-            target=imports.run_status_sync, args=(config, start),
-            kwargs={"run_status": lambda _i: "completed"},
-        )
-        for _ in range(4)
-    ]
+    def approve():
+        with contextlib.suppress(ValueError):
+            imports.approve_refresh(config, start, cases[0])
+
+    threads = [threading.Thread(target=approve) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:
@@ -1579,12 +1601,12 @@ def test_status_check_frozen_at_settle_without_view(env):  # noqa: F811
     manager.settle_status_check(dict(base))  # sync settled; nobody calls view()
     imports._write_sync_state(config, dict(base, check_run_id="other", phase="checking"))
     mine = [h for h in manager.history() if h["id"] == "r1"]
-    assert len(mine) == 1 and mine[0]["outcome"] == "incomplete"
+    assert len(mine) == 1 and mine[0]["outcome"] == "completed"
     assert all(a["id"] != "r1" for a in manager.active())  # ended runs are not active
     data = manager.view("r1")
-    assert data["outcome"] == "incomplete" and data["message"].startswith("Incomplete")
+    assert data["outcome"] == "completed"
     reloaded = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
-    assert reloaded.get("r1").final["outcome"] == "incomplete"
+    assert reloaded.get("r1").final["outcome"] == "completed"
 
 
 def test_issue_ids_subject_capped_and_loaded_checklist_validated(env):  # noqa: F811
@@ -1682,63 +1704,21 @@ def _case(config):
     return "Auto-wc-id-9"
 
 
-def test_risk_refresh_with_no_delta_is_not_triggered(env):  # noqa: F811
+def test_risk_refresh_never_auto_approves_even_with_delta_state(env):  # noqa: F811
     config, workspace, home = env
     case = _case(config)
-    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
-    run = manager.start(
-        "risk-issues", {"case_folder": case}, "refresh-case",
-        delta={"changed": False, "reason": "no change"},
-    )
-    assert run.status == "not_started" and run.gates == []
-    assert "not triggered" in run.message
-    view = manager.view(run.id)
-    assert view["auto"]["triggered"] is False
-    assert view["decisions"][0]["auto"] is True
-    assert view["decisions"][0]["decision"] == "not-triggered"
-    assert manager.active() == []
-
-
-def test_risk_refresh_with_delta_auto_approves_both_gates(env):  # noqa: F811
-    config, workspace, home = env
-    case = _case(config)
+    imports._write_sync_state(config, {
+        "phase": "done", "checked_cases": [case], "changed": [case],
+        "reasons": {case: "1 new issue"},
+    })
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home) as helper:
-        run = manager.start(
-            "risk-issues", {"case_folder": case}, "refresh-case",
-            delta={"changed": True, "reason": "1 new issue"},
-        )
-        assert [g["state"] for g in run.gates] == ["approved", "pending"]
-        assert run.gates[0]["auto"] is True
-        assert run.decisions[0] == {**run.decisions[0], "gate": "collection-plan",
-                                    "decision": "approve", "auto": True, "reason": "1 new issue"}
-        stages = manager.view(run.id)["stages"]
-        assert stages[0]["lifecycle"] in ("started", "running")
-        assert stages[0]["mode"] == "auto-approved (change detected)"
-        append(
-            helper.events_path,
-            event("assistant.message", {"content": "Plan ready."}),
-            event("hook.end", {"hookType": "agentStop"}),
-        )
-        view = manager.view(run.id)  # completes and auto-approves generation
-        assert view["status"] == "completed"
-        child = manager.get(manager.get(run.id).child)
-    assert [g["state"] for g in child.gates] == ["approved", "approved"]
-    assert [d.get("auto") for d in child.decisions] == [True, True]
-    assert child.decisions[1]["gate"] == "generation"
-    assert child.decisions[1]["reason"] == "1 new issue"
-
-
-def test_other_workflows_stay_manual_even_with_delta(env):  # noqa: F811
-    config, workspace, home = env
-    manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
-    run = manager.start(
-        "weekly-progress-reporting", {"reporting_monday": "2026-11-03"}, "new", gated=True,
-        delta={"changed": True, "reason": "x"},
-    )
-    assert run.status == "awaiting_gate" and run.auto == {}
-    assert [g["state"] for g in run.gates] == ["pending", "pending"]
+        run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
+        assert run.status == "awaiting_gate"
+        assert [g["state"] for g in run.gates] == ["pending", "pending"]
+        assert not [j for j in helper.jobs if j["kind"] == "start_chat"]
+        assert run.auto == {}
 
 
 def test_case_delta_from_status_sync_state(env):  # noqa: F811
