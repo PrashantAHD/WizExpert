@@ -18,7 +18,7 @@ from test_console_server import api, console, token_of  # noqa: F401  (fixtures/
 
 from wizexpert.console import categories, imports
 from wizexpert.console.bridge import Bridge
-from wizexpert.console.runs import RunBusyError, RunError, RunManager
+from wizexpert.console.runs import RunError, RunManager
 from wizexpert.console.sessions import SessionView
 
 
