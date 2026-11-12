@@ -506,7 +506,7 @@ def test_category_json_exposes_stages_and_actions():
         "update-deliverables", "follow-up-email", "reply-response",
     ]
     daily = categories.CATEGORIES["daily-progress-reporting"].to_json()
-    assert [s["id"] for s in daily["stages"]] == ["new", "in-progress"]
+    assert [s["id"] for s in daily["stages"]] == ["new", "in-progress", "deliverables"]
     ids = [a["id"] for a in daily["actions"]]
     assert ids == ["new-work-item", "continue-work-item", "reply-stakeholder"]
     assert daily["work_items"] == ["PHP2SHELL Campaign"]

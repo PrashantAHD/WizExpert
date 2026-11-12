@@ -6,6 +6,7 @@ configured agent (through the helper extension) and then follows the real sessio
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -19,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import categories, imports
+from . import categories, freshness, imports
 from .bridge import MIN_HELPER_VERSION, Bridge
 from .categories import InputError
 from .config import ConsoleConfig
@@ -40,6 +41,7 @@ HANDOFF_WAIT_SECONDS = 1800.0
 LATE_START_MESSAGE = "The console stopped before this run started."
 INACTIVE = ("completed", "stopped", "interrupted", "not_started", "rejected")
 MCP_HINT_SECONDS = 600.0
+AUTH_GRACE_SECONDS = 120  # the bridge renews on demand shortly after expiry
 MCP_ACTIONS = ("start", "stop", "auth", "list")
 ACTION_CASE_MODES = {
     "refresh-case": "refresh",
@@ -108,8 +110,10 @@ class RunManager:
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
         cli: Callable[[list[str]], int] | None = None,
+        mcp_auth_dir: Path | None = None,
     ) -> None:
         self.config = config
+        self.mcp_auth_dir = mcp_auth_dir  # injectable; default resolved from LOCALAPPDATA
         self.bridge = bridge
         self.finder = finder or SessionFinder(config)
         self._async = run_async
@@ -164,10 +168,13 @@ class RunManager:
                     and run.status in INACTIVE
                 ):
                     reason = final.get("reason")
+                    reason_limit = (
+                        FRESHNESS_DETAIL_MAX if self._needs_freshness(run) else FINAL_REASON_MAX
+                    )
                     run.final = {
                         "checklist": clean_checklist(final["checklist"]),
                         "outcome": final["outcome"],
-                        "reason": reason[:FINAL_REASON_MAX] if isinstance(reason, str) else "",
+                        "reason": reason[:reason_limit] if isinstance(reason, str) else "",
                     }
                 self._runs[run.id] = run
         except (OSError, ValueError, KeyError, TypeError):
@@ -452,6 +459,11 @@ class RunManager:
                         "Only the latest weekly report can be updated"
                         + (f" ({latest['name']})." if latest else "; none was found.")
                     )
+                if not latest.get("updatable"):
+                    raise ValueError(
+                        f"Weekly report {latest['name']} is closed for updates; reports can be "
+                        "updated only from the report date until the following Monday EOD."
+                    )
             if values.get("attachment"):
                 imports.resolve_viewable(
                     self.config, self.config.output_roots[0] + "/" + values["attachment"]
@@ -702,6 +714,19 @@ class RunManager:
                 status, data["gates"], bool(data["files"]), sync, run.action_id
             )
             reason = outcome_reason(data["checklist"])
+            if self._needs_freshness(run) and status in INACTIVE:
+                auth_failed = sv.wiz_auth_failed if sv else False
+                ok, why = (
+                    freshness.gate(self.config, run.created, auth_failed=auth_failed)
+                    if status == "completed" else (False, "")
+                )
+                if status == "completed" and not ok:
+                    data["checklist"].append(_step("fresh", "Fresh Wiz data and rebuilt outputs",
+                                                   "blocked", why))
+                    data["outcome"], reason = "incomplete", why
+                elif status == "completed":
+                    data["checklist"].append(_step("fresh", "Fresh Wiz data and rebuilt outputs",
+                                                   "completed"))
             if status in INACTIVE and _is_settled(status, sync, run.action_id):
                 with run.lock:
                     run.final = {"checklist": data["checklist"], "outcome": data["outcome"],
@@ -772,6 +797,12 @@ class RunManager:
             run.final = {"checklist": checklist, "outcome": outcome,
                          "reason": outcome_reason(checklist)}
             self._save()
+
+    @staticmethod
+    def _needs_freshness(run: Run) -> bool:
+        return (run.category_id == "daily-progress-reporting"
+                and run.action_id == "continue-work-item"
+                and freshness.is_php2shell((run.values or {}).get("work_item", "")))
 
     def _sync_for(self, run: Run) -> dict[str, Any] | None:
         if run.action_id != "status-check":
@@ -1057,7 +1088,7 @@ class RunManager:
     _mcp_hint: dict[str, Any] | None = None
 
     def mcp_status(self) -> dict[str, Any]:
-        """connected / needs_auth / stopped for the Wiz MCP server (via the helper)."""
+        """Tool registration and operator intent, never inferred authentication/liveness."""
         servers = self.mcp_servers()
         workspace = str(self.config.resolved_workspace())
         out: dict[str, Any] = {
@@ -1070,6 +1101,7 @@ class RunManager:
             out.update(state="not_configured", detail="No Wiz MCP server found in mcp.json.")
             return out
         if not self.bridge.helper_connected(workspace, min_version=True):
+            out["state"] = "helper_unavailable"
             out["detail"] = (
                 "The current VS Code helper is not connected. Reload the standard VS Code "
                 f"window so helper {'.'.join(map(str, MIN_HELPER_VERSION))} or newer is active."
@@ -1088,17 +1120,125 @@ class RunManager:
         hint = self._mcp_hint
         now = self._clock()
         if tools > 0:
-            out.update(state="connected", detail="")
+            out.update(
+                state="registered",
+                detail="Wiz tools are registered; authenticated access is unverified. "
+                "A successful read-only catalog call verifies access at that time only.",
+            )
+            with contextlib.suppress(Exception):  # never let auth metadata break the status
+                out.update(self._mcp_login_state(now))
             self._mcp_hint = None
         elif hint and hint["action"] in ("start", "auth") and now - hint["at"] < MCP_HINT_SECONDS:
             out.update(
-                state="needs_auth",
-                detail="No tools yet: finish the SSO sign-in in the browser window, then refresh.",
+                state="starting",
+                detail="Start/authenticate was requested; no tools are registered yet. "
+                "This does not prove an authentication failure.",
+            )
+        elif hint and hint["action"] == "stop":
+            out.update(
+                state="stop_requested",
+                detail="Operator requested Stop; no tools are registered. "
+                "Server process state is not independently verified.",
             )
         else:
-            out.update(state="stopped", detail="No Wiz tools are available (server stopped).")
+            out.update(
+                state="unknown",
+                detail="No Wiz tools are registered. Server state and authentication are unknown.",
+            )
         out["tools"] = tools
         return out
+
+    def _mcp_token_meta(self) -> dict[str, Any] | None:
+        """Metadata of the newest local OAuth token cache; never returns token values."""
+        base = self.mcp_auth_dir
+        if base is None:
+            local = os.environ.get("LOCALAPPDATA")
+            if not local:
+                return None
+            base = Path(local) / "WizExpert" / "mcp-bridge" / "auth" / "mcp-remote-v1"
+        best: dict[str, Any] | None = None
+        try:
+            files = list(base.glob("*_tokens.json"))
+        except OSError:
+            return None
+        for path in files:
+            try:
+                mtime = path.stat().st_mtime
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            try:
+                ttl = float(data.get("expires_in") or 0)
+            except (TypeError, ValueError):
+                ttl = 0.0
+            meta = {
+                "has_access": bool(data.get("access_token")),
+                "has_refresh": bool(data.get("refresh_token")),
+                "renewed": mtime,
+                "valid_until": mtime + ttl,
+            }
+            if best is None or mtime > best["renewed"]:
+                best = meta
+        return best
+
+    def _mcp_run_outcomes(self) -> tuple[float, float]:
+        """Latest verified Wiz tool success / auth failure across tracked runs (epoch, 0=none)."""
+        ok = fail = 0.0
+        with self._lock:
+            views = [r.view for r in self._runs.values() if r.view is not None]
+        for sv in views:
+            ok = max(ok, float(getattr(sv, "last_wiz_ok_at", 0.0) or 0.0))
+            fail = max(fail, float(getattr(sv, "last_wiz_auth_fail_at", 0.0) or 0.0))
+        return ok, fail
+
+    def _mcp_login_state(self, now: float) -> dict[str, Any]:
+        """Local login state from token-cache metadata plus run outcomes (no server check)."""
+        meta = self._mcp_token_meta()
+        if meta is None:
+            return {}
+        ok, fail = self._mcp_run_outcomes()
+
+        def clock(t: float) -> str:
+            return time.strftime("%H:%M", time.localtime(t))
+
+        renewed, until = meta["renewed"], meta["valid_until"]
+        info: dict[str, Any] = {
+            "auth": {
+                "refresh_token_present": meta["has_refresh"],
+                "access_token_present": meta["has_access"],
+                "renewed_at": renewed,
+                "access_valid_until": until,
+                "last_run_ok_at": ok or None,
+                "last_run_auth_failure_at": fail or None,
+            }
+        }
+        note = " This reflects the local login state, not a server-side check."
+        run_note = f" Last successful Wiz run: {clock(ok)}." if ok else ""
+        if fail and fail >= max(ok, renewed):
+            info.update(
+                state="signin_needed",
+                detail=f"The latest Wiz run failed authentication ({clock(fail)}). "
+                "Use Authenticate (restart) and complete sign-in in VS Code." + note,
+            )
+        elif not meta["has_refresh"] or not meta["has_access"] or now - until > AUTH_GRACE_SECONDS:
+            why = (
+                "No refresh token is cached."
+                if not meta["has_refresh"]
+                else f"The access token expired {clock(until)} and was not renewed."
+            )
+            info.update(
+                state="signin_needed",
+                detail=why + " Use Authenticate (restart) to sign in again." + note,
+            )
+        else:
+            info.update(
+                state="authenticated",
+                detail=f"Token renewed {clock(renewed)}, valid until {clock(until)} "
+                f"(auto-renews).{run_note}" + note,
+            )
+        return info
 
     def mcp_action(self, action: str, server: str | None = None) -> dict[str, Any]:
         """Start, stop or authenticate via VS Code MCP commands (sign-in is in the browser)."""
@@ -1274,6 +1414,7 @@ CHECKLIST_STATES = frozenset(("completed", "skipped", "blocked", "not_applicable
 CHECKLIST_MAX = 60
 CHECKLIST_FIELD_MAX = 80
 CHECKLIST_DETAIL_MAX = 300
+FRESHNESS_DETAIL_MAX = 2000  # keep every required missing output in a frozen run
 
 
 def clean_checklist(items: Any) -> list[dict[str, str]]:
@@ -1290,10 +1431,11 @@ def clean_checklist(items: Any) -> list[dict[str, str]]:
         detail = s.get("detail", "")
         if not isinstance(detail, str):
             continue
+        detail_limit = FRESHNESS_DETAIL_MAX if s["id"] == "fresh" else CHECKLIST_DETAIL_MAX
         out.append({"id": s["id"][:CHECKLIST_FIELD_MAX],
                     "label": s["label"][:CHECKLIST_DETAIL_MAX],
                     "state": s["state"][:CHECKLIST_FIELD_MAX],
-                    "detail": detail[:CHECKLIST_DETAIL_MAX]})
+                    "detail": detail[:detail_limit]})
         if len(out) >= CHECKLIST_MAX:
             break
     return out

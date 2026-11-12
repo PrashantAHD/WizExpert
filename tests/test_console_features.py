@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -572,7 +574,7 @@ def test_ui_shows_daily_result_as_notification_not_inline_phases():
     assert "Approve refresh" in js and "approve-refresh" in js
     assert "Phase 1 \\u2013 Status check" not in js and "syncPhaseText" not in js
     assert "PHASE_LABEL" not in js
-    assert 'deliverablesButton("status-check", "results", null)' in js
+    assert 'deliverablesButton("status-check"' not in js and "sync-phases" not in js
 
 
 def test_phase2_has_status_only_after_approval(env):  # noqa: F811
@@ -874,28 +876,118 @@ def _mcp_config(workspace, name="wiz-demo"):
     )
 
 
-def test_mcp_status_connected_needs_auth_and_stopped(env):  # noqa: F811
+def test_mcp_status_registration_is_not_authentication(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
-    manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
+    manager = RunManager(
+        config, bridge, run_async=False, sleep=lambda _s: None,
+        mcp_auth_dir=workspace / "no-such-auth-dir",
+    )
     assert manager.mcp_status()["state"] == "not_configured"
     _mcp_config(workspace)
     assert manager.mcp_servers() == ["wiz-demo"]
-    assert manager.mcp_status()["state"] == "unknown"  # helper not connected
+    assert manager.mcp_status()["state"] == "helper_unavailable"
     with FakeHelper(bridge, workspace, home) as helper:
         helper.infos["mcp_status"] = {"toolCount": 0}
-        assert manager.mcp_status()["state"] == "stopped"
+        assert manager.mcp_status()["state"] == "unknown"
         manager.mcp_action("auth")
         status = manager.mcp_status()
-        assert status["state"] == "needs_auth" and "browser" in status["detail"]
+        assert status["state"] == "starting"
+        manager._mcp_hint["at"] -= 601
+        assert manager.mcp_status()["state"] == "unknown"
         helper.infos["mcp_status"] = {"toolCount": 2}
-        assert manager.mcp_status()["state"] == "connected"
+        status = manager.mcp_status()
+        assert status["state"] == "registered" and "unverified" in status["detail"]
         manager.mcp_action("stop")
         helper.infos["mcp_status"] = {"toolCount": 0}
-        assert manager.mcp_status()["state"] == "stopped"
+        assert manager.mcp_status()["state"] == "stop_requested"
         job = [j for j in helper.jobs if j["kind"] == "mcp_action"][0]
         assert job["server"] == "mcp.config.ws0.wiz-demo"
         assert "secret" not in json.dumps(helper.jobs)
+
+
+_FAKE_ACCESS = "SECRET-" + "ACCESS-VALUE"
+_FAKE_REFRESH = "SECRET-" + "REFRESH-VALUE"
+
+
+def _auth_cache(tmp_path, *, refresh=True, age=60, ttl=900, raw=None):
+    auth = tmp_path / "auth"
+    auth.mkdir(exist_ok=True)
+    path = auth / "abc_tokens.json"
+    path.write_text(
+        raw
+        if raw is not None
+        else json.dumps(
+            {
+                "access_token": _FAKE_ACCESS,
+                "refresh_token": _FAKE_REFRESH if refresh else "",
+                "expires_in": ttl,
+            }
+        ),
+        encoding="utf-8",
+    )
+    stamp = time.time() - age
+    os.utime(path, (stamp, stamp))
+    return auth
+
+
+def _auth_status(envt, auth, *, ok_at=0.0, fail_at=0.0):
+    config, workspace, home = envt
+    _mcp_config(workspace)
+    bridge = Bridge("t" * 64)
+    manager = RunManager(
+        config, bridge, run_async=False, sleep=lambda _s: None, mcp_auth_dir=auth
+    )
+    if ok_at or fail_at:
+        view = types.SimpleNamespace(last_wiz_ok_at=ok_at, last_wiz_auth_fail_at=fail_at)
+        manager._runs["r1"] = types.SimpleNamespace(view=view)
+    with FakeHelper(bridge, workspace, home) as helper:
+        helper.infos["mcp_status"] = {"toolCount": 2}
+        return manager.mcp_status()
+
+
+def test_mcp_login_state_green(env, tmp_path):  # noqa: F811
+    status = _auth_status(env, _auth_cache(tmp_path), ok_at=time.time() - 30)
+    assert status["state"] == "authenticated"
+    assert "auto-renews" in status["detail"] and "Last successful Wiz run" in status["detail"]
+    assert status["auth"]["refresh_token_present"] is True
+    # just expired (< 2 minutes ago) is still green: the bridge renews on demand
+    recent = _auth_status(env, _auth_cache(tmp_path, age=960))
+    assert recent["state"] == "authenticated"
+
+
+def test_mcp_login_state_refresh_missing(env, tmp_path):  # noqa: F811
+    status = _auth_status(env, _auth_cache(tmp_path, refresh=False))
+    assert status["state"] == "signin_needed"
+    assert "Authenticate" in status["detail"]
+
+
+def test_mcp_login_state_expired_stale(env, tmp_path):  # noqa: F811
+    status = _auth_status(env, _auth_cache(tmp_path, age=5000))
+    assert status["state"] == "signin_needed"
+
+
+def test_mcp_login_state_auth_failure_newer(env, tmp_path):  # noqa: F811
+    auth = _auth_cache(tmp_path, age=60)
+    status = _auth_status(env, auth, ok_at=time.time() - 300, fail_at=time.time() - 10)
+    assert status["state"] == "signin_needed"
+    # a failure older than the last renewal does not win
+    older = _auth_status(env, auth, fail_at=time.time() - 600)
+    assert older["state"] == "authenticated"
+
+
+def test_mcp_login_state_unreadable_is_unverified(env, tmp_path):  # noqa: F811
+    for auth in (
+        tmp_path / "missing",
+        _auth_cache(tmp_path, raw="{not json"),
+    ):
+        status = _auth_status(env, auth)
+        assert status["state"] == "registered" and "unverified" in status["detail"]
+
+
+def test_mcp_status_never_contains_token_values(env, tmp_path):  # noqa: F811
+    status = _auth_status(env, _auth_cache(tmp_path), ok_at=time.time())
+    assert "SECRET" not in json.dumps(status)
 
 
 def test_mcp_action_validates_input(env):  # noqa: F811
@@ -917,7 +1009,7 @@ def test_mcp_refuses_stale_helper(env):  # noqa: F811
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home, version="0.2.0"):
         status = manager.mcp_status()
-        assert status["state"] == "unknown"
+        assert status["state"] == "helper_unavailable"
         assert "Reload" in status["detail"]
         with pytest.raises(RunError, match="current VS Code helper"):
             manager.mcp_action("start")
@@ -934,6 +1026,27 @@ def test_weekly_list_marks_latest_and_hides_evidence(env):  # noqa: F811
     assert reports[0]["latest"] and not reports[1]["latest"]
     assert set(reports[0]["files"]) == {"pptx", "pdf", "email"}
     assert "evidence" not in json.dumps(reports)
+
+
+def test_weekly_update_window_is_report_date_to_monday_eod(env, monkeypatch):  # noqa: F811
+    from datetime import date
+
+    assert not imports.weekly_update_open("2026-11-06", date(2026, 11, 5))
+    for day in (6, 7, 8, 9):
+        assert imports.weekly_update_open("2026-11-06", date(2026, 11, day))
+    assert not imports.weekly_update_open("2026-11-06", date(2026, 11, 10))
+    assert not imports.weekly_update_open("not-a-date", date(2026, 11, 6))
+    config, workspace, _ = env
+    _weekly(workspace)
+    monkeypatch.setattr(imports, "_today", lambda: date(2026, 11, 10))
+    reports = imports.scan_weekly(config)
+    assert reports[0]["latest"] and not reports[0]["updatable"]
+    with pytest.raises(RunError, match="closed for updates"):
+        _manager(config).start(
+            "weekly-progress-reporting",
+            {"report_folder": "2026-11-03", "internal_response": "ok"},
+            "update",
+        )
 
 
 def test_weekly_update_is_latest_only_and_needs_a_response(env):  # noqa: F811

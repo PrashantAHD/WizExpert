@@ -3,8 +3,8 @@
 Sessions live in ``<copilot home>/session-state/<id>/`` (``events.jsonl``, ``workspace.yaml``);
 the agent-host database maps a session to the id VS Code uses to open its chat. This module
 finds the session created for a start request, tails its event log incrementally and reduces
-it to what the page shows. Only event types the page needs are parsed, and tool output is
-never read or exposed.
+it to what the page shows. Failed Wiz tool envelopes are classified locally for authentication
+errors; raw tool results are never exposed in progress or retained by the reducer.
 """
 
 from __future__ import annotations
@@ -60,6 +60,43 @@ PERMISSION_FLICKER_SECONDS = 2.5  # auto-approved prompts resolve at once; do no
 IDLE_COMPLETE_SECONDS = 45.0
 STALL_SECONDS = 60.0  # silent log with an open tool call: probably awaiting a confirmation
 SCAN_LIMIT = 500
+WIZ_TOOL = re.compile(r"(?:^|[_.-])wiz[_.-]+(?:execute|discover)$", re.IGNORECASE)
+AUTH_ERROR = re.compile(
+    r"\b(?:HTTP(?:/\d(?:\.\d)?| error| status)?|status(?: code)?|returned)\s*[:=]?\s*401\b"
+    r"|unauthori[sz]ed|authentication (?:failed|required|expired)"
+    r"|not authenticated|sign[- ]?in (?:is )?required|token (?:expired|invalid)"
+    r"|(?:oauth|authorization) challenge|invalid_token|invalid_grant",
+    re.IGNORECASE,
+)
+
+
+def wiz_tool_result(data: dict) -> bool | None:
+    """True = auth failure, False = verified tool success, None = other/unknown.
+
+    Only explicitly failed calls/error envelopes may contribute error text. Never scan
+    arguments, successful payloads, assistant prose or arbitrary nested evidence.
+    """
+    raw_result = data.get("result")
+    result = raw_result if isinstance(raw_result, dict) else {}
+    failed = data.get("success") is False or result.get("isError") is True
+    if not failed:
+        return False if data.get("success") is True else None
+    errors = [data.get("error"), result.get("error")]
+    if isinstance(raw_result, str):
+        errors.append(raw_result)
+    content = result.get("content")
+    if isinstance(content, str):
+        errors.append(content)
+    elif isinstance(content, list):
+        errors.extend(c.get("text") for c in content if isinstance(c, dict))
+    for error in errors:
+        if isinstance(error, dict):
+            values = [error.get(k) for k in ("message", "code", "status", "statusCode")]
+        else:
+            values = [error]
+        if any(str(v) == "401" or AUTH_ERROR.search(str(v)) for v in values if v is not None):
+            return True
+    return None
 
 
 def short(text: Any, limit: int = 200) -> str:
@@ -235,6 +272,10 @@ class SessionView:
     permissions: dict[str, Pending] = field(default_factory=dict)
     questions: dict[str, Pending] = field(default_factory=dict)
     open_tools: dict[str, int] = field(default_factory=dict)
+    wiz_calls: set[str] = field(default_factory=set)
+    wiz_auth_failed: bool = False
+    last_wiz_ok_at: float = 0.0  # epoch of the latest verified Wiz tool success
+    last_wiz_auth_fail_at: float = 0.0  # epoch of the latest Wiz auth failure
     written: dict[str, str] = field(default_factory=dict)
     final: str = ""
     last_has_tools: bool = False
@@ -278,6 +319,8 @@ class SessionView:
         self.permissions.clear()
         self.questions.clear()
         self.open_tools.clear()
+        self.wiz_calls.clear()
+        self.wiz_auth_failed = False
         self.written.clear()
         self.final, self.finished, self.saw_user = "", False, False
         self.handoff = None
@@ -366,6 +409,8 @@ class SessionView:
             sub=self._sub,
         )
         self.open_tools[call_id] = item["seq"]
+        if WIZ_TOOL.search(name):
+            self.wiz_calls.add(call_id)
         if name == HANDOFF_TOOL and not self._sub:
             self.handoff_calls[call_id] = {
                 "title": short(args.get("title") or "", 120),
@@ -378,6 +423,15 @@ class SessionView:
 
     def _on_tool_execution_complete(self, data: dict, stamp: float) -> None:
         call_id = str(data.get("toolCallId") or "")
+        if call_id in self.wiz_calls:
+            self.wiz_calls.remove(call_id)
+            auth = wiz_tool_result(data)
+            if auth is not None:
+                self.wiz_auth_failed = auth
+                if auth:
+                    self.last_wiz_auth_fail_at = stamp or time.time()
+                else:
+                    self.last_wiz_ok_at = stamp or time.time()
         seq = self.open_tools.pop(call_id, None)
         if seq is not None:
             for item in reversed(self.progress):
@@ -412,6 +466,7 @@ class SessionView:
                     item["aborted"] = True
                     break
         self.open_tools.clear()
+        self.wiz_calls.clear()
 
     def _on_permission_requested(self, data: dict, stamp: float) -> None:
         request = data.get("permissionRequest") or {}

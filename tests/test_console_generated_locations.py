@@ -16,7 +16,6 @@ GENERATED = {
     imports.WEEKLY_DIR: "weekly",
     imports.MONTHLY_DIR: "monthly",
     imports.DAILY_DIR: "daily",
-    imports.STATUS_CHECK_DIR: "status-check",
 }
 
 
@@ -26,20 +25,16 @@ def test_generated_location_has_mapping_and_button(directory, category):
     assert f'deliverablesButton("{category}"' in APP_JS.read_text(encoding="utf-8")
 
 
-def test_status_check_listing_confined(env):  # noqa: F811
+def test_status_check_results_stay_backend_only(env):  # noqa: F811
     config, workspace, _ = env
     base = workspace / "deliverables" / "Status-Check"
     base.mkdir(parents=True)
     (base / "abc12345.json").write_text("{}", encoding="utf-8")
-    (base / "secret.pem").write_text("x", encoding="utf-8")
-    (base / "tool.py").write_text("x", encoding="utf-8")
-    names = {f["name"] for f in launcher.list_files(config, "status-check", "results")}
-    assert names == {"abc12345.json"}
-    for bad in ("../x", "other", "results/.."):
-        with pytest.raises(ValueError):
-            launcher.list_files(config, "status-check", bad)
+    assert "status-check" not in launcher.CATEGORY_DIRS
     with pytest.raises(ValueError):
-        launcher.resolve_file(config, "status-check", "results", "../tool.py")
+        launcher.list_files(config, "status-check", "results")
+    with pytest.raises(ValueError):
+        launcher.open_relative(config, "deliverables/Status-Check/abc12345.json")
     case = workspace / "deliverables" / "Risk-Issues" / "Case-1"
     case.mkdir(parents=True)
     (case / "e.json").write_text("{}", encoding="utf-8")

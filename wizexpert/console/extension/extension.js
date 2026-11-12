@@ -226,7 +226,7 @@ async function runJobUnbounded(job) {
       if (cmd) await settleWithin(vscode.commands.executeCommand(cmd), 5000);
       info.note = 'focused';
     } else if (job.kind === 'mcp_status') {
-      // Wiz MCP tools registered in this window mean the server is running and signed in.
+      // Registration only: this does not verify server liveness or authenticated Wiz access.
       const tools = (vscode.lm && vscode.lm.tools) || [];
       const re = /wiz/i;
       info.toolCount = tools.filter((t) => re.test(String(t.name || ''))).length;
