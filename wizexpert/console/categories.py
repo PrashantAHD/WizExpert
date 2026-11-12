@@ -487,7 +487,14 @@ DAILY_ACTIONS: tuple[Action, ...] = (
             ),
         ),
         "Daily Progress Reporting category, In-progress: continue the existing local work item "
-        "{work_item}. Refresh today's progress report locally only.",
+        "{work_item}. Refresh today's progress report locally only. For the PHP2SHELL Campaign "
+        "work item, follow the php2shell-daily-report skill end to end without asking for "
+        "confirmation: fetch fresh read-only Wiz data with collect_refresh.py, assemble a new "
+        "snapshot and inventory, run update_dashboard.py --update, and rebuild all deliverables "
+        "and the Inactive workbook. If a Wiz MCP call fails with 401 or a sign-in prompt, stop "
+        "and say: Reconnect Wiz MCP in VS Code, then click Refresh again. Never claim success "
+        "without fresh outputs. Do not send email or change Wiz, ServiceNow or cloud",
+        max_prompt=1200,
     ),
     Action(
         "reply-stakeholder",
@@ -551,7 +558,11 @@ CATEGORIES: dict[str, Category] = {
             ),
         ),
         "Daily Progress Reporting category: prepare the daily progress report for today{note}",
-        stages=(("new", "New Issue"), ("in-progress", "In-Progress")),
+        stages=(
+            ("new", "New Issue"),
+            ("in-progress", "In-Progress"),
+            ("deliverables", "Deliverables"),
+        ),
         actions=DAILY_ACTIONS,
         work_items=("PHP2SHELL Campaign",),
         imports="daily",

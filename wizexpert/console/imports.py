@@ -999,9 +999,25 @@ def scan_weekly(config: ConsoleConfig) -> list[dict[str, Any]]:
         )
     reports.sort(key=lambda r: r["name"], reverse=True)
     reports = reports[:MAX_ITEMS]
+    today = _today()
     for index, report in enumerate(reports):
         report["latest"] = index == 0
+        report["updatable"] = index == 0 and weekly_update_open(report["name"], today)
     return reports
+
+
+def _today() -> datetime.date:
+    return datetime.date.today()
+
+
+def weekly_update_open(name: str, today: datetime.date) -> bool:
+    """A weekly report can be updated from its report date until the following Monday EOD."""
+    try:
+        start = datetime.date.fromisoformat(name)
+    except ValueError:
+        return False
+    end = start + datetime.timedelta(days=(7 - start.weekday()) or 7)
+    return start <= today <= end
 
 
 def scan_daily(config: ConsoleConfig) -> list[dict[str, Any]]:
@@ -1018,6 +1034,105 @@ def scan_daily(config: ConsoleConfig) -> list[dict[str, Any]]:
         out.append({"name": folder.name, "modified": _mtime(folder)})
     out.sort(key=lambda r: r["modified"], reverse=True)
     return out[:MAX_ITEMS]
+
+
+#: Daily deliverables expire after this many days (emails already hold the backup).
+DAILY_RETENTION_DAYS = 7
+
+
+def daily_cutoff(now: float | None = None) -> float:
+    return (time.time() if now is None else now) - DAILY_RETENTION_DAYS * 86400
+
+
+def daily_deliverable_files(
+    config: ConsoleConfig, *, expired: bool = False, now: float | None = None
+) -> list[dict[str, Any]]:
+    """Top-level deliverable files of each daily campaign folder (read-only).
+
+    Only direct children with a deliverable extension are returned, never the evidence,
+    archives or snapshots subfolders. ``expired`` selects files older than the retention
+    window; otherwise only files inside it.
+    """
+    base = _base(config, DAILY_DIR)
+    if base is None:
+        return []
+    cutoff = daily_cutoff(now)
+    out: list[dict[str, Any]] = []
+    for folder in _children(base, config):
+        if not folder.is_dir() or not SAFE_NAME.fullmatch(folder.name):
+            continue
+        for entry in _children(folder, config):
+            if not entry.is_file() or entry.suffix.lower() not in DELIVERABLE_EXTENSIONS:
+                continue
+            modified = _mtime(entry)
+            if (modified < cutoff) != expired:
+                continue
+            out.append(
+                {
+                    "campaign": folder.name,
+                    "name": entry.name,
+                    "type": entry.suffix.lower().lstrip("."),
+                    "modified": modified,
+                    "path": entry,
+                }
+            )
+    return out
+
+
+def scan_daily_by_date(config: ConsoleConfig, now: float | None = None) -> list[dict[str, Any]]:
+    """Unexpired daily deliverables grouped by local date, newest date first."""
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for item in daily_deliverable_files(config, now=now):
+        day = datetime.date.fromtimestamp(item["modified"]).isoformat()
+        groups.setdefault(day, []).append(
+            {k: item[k] for k in ("campaign", "name", "type", "modified")}
+        )
+    out = []
+    for day in sorted(groups, reverse=True):
+        files = sorted(groups[day], key=lambda f: (-f["modified"], f["campaign"], f["name"]))
+        out.append({"date": day, "files": files[:MAX_ITEMS]})
+    return out[:MAX_ITEMS]
+
+
+def cleanup_daily(
+    config: ConsoleConfig, *, apply: bool = False, now: float | None = None
+) -> list[str]:
+    """Explicit retention: remove expired top-level daily deliverable files.
+
+    Dry run unless ``apply``. Touches only regular, non-symlink deliverable-extension files
+    directly inside deliverables/Daily-Progress-Reporting/<campaign>/; evidence, archives,
+    snapshots and every other folder are never visited. Returns the relative names.
+    """
+    removed: list[str] = []
+    for item in daily_deliverable_files(config, expired=True, now=now):
+        path: Path = item["path"]
+        removed.append(f"{item['campaign']}/{item['name']}")
+        if apply:
+            with contextlib.suppress(OSError):
+                path.unlink()
+    return removed
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m wizexpert.console.imports",
+        description="List (default) or delete (--apply) Daily-Progress-Reporting deliverables "
+        "older than 7 days.",
+    )
+    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--apply", action="store_true", help="Actually delete (default: dry run).")
+    args = parser.parse_args(argv)
+    names = cleanup_daily(ConsoleConfig(workspace=args.workspace), apply=args.apply)
+    print(("Deleted" if args.apply else "Would delete") + f" {len(names)} file(s)")
+    for name in names:
+        print(" ", name)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
 
 
 def latest_weekly(config: ConsoleConfig) -> dict[str, Any] | None:

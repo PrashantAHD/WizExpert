@@ -589,6 +589,8 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 )
             if path == "/api/imports/daily":
                 return self._json(HTTPStatus.OK, {"campaigns": imports.scan_daily(config)})
+            if path == "/api/imports/daily-by-date":
+                return self._json(HTTPStatus.OK, {"dates": imports.scan_daily_by_date(config)})
             if path == "/api/imports/weekly":
                 return self._json(HTTPStatus.OK, {"reports": imports.scan_weekly(config)})
             if path == "/api/imports/monthly":

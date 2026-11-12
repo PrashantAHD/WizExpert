@@ -123,6 +123,26 @@ Record each such request in the optional top-level review field `owner_changes`
 
 ## Post-collection check (one gate before generation)
 
+### Tool access and local output recovery
+
+- Verify access with a cheap actual read-only catalog call before collection; registered MCP
+  tools alone do not prove authentication. Reuse known approved schemas; discover only missing
+  schemas or when the service reports a changed contract.
+- Classify auth failures from actual failed Wiz calls/error envelopes in completion order,
+  respecting later successful recovery. Conditional prose, ordinary OAuth mentions, incorrect
+  discovery domains, commands and successful evidence payloads are not auth failures.
+- No tools, a missing helper or an expired UI start hint do not prove server shutdown or SSO
+  expiry. Do not automatically restart a healthy MCP server; there is no keepalive guarantee.
+- Name every missing/stale required output even when auth failed. When collection is complete
+  but generation is not, repair locally from the same reconciled snapshot/inventory. Record
+  retained-evidence reuse and its actual cutoff; never label this new collection.
+- A required stakeholder draft belongs in the deterministic validated build and output hashes,
+  not an optional manual follow-up. Archive existing deliverables before replacement and fail
+  the build if draft validation fails. Never send the draft.
+- Record only checks actually performed on the rebuilt files. Previous native Office or visual
+  QA does not transfer to a new build. Historical frozen run outcomes are not recomputed from
+  later files.
+
 Reuse-first stays the default: start from retained evidence and collect only
 what is missing. Collection itself is **not** pre-approved, allow-listed or
 independently reviewed, and no tool call is ever blocked. After collection and
@@ -419,3 +439,10 @@ deliverables/Status-Check, console notification ("Sync completed > No change det
 "Changes detected, click to view"), per-case "Approve refresh" click required, Collection plan and
 Generation never auto-approved, Phase 2 shows no status until a refresh is approved, and a stale
 no-change delta never blocks a manual Refresh.
+
+## Daily deliverables expire after 7 days (owner-approved, persistent rule)
+
+Daily deliverables expire after 7 days; the console Deliverables tab hides older files. Cleanup is
+explicit (dry run by default, `--apply` to delete), limited to top-level deliverable files in
+`deliverables/Daily-Progress-Reporting/<campaign>/`, and never touches evidence, archives or
+snapshots needed by the campaign workflow. See CONSOLE.md.
