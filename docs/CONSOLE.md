@@ -119,18 +119,46 @@ passwords, MFA codes or tokens.
 
 ### Wiz MCP status
 
-The sidebar shows **Wiz MCP connected / needs sign-in / stopped / not configured** with Start,
-Stop, Authenticate and Refresh. The server finds MCP server *names* containing "wiz" in the
+The sidebar shows **tools registered (access unverified) / start-auth requested /
+stop requested / helper unavailable / unknown / not configured**, with manual Start,
+Stop, Authenticate (restart) and Refresh. The server finds MCP server *names* containing "wiz" in the
 workspace `.vscode/mcp.json` and the user `mcp.json` (names only; settings, headers and
 environment are never read into a response or job). The helper reports whether Wiz tools are
-registered in `vscode.lm.tools` (connected) and runs VS Code's own `workbench.mcp.startServer` /
+registered in `vscode.lm.tools` and runs VS Code's own `workbench.mcp.startServer` /
 `stopServer` / `restartServer` commands for the buttons. Authenticate restarts the server so
-VS Code opens the SSO page in your browser; finish sign-in there. `GET /api/helper/mcp`,
+VS Code may request sign-in in your browser; finish it there if prompted. `GET /api/helper/mcp`,
 `POST /api/helper/mcp {"action": "start|stop|auth|list"}`.
-Limitation: VS Code exposes no public API for MCP server state, so *needs sign-in* is inferred
-(no tools yet within 10 minutes of a Start/Authenticate from the console) and the MCP command
-arguments may differ between VS Code versions; if a button has no effect, use the `list`
-action (MCP: List Servers) in VS Code.
+Limitation: registration is neither a server-health check nor proof of authenticated access.
+Zero tools and expiration of the ten-minute start/auth hint mean **unknown**, not stopped or
+expired SSO. Stop requested records operator intent, not verified process termination.
+When tools are registered, the status also reads **metadata only** from the local mcp-remote
+token cache (`%LOCALAPPDATA%\WizExpert\mcp-bridge\auth\mcp-remote-v1\*_tokens.json`): whether
+access/refresh tokens exist (booleans), the file time as "last renewed" and that plus
+`expires_in` as "valid until". Token values are never returned, logged or rendered, and no
+Wiz/MCP call is made. Green **Wiz authenticated**: refresh token present, access token valid
+(or expired under two minutes ago, as the bridge renews on demand) and no auth failure from a
+run newer than the last renewal. Amber **Wiz sign-in will be needed**: no refresh token,
+access token expired long ago without renewal, or the latest run failed authentication; use
+Authenticate (restart). If the cache cannot be read the old amber "access unverified" shows.
+This is the local login state, not a server-side check. Restart the console to load changes.
+The helper does not provide keepalive or authentication guarantees. No automatic MCP restart
+is performed; do not restart a healthy server to check it. Command arguments may differ between
+VS Code versions; if a button has no effect, use the `list` action in VS Code.
+
+Before collection, use a cheap actual read-only catalog call to verify access at that moment;
+reuse known approved schemas instead of repeating discovery. Only explicitly failed Wiz
+tool/error envelopes establish authentication failures. Conditional progress prose, OAuth
+mentions, command text and successful result payloads do not. A later successful Wiz call
+clears the earlier error classification. Raw error payloads are not exposed by the console.
+
+Daily Refresh requires the dated matching snapshot/inventory and every required output newer
+than the run, including the draft and validation manifest; ending the chat is insufficient.
+Missing/stale outputs are always listed, including on an auth failure. A collected snapshot with
+a missing draft is **local generation incomplete**: repair from the reconciled retained evidence,
+explicitly label that reuse, and do not automatically collect again or claim new collection.
+The deterministic build must generate and validate the draft, not leave it as a manual step.
+Frozen final results remain historical records; later files do not turn an old failed run into
+a success. New runs report their own current checks.
 
 ### Imported work and previous reports
 
@@ -148,9 +176,8 @@ secrets and unsupported types are never listed) via
 `GET /api/imports/files?category=<risk-issues|daily|weekly|monthly>&folder=<case|campaign|report folder|YYYY-MM>`
 (Daily campaigns are listed by `GET /api/imports/daily`, read-only, dot-folders skipped; a test
 enforces that every category with `imports` has a `launcher.CATEGORY_DIRS` entry.)
-**Status-Check results:** category `status-check`, fixed folder `results` (flat `deliverables/Status-Check`;
-the read-only status-check run's small `.json` result files are additionally allowed for this category
-only; evidence/archives stay hidden). The button sits under the sync phases panel. Email drafts,
+**Status-Check results** (`deliverables/Status-Check`) are backend-only: the sync uses them, but the
+UI has no Deliverables button for them and they are not listed or opened. Email drafts,
 follow-ups, replies, change summaries and update-deliverables outputs are direct files in the case
 folder (`inputs/` and `archives/` sub-folders are intentionally not listed). A test
 (`test_console_deliverables.py`) enforces a CATEGORY_DIRS entry plus an app.js button for every generated location.
@@ -182,26 +209,25 @@ launch, no helper).
   Wiz/SNOW/cloud change, no email.
   Sync is Risk Issues-only: the topbar control is labelled "Risk Issues only", is hidden on the Weekly Progress Reporting and Monthly Governance Reporting pages, and the client guard refuses to call the endpoint there; no category-page sync controls exist. Weekly report generation does its own fresh read-only Wiz status fetch for the reporting scope (retained Risk Issues/Daily evidence is only history and remediation context) and Monthly is independent of both.
   The homepage topbar performs a read-only Wiz status check for eligible worked-on In-Progress cases when
-  the last sync is older than 24 hours. Sync starts ONE `status-check` run (hidden `system` stage
+  no check has started yet in the current IST day (persisted `last_started`). Sync starts ONE `status-check` run (hidden `system` stage
   action, not gated) in the VS Code WizExpert chat, because only that chat has read-only Wiz MCP
   access; the console server has none. The check fetches the latest Wiz status of the eligible
   cases' issue IDs, compares it with each case's latest retained evidence, writes nothing into
   case folders, mutates nothing in Wiz/ServiceNow/cloud and sends no email. Its only output is
-  `deliverables/Status-Check/<token>.json` (`checked`, and `changed` with a short `reason`).
+  `deliverables/Status-Check/<token>.json` (`checked`, and `changed` with a short `reason`), kept
+  backend-only (no Deliverables button).
   Eligibility: not resolved, not legacy, has retained evidence and issue IDs, and assigned to the
   owner. Assignee exists only in Wiz, so the owner id is passed in the prompt and the check run filters
   read-only. Set it in the private console config (`--config`) as `status_sync_assignee`
   (never committed to the public repo); with it unset the sync refuses and starts nothing.
-  When the check run completes (the next sync POST, or the 60 s progress poll, which is also a POST,
-  while a sync is in progress), the console starts the ungated `sync-refresh` run (no approval step; read-only Wiz, local drafts, no email) ONLY for changed cases, one at a
-  time; cases blocked by the one-active-run guard stay `pending` in the sync state and are
-  retried, not lost; a Refresh start refused for any other reason is recorded in `skipped` and dropped
-  from `pending` so it cannot wedge the queue. `GET /api/imports/risk-issues/sync` is side-effect free (it only
-  reports state); only `POST` starts or advances runs, serialized by a lock so concurrent requests cannot
-  double-queue. Sync state records `phase` (checking/refreshing/done/failed), `phase1` (status check) and
-  `phase2` (Refresh plus deliverables), each `started`/`running`/`completed`/`failed` with timestamps, `checked`,
-  `changed`, `pending`, `queued` and `skipped`. Both phases are always visible in the console: a **Phase 1 / Phase 2** strip under the topbar,
-  the sync icon hint, and notification rows labelled Phase 1 / Phase 2. Refresh deliverables include a PDF change summary
+  When the check run completes, the console produces a daily change report and one console
+  notification ("Sync completed > No change detected" or "Sync completed > Changes detected, click to
+  view"). Nothing is refreshed automatically: each changed case gets its own **Approve refresh**
+  button, and only that owner click starts the read-only `sync-refresh` run for that case (local
+  drafts, no email). Phase 2 shows no status until a refresh is approved. A stale or unapproved delta
+  never blocks a manual Refresh. `GET /api/imports/risk-issues/sync` is side-effect free (it only
+  reports state); only `POST` starts or advances runs, serialized by a lock. There is no inline
+  Phase 1 / Phase 2 strip; the result is shown through the sync icon hint and the notification. Refresh deliverables include a PDF change summary
   (INC created and emailed dates, risk descriptions, recommended remediation approach) with the private confidentiality footer on every printed page;
   Risk Issues emails follow the four-stage lifecycle in `WORKFLOW-QA.md`. A failed check counts as an attempt, so automatic checks
   retry at most once per interval (a manual forced sync retries immediately). Resolved cases are not
@@ -246,8 +272,9 @@ launch, no helper).
   or malformed field shows the boxes unchecked, and the boxes are disabled without a record.
   `GET /api/imports/risk-issues`.
 - **Weekly Progress** (*Previous reports* and *New report*): lists `deliverables\Weekly-Progress-Reporting`
-  (newest first) with Open PDF / PPTX / email draft. **Update** exists for the latest report only
-  (enforced by the backend): paste the internal and/or client response (quoted data between
+  (newest first) with Open PDF / PPTX / email draft.   **Update** exists for the latest report only, and only
+    from its report date (the Friday snapshot) until the following Monday EOD (local date; enforced by the
+    backend, older or closed reports are     read-only history): paste the internal and/or client response (quoted data between
   BEGIN/END RESPONSES, up to 1500 characters each) or name a local file under `deliverables`;
   the agent archives the prior version first, regenerates from retained evidence, writes a change
   log and runs the validators; the email stays a draft. **New report** is the existing form
@@ -535,3 +562,16 @@ Replaces the earlier delta auto-approval. Applies to the Risk Issues workflow on
   refresh is approved. A manual Refresh/Update is never blocked by a stale or no-change delta and
   stays gated (Collection plan, Generation) with manual approval.
 - Never sends email, mutates Wiz/ServiceNow, commits or pushes.
+
+## Daily deliverables expire after 7 days (owner-approved, persistent rule)
+
+Daily Progress Reporting has a third tab, **Deliverables** (after In-Progress, with a gap). It lists
+top-level deliverable files of `deliverables/Daily-Progress-Reporting/<campaign>/` grouped by
+modified date, newest first, read-only (`GET /api/imports/daily-by-date`). The old "Daily
+deliverables" section moved here; In-Progress keeps "Existing work items". Daily deliverables
+expire after 7 days (emails already hold the backup): older files are never shown.
+
+Retention is an explicit action, not automatic: `python -m wizexpert.console.imports --workspace
+<dir>` is a dry run listing expired files; add `--apply` to delete them. It only touches
+top-level deliverable-extension, non-symlink files inside the Daily-Progress-Reporting campaign
+folders; `evidence`, `archives`, `snapshots` and every other folder are never visited.

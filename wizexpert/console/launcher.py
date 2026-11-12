@@ -81,13 +81,11 @@ CATEGORY_DIRS: dict[str, str] = {
     "weekly": imports.WEEKLY_DIR,
     "monthly": imports.MONTHLY_DIR,
     "daily": imports.DAILY_DIR,
-    "status-check": imports.STATUS_CHECK_DIR,
 }
 #: Flat categories: files sit directly in the category folder and the only folder name is fixed.
-FLAT_FOLDERS: dict[str, str] = {"status-check": "results"}
-#: Extra extensions per category (status-check results are small JSON files;
-#: evidence JSON stays hidden).
-EXTRA_EXTENSIONS: dict[str, frozenset[str]] = {"status-check": frozenset({".json"})}
+FLAT_FOLDERS: dict[str, str] = {}
+#: Extra extensions per category (none today; evidence JSON stays hidden).
+EXTRA_EXTENSIONS: dict[str, frozenset[str]] = {}
 _NO_FOLDER = "No such deliverables folder."
 
 
@@ -133,6 +131,8 @@ def list_files(config: ConsoleConfig, category: str, folder_name: str) -> list[d
             continue
         if category == "monthly" and imports.month_of(entry.name) != folder_name:
             continue
+        if category == "daily" and imports._mtime(entry) < imports.daily_cutoff():
+            continue  # daily deliverables expire after 7 days
         out.append(
             {
                 "name": entry.name,
@@ -202,8 +202,6 @@ def open_relative(config: ConsoleConfig, relative: str) -> str:
     root = Path(config.output_roots[0]).as_posix().split("/")
     by_dir = {v: k for k, v in CATEGORY_DIRS.items() if k not in FLAT_FOLDERS}
     n = len(root)
-    if len(parts) == n + 2 and parts[:n] == root and parts[n] == imports.STATUS_CHECK_DIR:
-        return open_file(config, "status-check", "results", parts[-1])
     if len(parts) == n + 2 and parts[:n] == root and parts[n] == imports.MONTHLY_DIR:
         month = imports.month_of(parts[-1])  # flat monthly file
         return open_file(config, "monthly", month, parts[-1])
