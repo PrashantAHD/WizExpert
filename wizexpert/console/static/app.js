@@ -21,6 +21,7 @@ const STAGE_HELP = {
   "in-progress": "Continue existing work with an acceptance, email, or status action.",
   resolved: "Review resolved cases and open their local deliverables (read-only; no refresh or update).",
   previous: "Browse what already exists locally (read-only), then update, compare or start the next one.",
+  deliverables: "Read-only list of daily deliverables by date (last 7 days).",
 };
 const VIEWS = ["home", "dashboard", "progress", "history", "workflow", "run"];
 
@@ -612,12 +613,6 @@ function syncStatusText(syncState) {
   else if (Number.isFinite(syncState.checked)) result = " \u00b7 Checked " + syncState.checked + ", changed " + (syncState.changed || []).length + (syncState.pending && syncState.pending.length ? ", " + syncState.pending.length + " Refresh pending." : ".");
   return "Risk Issues only \u00b7 Last synced " + when + " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + result;
 }
-// The daily result is a console notification, not an inline phase banner; only Deliverables stays here.
-function renderSyncPhases(syncState) {
-  const box = $("sync-phases");
-  if (!box) return;
-  box.replaceChildren(deliverablesButton("status-check", "results", null));
-}
 function dailySyncNotice(syncState) {
   if (!syncState || syncState.phase !== "done" || !Array.isArray(syncState.checked_cases)) return null;
   const changed = (syncState.changed || []).length > 0;
@@ -661,7 +656,6 @@ function updateSyncStatus(syncState) {
   button.title = text + " \u00b7 Click to sync now";
   button.setAttribute("aria-label", "Sync Risk Issues status. " + text);
   if (tooltip) tooltip.textContent = text;
-  renderSyncPhases(syncState);
   renderNotifications();
 }
 async function loadTopbarSync() {
@@ -1047,7 +1041,7 @@ function showWorkflow(category, stageId, actionId) {
       else detail.append(monthlyPanel(category));
       return;
     }
-    if (category.imports === "daily" && stage.id === "in-progress") detail.append(dailyPanel());
+    if (category.imports === "daily" && stage.id === "deliverables") { detail.append(dailyPanel()); return; }
     if (category.imports === "risk-issues" && stage.id === "in-progress") detail.append(riskCasesPanel(category, false));
     if (category.imports === "risk-issues" && stage.id === "resolved") { detail.append(riskCasesPanel(category, true)); return; }
     if (stage.id === "in-progress" && category.work_items && category.work_items.length) {
@@ -1137,7 +1131,7 @@ function showWorkflow(category, stageId, actionId) {
     }
   };
   for (const s of category.stages) {
-    stageButtons[s.id] = h("button", { class: "seg", type: "button", onclick: () => go(wfPath(category.id, s.id), { focus: "stage" }) }, s.title);
+    stageButtons[s.id] = h("button", { class: "seg" + (s.id === "deliverables" ? " seg-gap" : ""), type: "button", onclick: () => go(wfPath(category.id, s.id), { focus: "stage" }) }, s.title);
     stageBar.append(stageButtons[s.id]);
   }
   arrowNav(stageBar);
@@ -1315,17 +1309,24 @@ function riskCasesPanel(category, resolvedOnly) {
     h("p", { class: "help" }, resolvedOnly ? "Read-only scan of deliverables/Risk-Issues for cases whose latest retained refresh shows every issue RESOLVED. Only the local deliverables can be opened; no refresh, update or email action is offered. Nothing is changed by this list." : "Read-only scan of deliverables/Risk-Issues. Refresh is repeatable: it fetches the latest Wiz status read-only, compares with the retained evidence, saves a new snapshot and change summary and updates the deliverables; email actions only draft locally. Nothing is changed by this list."), list, message);
 }
 function dailyPanel() {
-  const list = h("div", { class: "item-list" }, loadingNote("Scanning daily campaigns..."));
+  const list = h("div", { class: "item-list" }, loadingNote("Scanning daily deliverables..."));
   const message = h("p", { role: "status" });
-  api("GET", "/api/imports/daily").then((res) => {
+  api("GET", "/api/imports/daily-by-date").then((res) => {
     clear(list);
-    if (!res.campaigns.length) { list.append(h("p", { class: "help" }, "No daily campaign folders were found.")); return; }
-    res.campaigns.forEach((c) => list.append(h("div", { class: "item-row" },
-      h("div", {}, h("strong", {}, c.name), h("span", { class: "meta" }, "Last modified " + fmtDate(c.modified))),
-      h("div", { class: "row-actions" }, deliverablesButton("daily", c.name, message)))));
-  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list campaigns: " + e.message)); });
+    if (!res.dates.length) { list.append(h("p", { class: "help" }, "No daily deliverables from the last 7 days.")); return; }
+    for (const d of res.dates) {
+      list.append(h("h3", { class: "date-heading" }, d.date));
+      for (const f of d.files) {
+        list.append(h("div", { class: "item-row" },
+          h("div", {}, h("strong", { class: "mono" }, f.name), h("span", { class: "meta" }, f.campaign + " \u00b7 " + f.type + " \u00b7 " + fmtDate(f.modified))),
+          h("div", { class: "row-actions" },
+            h("button", { class: "secondary small", type: "button", onclick: () => openDeliverable("daily", f.campaign, f, null, message) }, "Open"),
+            deliverablesButton("daily", f.campaign, message))));
+      }
+    }
+  }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list deliverables: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Daily deliverables"),
-    h("p", { class: "help" }, "Read-only list of deliverables/Daily-Progress-Reporting. Only top-level report files are shown; nothing is changed."),
+    h("p", { class: "help" }, "Read-only, newest date first. Daily deliverables expire after 7 days (emails hold the backup); older files are not shown. Nothing is changed."),
     list, message);
 }
 function weeklyPanel(category) {
@@ -1351,14 +1352,14 @@ function weeklyPanel(category) {
       const older = res.reports[i + 1];
       const row = [deliverablesButton("weekly", r.name, message)];
       if (r.has_data && older && older.has_data) row.push(h("button", { class: "secondary small", type: "button", onclick: () => compare(r.name, older.name) }, "Compare with " + older.name));
-      if (r.latest) row.push(h("button", { type: "button", onclick: () => go(wfPath(category.id, "previous", "update")) }, "Update"));
+      if (r.updatable) row.push(h("button", { type: "button", onclick: () => go(wfPath(category.id, "previous", "update")) }, "Update"));
       list.append(h("div", { class: "item-row" },
-        h("div", {}, h("strong", {}, "Report " + r.name), h("span", { class: "meta" }, "Last modified " + fmtDate(r.modified) + (r.latest ? " \u00b7 latest (can be updated)" : " \u00b7 read-only history") + (r.template_only ? " \u00b7 template files only" : ""))),
+        h("div", {}, h("strong", {}, "Report " + r.name), h("span", { class: "meta" }, "Last modified " + fmtDate(r.modified) + (r.updatable ? " \u00b7 latest (can be updated until Monday EOD)" : r.latest ? " \u00b7 latest (update window closed)" : " \u00b7 read-only history") + (r.template_only ? " \u00b7 template files only" : ""))),
         h("div", { class: "row-actions" }, ...row)));
     });
   }).catch((e) => { clear(list); list.append(h("p", { class: "bad" }, "Could not list reports: " + e.message)); });
   return h("section", { class: "imports" }, h("h2", {}, "Previous reports"),
-    h("p", { class: "help" }, "Read-only list of deliverables/Weekly-Progress-Reporting. Only the latest report can be updated; the email stays a local draft."),
+    h("p", { class: "help" }, "Read-only list of deliverables/Weekly-Progress-Reporting. Only the latest report can be updated, from its report date (Friday) until the following Monday EOD; the email stays a local draft."),
     list, message, diffBox,
     h("div", { class: "form-actions" }, h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(category.id, "new")) }, "New report")));
 }
@@ -1453,13 +1454,13 @@ function approvalBanner(run) {
     h("button", { type: "button", onclick: () => focusVsCode(run) }, "Focus VS Code"));
 }
 // ---- Wiz MCP status (sidebar) ----------------------------------------------------------------------------
-const MCP_TEXT = { connected: "Wiz MCP connected", needs_auth: "Wiz MCP needs sign-in", stopped: "Wiz MCP stopped", not_configured: "Wiz MCP not configured", unknown: "Wiz MCP status unknown" };
+const MCP_TEXT = { registered: "Wiz tools registered - access unverified", authenticated: "Wiz authenticated", signin_needed: "Wiz sign-in will be needed", starting: "Wiz MCP start/auth requested", stop_requested: "Wiz MCP stop requested", helper_unavailable: "Wiz MCP helper unavailable", not_configured: "Wiz MCP not configured", unknown: "Wiz MCP status unknown" };
 async function refreshMcp() {
   try { state.mcp = await api("GET", "/api/helper/mcp"); } catch (e) { state.mcp = { state: "unknown", detail: e.message, servers: [] }; }
   renderMcp();
 }
 async function mcpAct(action) {
-  try { const r = await api("POST", "/api/helper/mcp", { action }); banner("Wiz MCP " + action + ": " + (r.note || "sent") + (action === "auth" ? ". Finish the sign-in in the browser window." : "")); }
+  try { const r = await api("POST", "/api/helper/mcp", { action }); banner("Wiz MCP " + action + ": " + (r.note || "sent") + (action === "auth" ? ". If VS Code requests sign-in, complete it there." : "")); }
   catch (e) { banner("Wiz MCP: " + e.message); }
   setTimeout(refreshMcp, 4000);
 }
@@ -1467,16 +1468,15 @@ function renderMcp() {
   const box = $("mcp"); if (!box) return;
   clear(box);
   const m = state.mcp || { state: "unknown", detail: "", servers: [] };
-  box.append(h("p", { class: "helper-line" }, h("span", { class: "dot" + (m.state === "connected" ? " on" : ""), "aria-hidden": "true" }), h("span", {},   MCP_TEXT[m.state] || m.state)));
+  box.append(h("p", { class: "helper-line" },   h("span", { class: "dot" + (m.state === "authenticated" ? " on" : ""), "aria-hidden": "true" }), h("span", {}, MCP_TEXT[m.state] || m.state)));
     if (m.detail) box.append(h("p", { class: "help" }, m.detail));
   if (m.servers && m.servers.length) {
-    const running = m.state === "connected" || m.state === "needs_auth";
-    box.append(h("p", { class: "help" }, "Status: " + (running ? "Running" : "Stopped")));
+    const registered = ["registered", "authenticated", "signin_needed"].includes(m.state);
     const btn = (label, fn) => h("button", { class: "secondary small", type: "button", onclick: fn }, label);
     box.append(h("div", { class: "row-actions" },
-      running ? null : btn("Start", () => mcpAct("start")),
-      running ? btn("Stop", () => mcpAct("stop")) : null,
-      m.state === "connected" ? null : btn("Authenticate", () => mcpAct("auth")),
+      registered ? null : btn("Start", () => mcpAct("start")),
+      btn("Stop", () => mcpAct("stop")),
+      btn("Authenticate (restart)", () => mcpAct("auth")),
       btn("Refresh", refreshMcp)));
   }
 }
