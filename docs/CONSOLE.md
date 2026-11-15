@@ -401,6 +401,14 @@ never from this repository:
   `scripts/console-workspace/`; copy them into `<outer root>\.vscode\` (the scripts resolve the
   workspace as the parent of their own folder).
 - Stop: **WizExpert: Stop workflow console** (outer root) stops that process.
+- Desktop shortcut: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\console-workspace\install-shortcut.ps1`
+  creates `WizExpert.lnk` on the current Desktop (an identical one is left alone; a different
+  existing one is reported and never overwritten). The shortcut runs `open-console.ps1`, which opens
+  the browser if a console for this exact workspace is already ready on port 8765; otherwise it opens a
+  standard VS Code window on `<outer root>` (`Code.exe` next to `code.cmd`) and waits up to 90 s for the
+  folder-open task to start the console. It never starts or stops the backend itself, refuses an
+  unrelated listener on the port, and reports errors in a dialog. The automatic task still needs
+  `task.allowAutomaticTasks` on and a trusted folder.
 
 The task in this repository's `.vscode/tasks.json` deliberately does not start a console;
 it only explains this setup, so a second backend with a mismatched workspace cannot be
