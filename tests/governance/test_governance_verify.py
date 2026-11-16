@@ -263,3 +263,63 @@ def test_verify_cli_returns_machine_readable_gate_result(prepared, tmp_path, cap
     assert result["share_ready"] is False
     assert result["source_and_output_sha256"][str(profile_path)] == digest(profile_path)
     assert result["workflow_qa"]["status"] == "workflow_checks_passed"
+
+
+def _retext(path, old, new):
+    deck = Presentation(path)
+    hits = 0
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        if old in run.text:
+                            run.text = run.text.replace(old, new)
+                            hits += 1
+    deck.save(path)
+    return hits
+
+
+def test_operational_as_of_date_must_equal_the_cutoff(prepared):
+    # MG-CUT-04: a stale evidence-watermark date in the deck text is rejected.
+    assert _retext(prepared["operational"], "Oct 15, 2026", "Oct 28, 2026") > 0
+    with pytest.raises(DashboardError, match="MG-CUT-04.*Oct 28 2026"):
+        verify_preparation(**prepared)
+
+
+def test_executive_as_of_date_must_equal_the_cutoff(prepared):
+    from wizexpert.governance.verify import _slide_paragraphs
+
+    before = _slide_paragraphs(prepared["executive"])
+    assert before
+    _retext(prepared["executive"], "October 15th, 2026", "As of October 28th, 2026")
+    from wizexpert.governance.governance_data import load_snapshot
+    from wizexpert.governance.verify import check_cutoff
+
+    data = load_snapshot(prepared["snapshot"])
+    # Only asserts when the dashboard carries an "As of" line; the workbook date is always checked.
+    if any("As of October 28th" in t for t in _slide_paragraphs(prepared["executive"])):
+        with pytest.raises(DashboardError, match="MG-CUT-04"):
+            check_cutoff(
+                data,
+                workbook=prepared["workbook"],
+                decks={"Executive dashboard": prepared["executive"]},
+            )
+
+
+def test_period_bounds_must_equal_the_cutoff(prepared):
+    from wizexpert.governance.governance_data import load_snapshot
+    from wizexpert.governance.verify import check_cutoff
+
+    path = prepared["snapshot"]
+    payload = json.loads(path.read_text())
+    assert check_cutoff(
+        load_snapshot(path), workbook=prepared["workbook"], decks={}
+    ) == "2026-10-15"
+    del payload["period"]["backlog_as_of"]
+    payload["period"].update(
+        collected_from="2026-10-15T23:00:00Z", collected_through="2026-10-15T23:59:59Z"
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(DashboardError, match="backlog_as_of must be set"):
+        check_cutoff(load_snapshot(path), workbook=prepared["workbook"], decks={})

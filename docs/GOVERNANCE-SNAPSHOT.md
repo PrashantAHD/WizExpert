@@ -228,6 +228,31 @@ not necessarily all; detailed coverage stays in JSON/notes.
 Keep real identities and assignment evidence in the ignored local snapshot,
 not in repository source or examples.
 
+## Building the snapshot with the CLI
+
+`wizexpert governance snapshot` is the only approved way to build this JSON (MG-REL-04).
+Inputs: `--reviewed` CSV(s) (counts via `cutoff_counts`), `--resolved-raw` (one or more
+complete grouped responses, for example split by severity because of the 50-group limit;
+merged by source-rule id, identical repeats collapse, conflicting duplicates fail),
+`--in-progress-raw`, `--prior-snapshot` (supplies scope, the `prior` block and its
+sha256), `--cutoff`, `--collected-through`, optional `--collected-from`, `--decisions`
+(reviewed `team_resolved`, `owner_status`, `rule_status`, `closure_wording`, etc.; it may
+not override computed fields) and required `--metrics`:
+
+```json
+{
+  "security_score": {"value": 96, "source": "Wiz dashboard", "observed_at": "2026-11-16T09:00:00Z"},
+  "hipaa": {"value": 91, "source": "Owner screenshot", "observed_at": "2026-11-16T09:00:00Z",
+            "framework_version": "HIPAA <exact version>", "screenshot_sha256": "<64 hex>"},
+  "hitrust": {"value": null, "source": "Wiz framework query", "unavailable_reason": "HTTP 504"}
+}
+```
+
+Values must be above 0 or `null` with `unavailable_reason`; a screenshot source needs its
+sha256. The command writes the output only after `load_snapshot` validates it (use
+`--refresh` to replace an existing file) and sets `end_inclusive`, `backlog_as_of` and
+`resolved_through` to the cutoff; a `--backlog-as-of` later than the period end is rejected.
+
 ## Repeat-month operation
 
 ### Sharing names across rule statuses

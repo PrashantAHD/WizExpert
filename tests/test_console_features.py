@@ -747,30 +747,19 @@ def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
 # -- approval gates ----------------------------------------------------------------------------
 
 
-def test_gated_run_hands_nothing_to_the_agent_until_approved_and_reject_ends_it(env):  # noqa: F811
+def test_monthly_proceed_starts_end_to_end_without_approval_gates(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home) as helper:
         run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
-        assert run.status == "awaiting_gate"
-        assert [g["id"] for g in run.gates] == ["collection-plan", "generation"]
-        assert manager.active()[0]["status"] == "awaiting_gate"
-        assert not [j for j in helper.jobs if j["kind"] == "start_chat"]
-        with pytest.raises(RunError, match="earlier gate"):
-            manager.decide_gate(run.id, "generation", "approve")
-        manager.decide_gate(run.id, "collection-plan", "reject")
-    assert manager.get(run.id).status == "rejected"
-    assert manager.active() == []
-    view = manager.view(run.id)
-    assert view["decisions"][0] == {
-        **view["decisions"][0],
-        "gate": "collection-plan",
-        "decision": "reject",
-    }
-    assert [g["state"] for g in view["gates"]] == ["rejected", "skipped"]
-    with pytest.raises(RunError, match="not waiting"):
-        manager.decide_gate(run.id, "collection-plan", "approve")
+        assert run.status == "running" and not run.gates
+        assert [j for j in helper.jobs if j["kind"] == "start_chat"]
+        view = manager.view(run.id)
+    assert [m["label"] for m in view["milestones"]] == [
+        "Run started", "Wiz connected", "Data fetching", "Data collected",
+        "Report generating", "Report generated",
+    ]
 
 
 def test_second_gate_starts_a_follow_up_run_and_decisions_persist(env):  # noqa: F811
@@ -905,7 +894,8 @@ def test_mcp_status_registration_is_not_authentication(env):  # noqa: F811
         assert job["server"] == "mcp.config.ws0.wiz-demo"
         assert "secret" not in json.dumps(helper.jobs)
 
-
+
+
 _FAKE_ACCESS = "SECRET-" + "ACCESS-VALUE"
 _FAKE_REFRESH = "SECRET-" + "REFRESH-VALUE"
 
@@ -1201,11 +1191,14 @@ def test_previous_month_wraps_the_year():
 
 
 def test_new_month_runs_behind_gates_with_runbook(env):  # noqa: F811
-    config, *_ = env
-    run = _manager(config).start(
-        "monthly-governance-reporting", {"month": "2026-11"}, "new", gated=True
-    )
-    assert "governance runbook" in run.prompt and run.status == "awaiting_gate"
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    with FakeHelper(bridge, workspace, home):
+        run = RunManager(config, bridge, run_async=False, sleep=lambda _s: None).start(
+            "monthly-governance-reporting", {"month": "2026-11"}, "new", gated=True
+        )
+    assert "governance runbook" in run.prompt and run.status == "running"
+    assert not run.gates and "governance collect check" in run.prompt
 
 
 # -- viewing files ---------------------------------------------------------------------------
@@ -1277,26 +1270,7 @@ def test_gate_endpoint_records_decision_over_http(console):  # noqa: F811
             "gated": True,
         },
     )
-    assert status == 200
-    run_id = json.loads(body)["run_id"]
-    bad = api(
-        server,
-        token,
-        "POST",
-        f"/api/runs/{run_id}/gate",
-        {"gate": "generation", "decision": "approve"},
-    )
-    assert bad[0] == 400
-    status, _h, body = api(
-        server,
-        token,
-        "POST",
-        f"/api/runs/{run_id}/gate",
-        {"gate": "collection-plan", "decision": "reject"},
-    )
-    assert status == 200 and json.loads(body)["status"] == "rejected"
-    view = json.loads(api(server, token, "GET", f"/api/runs/{run_id}")[2])
-    assert view["status"] == "rejected" and view["decisions"][0]["decision"] == "reject"
+    assert status == 400 and "helper" in json.loads(body)["error"].lower()
 
 
 # -- helper extension, template and docs ---------------------------------------------------------
@@ -1395,20 +1369,9 @@ def test_thread_safety_of_concurrent_gate_decisions(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
-    run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
-    results = []
-
-    def go():
-        try:
-            manager.decide_gate(run.id, "collection-plan", "reject")
-            results.append("ok")
-        except RunError:
-            results.append("refused")
-
-    threads = [threading.Thread(target=go) for _ in range(4)]
-    [t.start() for t in threads]
-    [t.join() for t in threads]
-    assert results.count("ok") == 1 and len(manager.get(run.id).decisions) == 1
+    with FakeHelper(bridge, workspace, home):
+        run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
+    assert run.status == "running" and not run.gates and not run.decisions
 
 
 # -- manually confirmed milestones ---------------------------------------------------------------
@@ -1843,3 +1806,26 @@ def test_case_delta_from_status_sync_state(env):  # noqa: F811
     assert imports.case_delta(config, "A-wc-id-1") == {"changed": True, "reason": "status changed"}
     assert imports.case_delta(config, "B-wc-id-2") == {"changed": False, "reason": "no change"}
     assert imports.case_delta(config, "C-wc-id-3") is None
+
+
+def test_monthly_milestones_mark_reused_collection_evidence():
+    from types import SimpleNamespace
+
+    from wizexpert.console.runs import RunManager
+
+    def states(status, files, view):
+        run = SimpleNamespace(view=view, files=files)
+        return {m["id"]: m["state"] for m in RunManager._monthly_milestones(None, run, status)}
+
+    reused = states("completed", ["Governance-Workbook.xlsx"], None)
+    assert reused["run-started"] == "ok"
+    wiz_steps = ("wiz-connected", "data-fetching", "data-collected")
+    assert [reused[k] for k in wiz_steps] == ["reused"] * 3
+    assert reused["report-generating"] == reused["report-generated"] == "ok"
+    live = SimpleNamespace(
+        last_wiz_ok_at=1.0, wiz_auth_failed=False, wiz_calls=3, open_tools=[]
+    )
+    assert set(states("completed", ["x.xlsx"], live).values()) == {"ok"}
+    # failures and empty outputs never look reused
+    assert states("stopped", [], None)["wiz-connected"] == "failed"
+    assert "reused" not in states("completed", [], None).values()

@@ -225,6 +225,17 @@ class GovernanceData:
             if "next_step" in entry
         }
 
+    def rule_owner(self) -> dict[str, str]:
+        """Team-reported owner display name for one in-progress rule group, keyed by rule ID.
+
+        Used only when Wiz has no verified assignee for the rule.
+        """
+        return {
+            entry["id"]: entry["owner"]
+            for entry in self.payload.get("rule_status", [])
+            if "owner" in entry
+        }
+
     def closure_wording(self) -> dict[str, dict[str, str]]:
         """Team-written "what changed" / "risk reduced" text for a team-resolved rule.
 
@@ -628,15 +639,25 @@ def load_snapshot(path: Path) -> GovernanceData:
                 require(
                     len(step) <= 200, f"{entry['id']}: next step must be at most 200 characters."
                 )
+            if "owner" in entry:
+                owner = text(entry["owner"], "rule_status.owner")
+                require(
+                    len(owner) <= 60 and "\n" not in owner and not any(c in owner for c in "/()"),
+                    f"{entry['id']}: owner must be one line of at most 60 characters "
+                    "without '/', '(' or ')'.",
+                )
             text(entry.get("source"), "rule_status.source")
         wording = payload.get("closure_wording", [])
-        team_ids = {g["id"] for g in payload.get("team_resolved", {}).get("groups", [])}
+        if "team_resolved" in payload:
+            team_ids = {g["id"] for g in payload["team_resolved"].get("groups", [])}
+        else:
+            team_ids = {g["id"] for g in payload["resolved_groups"]["groups"]}
         require(isinstance(wording, list), "closure_wording must be a list.")
         seen_wording = set()
         for entry in wording:
             require(
                 isinstance(entry, dict) and entry.get("id") in team_ids,
-                f"closure_wording entry {entry!r} must name a team-resolved rule group.",
+                f"closure_wording entry {entry!r} must name a resolved rule group.",
             )
             require(
                 entry["id"] not in seen_wording, f"Duplicate closure_wording for {entry['id']}."

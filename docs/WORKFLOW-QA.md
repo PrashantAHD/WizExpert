@@ -21,6 +21,14 @@ Unknown, missing, failed and unsupported checks block; there is no blanket
 collection needs none. Different names alone do not authenticate an independent
 review.
 
+**Monthly Governance console flow (owner-requested rule).** The console's
+Proceed action authorizes the monthly run end-to-end; it does not present
+separate collection-plan and generation approval steps. The run still fails
+closed when collection, receipt, validation, replay, workflow QA or release
+requirements fail. The console reports the six milestones Run started, Wiz
+connected, Data fetching, Data collected, Report generating and Report
+generated, using a green check for success and a red cross for failure.
+
 ## Owner-requested scope changes
 
 An owner-requested addition to a report or workflow is an approved scope
@@ -33,6 +41,65 @@ runs. This does not waive evidence integrity, privacy, approval, no-send or
 no-mutate controls, or a concrete Critical/High security finding. Conflicts with
 those gates are surfaced with the smallest safe alternative, never silently
 dropped.
+
+**Monthly Governance output rule (owner-approved).** Generate files directly in
+the canonical period directory under
+`deliverables\Monthly-Governance-Reporting` (for example
+`November2026-report`). Keep exactly one canonical filename per deliverable.
+Archive the prior version in that directory's `report-backups` folder before
+replacement; do not create a separate review folder or leave duplicate
+`.generated` files beside the canonical deliverables. This is a location and
+naming rule only and does not waive collection, QA, approval or publication
+gates.
+
+## Monthly governance collection invariant (owner-approved, no bypass)
+
+The canonical, machine-readable rule list is `wizexpert/governance/workflow_rules.py`
+(`wizexpert governance rules`, shown in the console under Monthly Governance
+Reporting). It is the source of truth and is loaded at the start of every monthly
+run; a rule that cannot be satisfied stops the run, citing its id. Rule changes need
+explicit owner approval and are made there. The text below elaborates it.
+
+Every monthly governance collection must use the proven October partition
+design unchanged: four separate OPEN+IN_PROGRESS active censuses (one per
+severity), new findings across all four statuses in the creation window,
+RESOLVED in-window, REJECTED in-window, a REJECTED census, a
+`STATUS_CHANGED_AT DESC` RESOLVED/REJECTED sweep to the watermark boundary,
+planned `get_issue` lookups, and residual lookups. Every `list_issues` page,
+including cursor continuations, must use `first=500`, never `20`. Any
+deviation requires explicit owner
+approval in the current plan; an operator must not choose an alternative
+partition or page size because it appears easier or faster.
+
+The events-log collector is mandatory for pagination. It reads exact
+arguments and `structuredContent` from session `events.jsonl`; cursors and
+payloads must never be hand-typed. It must fail closed unless `after` matches
+the saved `endCursor` byte-for-byte, page ordering advances, IDs are unique,
+`totalCount` is stable, terminal rows equal `totalCount`, and saved tool
+output cross-checks with the collected response.
+
+The post-cutoff ledger built by `build_cutoff_state.py` is also mandatory:
+hold out created-after-cutoff findings; map closed-after-cutoff prior-active
+findings to their prior-active row; map reopened-after-cutoff findings to
+their prior-closed row and confirm `reopenedAt` through `get_issue`; represent
+an in-window reopen later closed after cutoff as OPEN at cutoff; and preserve
+the observed status for active-to-active changes.
+
+The collector must write a plan revision with executed queries and observed
+counts using the `make_plan_r4.py` pattern. Owner approval is required before
+reconciliation. Run governance reconcile and then `governance collect check`;
+generation is blocked until the collection gate is READY. Missing pages,
+unstable totals, duplicate IDs, cursor mismatches, inferred counts, partial
+evidence, stale approvals, and method drift are blockers, never bypasses.
+
+Resolved/Ignored tracking is equally fixed (see the governance runbook's
+"Mandatory Resolved/Ignored tracking"): Wiz `REJECTED` = Ignored / Accepted
+Risk (`IGNORED` input normalized to `REJECTED`); a closure counts only when
+Resolved Time is at or before the cutoff; workbook Total = Open + Resolved +
+Ignored must reconcile and Resolution % = (Resolved + Ignored) / Total; deck
+period closures are split into resolved and accepted. Reviewers must block a
+report that merges, drops or relabels Ignored as technical remediation, or
+that changes these formulas without explicit owner approval.
 
 ## Risk Issues case Refresh (rule)
 

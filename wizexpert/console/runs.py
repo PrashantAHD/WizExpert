@@ -381,13 +381,14 @@ class RunManager:
         ensure_helper: Callable[[], bool] | None = None,
         gated: bool = False,
     ) -> Run:
-        """Start a run. Every gated run waits for the owner's explicit approval; nothing is ever
-        approved automatically (the daily Risk Issues change report has its own approve action)."""
+        """Start a run. Proceed authorizes monthly governance end-to-end."""
         action_id = categories.canonical_action(action_id)
         try:
             values = categories.validate(category_id, raw, action_id)
             prompt = categories.build_prompt(category_id, values, self.config.prompts, action_id)
             gate_list = categories.gate_ids(category_id, action_id, gated)
+            if category_id == "monthly-governance-reporting":
+                prompt += categories.MONTHLY_END_TO_END_NOTE
             if gate_list:
                 prompt = categories.stage_prompt(category_id, prompt, gate_list[0])
         except InputError as error:
@@ -704,6 +705,8 @@ class RunManager:
         data["status"] = status
         data["auto"] = dict(run.auto)
         data["stages"] = self._stages(run, status)
+        if run.category_id == "monthly-governance-reporting":
+            data["milestones"] = self._monthly_milestones(run, status)
         sync = self._sync_for(run)
         frozen = run.final if status in INACTIVE else None
         if frozen is not None:  # an ended run keeps the result it finished with
@@ -737,6 +740,54 @@ class RunManager:
                 reason or "changed cases have no queued Refresh yet (see checklist)."
             )
         return data
+
+    def _monthly_milestones(self, run: Run, status: str) -> list[dict[str, Any]]:
+        """Return the six end-to-end monthly workflow milestones for the console."""
+        labels = (
+            ("run-started", "Run started"),
+            ("wiz-connected", "Wiz connected"),
+            ("data-fetching", "Data fetching"),
+            ("data-collected", "Data collected"),
+            ("report-generating", "Report generating"),
+            ("report-generated", "Report generated"),
+        )
+        sv = run.view
+        wiz_ok = bool(sv and sv.last_wiz_ok_at)
+        wiz_failed = bool(sv and sv.wiz_auth_failed and not wiz_ok)
+        terminal_failure = status in ("stopped", "interrupted", "not_started", "rejected")
+        generated = status == "completed" and bool(run.files)
+        collecting = bool(sv and (sv.wiz_calls or sv.open_tools)) and not terminal_failure
+        states = ["ok", "pending", "pending", "pending", "pending", "pending"]
+        if wiz_failed:
+            states[1] = "failed"
+        elif wiz_ok:
+            states[1] = "ok"
+            states[2] = "ok" if not collecting else "running"
+        reused = (
+            status == "completed" and generated and not wiz_ok and not wiz_failed
+            and not (sv and (sv.wiz_calls or sv.open_tools))
+        )
+        details = [""] * 6
+        if status == "completed" and wiz_ok:
+            states[2:4] = ["ok", "ok"]
+            states[4] = "ok" if generated else "failed"
+            states[5] = "ok" if generated else "failed"
+        elif reused:
+            # Reused READY collection evidence: the run made no Wiz calls, so the Wiz
+            # milestones are marked "reused" (the receipt path is user-chosen, so it is
+            # not looked up here).
+            states[1:4] = ["reused"] * 3
+            details[1:4] = ["Reused collection evidence (no Wiz calls in this run)"] * 3
+            states[4:6] = ["ok", "ok"]
+        elif terminal_failure:
+            failed = next((i for i, value in enumerate(states) if value == "pending"), 1)
+            states[failed] = "failed"
+        elif collecting:
+            states[2] = "running"
+        return [
+            {"id": item[0], "label": item[1], "state": states[i], "detail": details[i]}
+            for i, item in enumerate(labels)
+        ]
 
     def _stages(self, run: Run, status: str) -> list[dict[str, Any]]:
         """Lifecycle of each approval stage: started/running/completed/stopped/failed."""

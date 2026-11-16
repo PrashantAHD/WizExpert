@@ -108,7 +108,7 @@ class Category:
     new_title: str = "New work-item"
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "imports": self.imports,
             "id": self.category_id,
             "title": self.title,
@@ -118,6 +118,12 @@ class Category:
             "actions": [a.to_json() for a in self.all_actions()],
             "work_items": list(self.work_items),
         }
+        if self.category_id == "monthly-governance-reporting":
+            from wizexpert.governance import workflow_rules
+
+            data["rules"] = workflow_rules.grouped()
+            data["rule_count"] = len(workflow_rules.RULES)
+        return data
 
     def all_actions(self) -> tuple[Action, ...]:
         if not self.stages:
@@ -677,9 +683,8 @@ CATEGORIES: dict[str, Category] = {
     ),
 }
 
-# Console-owned approval gates, in order. A gated run is created waiting for the first gate and
-# the console hands one stage prompt to the agent per approved gate. The console never pushes,
-# sends or deletes: a "push" gate only hands the agent an instruction (VS Code still prompts).
+# Console-owned approval gates, in order. Monthly governance is intentionally end-to-end after
+# Proceed; the collection and generation instructions are part of its single prompt.
 GATES: tuple[tuple[str, str], ...] = (
     ("collection-plan", "Collection plan"),
     ("generation", "Generation"),
@@ -708,18 +713,36 @@ CATEGORY_STAGE_NOTES = {
     ),
     ("monthly-governance-reporting", "collection-plan"): (
         " Follow the governance runbook: plan collection from retained evidence, reconcile, "
-        "then build the reviewed snapshot"
+        "then build the reviewed snapshot. Run wizexpert governance collect plan with the "
+        "requested cutoff, execute the approved read-only Wiz partitions, write a fresh "
+        "activity log, manifest, raw evidence and reconciliation outside retained evidence, "
+        "then run wizexpert governance collect check. Report blocked or ready and stop"
     ),
     ("monthly-governance-reporting", "generation"): (
-        " Follow the governance runbook generation, replay gate and release gates"
+        " Follow the governance runbook generation, replay gate and release gates. Do not "
+        "generate unless the collect check receipt is ready; pass it to governance verify "
+        "with the collection-gate option"
     ),
 }
+
+MONTHLY_END_TO_END_NOTE = (
+    " First run wizexpert governance rules and follow every listed rule; stop fail-closed on any "
+    "rule you cannot satisfy and cite its rule id (for example MG-PLN-04)."
+    " Follow the governance runbook end-to-end after Proceed: inspect retained evidence, execute "
+    "the approved read-only Wiz collection, write fresh activity, manifest, raw evidence and "
+    "reconciliation outputs, run governance collect check, and only when its receipt is ready "
+    "generate the workbook and decks. Run validators, workflow QA, replay and release gates, "
+    "pass the receipt to governance verify with the collection-gate option, then stop; send "
+    "nothing and mutate no external system."
+)
 
 
 def gate_ids(category_id: str, action_id: str | None, requested: bool) -> list[str]:
     """Gates for a start request: always for gated actions, otherwise only when requested."""
     category = CATEGORIES.get(category_id)
     if category is None:
+        return []
+    if category_id == "monthly-governance-reporting":
         return []
     action = category.resolve(action_id)
     if (action is not None and action.gated) or requested:

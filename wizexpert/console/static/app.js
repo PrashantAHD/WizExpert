@@ -1135,13 +1135,27 @@ function showWorkflow(category, stageId, actionId) {
     stageBar.append(stageButtons[s.id]);
   }
   arrowNav(stageBar);
-  main.append(stageBar, detail);
+  main.append(stageBar);
+  if (category.rules && category.rules.length) main.append(rulesPanel(category));
+  main.append(detail);
   const stage = stageId ? category.stages.find((s) => s.id === stageId) : null;
   if (stage) showStage(stage, actionId);
   else if (stageId) detail.append(stateBox("error", "Unknown stage", "This stage is not available for " + category.title + ".", "Back to workflow", () => go(wfPath(category.id))));
   else detail.append(stateBox("empty", "Choose a stage", "Select a stage above to continue."));
 }
 // ---- imported local deliverables (read-only listings) and approval gates --------------------------
+// Collapsed list of the canonical end-to-end workflow rules (read-only; source: workflow_rules.py).
+function rulesPanel(category) {
+  const details = h("details", { class: "workflow-rules" });
+  details.append(h("summary", {}, "End-to-end workflow rules (" + (category.rule_count || 0) + ")"));
+  details.append(h("p", { class: "help" }, "These rules are always followed. A rule that cannot be satisfied stops the run, citing its id."));
+  for (const group of category.rules) {
+    const list = h("ul", { class: "rule-list" });
+    for (const r of group.rules) list.append(h("li", {}, h("code", {}, r.id), " ", r.text));
+    details.append(h("section", { "aria-label": group.title }, h("h3", {}, group.title), list));
+  }
+  return details;
+}
 // One shared Deliverables component for every category (risk-issues, weekly, monthly).
 function deliverablesButton(category, folder, message, disabledReason) {
   if (disabledReason || !folder) {
@@ -1440,6 +1454,16 @@ function gatesBlock(run) {
   if (run.parent) box.append(h("p", { class: "help" }, "Continues ", link(runPath(run.parent), "", "the earlier stage"), "."));
   return box;
 }
+function milestonesBlock(run) {
+  if (!run.milestones || !run.milestones.length) return null;
+  const icon = (state) => state === "ok" ? "\u2713" : state === "reused" ? "\u21bb" : state === "failed" ? "\u2717" : "\u25cb";
+  const items = run.milestones.map((m) =>
+    h("li", { class: "milestone " + m.state, title: m.detail || "" },
+      h("span", { class: "milestone-icon", "aria-label": m.state }, icon(m.state)),
+      h("span", {}, m.label + (m.state === "reused" ? " (reused)" : ""))));
+  return h("section", { class: "card milestones", "aria-label": "Workflow milestones" },
+    h("h2", {}, "Workflow status"), h("ul", { class: "milestone-list" }, ...items));
+}
 async function focusVsCode(run) {
   try { const r = await api("POST", "/api/helper/focus", run ? { run_id: run.id } : {}); banner("Focus requested: " + (r.note || "done")); }
   catch (e) { banner("Could not focus VS Code: " + e.message); }
@@ -1653,7 +1677,7 @@ function renderRun(run) {
   root.append(runCrumbs(run), h("header", { class: "page-head" },
     h("h1", { class: "route-heading", tabindex: "-1" }, run.category),
     h("p", { class: "status-line", role: "status" }, badge(run.outcome === "incomplete" ? "incomplete" : run.status), h("span", {}, (run.subject && !TERMINAL.has(run.status) ? run.subject + ": " : "") + run.message))), toolbar);
-  for (const extra of [approvalBanner(run), gatesBlock(run), checklistBlock(run)]) if (extra) root.append(extra);
+  for (const extra of [approvalBanner(run), milestonesBlock(run), gatesBlock(run), checklistBlock(run)]) if (extra) root.append(extra);
   if (run.category_id === "weekly-progress-reporting" && run.status === "completed") {
     toolbar.append(h("button", { class: "secondary", type: "button", onclick: () => go(wfPath(run.category_id, "previous")) }, "Week-over-week diff"));
   }

@@ -75,6 +75,76 @@ filter or latest status-change timestamp is not an equivalent change feed.
 Keep the reporting-period boundary separate from the collection watermark:
 overlap must not double-count prior-period closures.
 
+### Mandatory proven monthly collection method (no bypass)
+
+> **Canonical rules:** the explicit end-to-end Monthly rules live in
+> `wizexpert/governance/workflow_rules.py` (run `wizexpert governance rules`).
+> That list is the source of truth, is loaded at the start of every monthly run,
+> and may change only with explicit owner approval. The prose below elaborates it.
+
+For every monthly governance run, use the proven October partition design
+unchanged. Execute separate OPEN+IN_PROGRESS active censuses for each
+severity; a new-findings partition covering all four statuses in the creation
+window; RESOLVED in the reporting window; REJECTED in the reporting window; a
+current REJECTED census; a `STATUS_CHANGED_AT DESC` RESOLVED/REJECTED sweep
+through the watermark boundary; planned `get_issue` lookups; and residual
+lookups. Every `list_issues` page, including cursor continuations, must use
+`first=500`; `first=20` is not permitted. The plan also includes the
+operational-deck grouped partitions (MG-COL-07): `list_issues_grouped` by
+`SOURCE_RULE` for RESOLVED in the reporting window and for IN_PROGRESS, all
+supported issue types; split by severity when a response would exceed 50
+groups and merge by source-rule id. Any change to this partition design,
+query method, or page size
+requires explicit owner approval recorded in the current plan.
+
+Use the events-log collector pattern for every paginated query. The collector
+must read exact arguments and `structuredContent` from the session
+`events.jsonl`; never hand-type a cursor or payload. Before accepting a page,
+verify that `after` equals the saved `endCursor` byte-for-byte, ordering
+advances, issue IDs have no duplicates, `totalCount` remains stable, terminal
+rows equal `totalCount`, and the saved tool output cross-checks with the
+collected response. Any failed check is a collection blocker, not a reason to
+infer or substitute data.
+
+Apply the post-cutoff ledger in `build_cutoff_state.py`: hold out
+created-after-cutoff findings; keep a prior-active row when closure occurs
+after cutoff; keep a prior-closed row when reopening occurs after cutoff and
+confirm `reopenedAt` with `get_issue`; represent an in-window reopen that is
+closed after cutoff as OPEN at cutoff; and retain the observed status for
+active-to-active changes.
+
+After execution, create a plan revision recording every executed query and
+observed count using the `make_plan_r4.py` pattern. Obtain owner approval
+before reconciliation, then run governance reconcile and
+`governance collect check`. The collection gate must be READY before any
+generation step. No partial, inferred, stale, hand-typed, or method-drifted
+evidence may pass this gate.
+
+### Mandatory Resolved/Ignored tracking (no drift)
+
+Closures are tracked exactly as the generators implement them; any change
+requires explicit owner approval.
+
+- Statuses are OPEN, IN_PROGRESS, RESOLVED and REJECTED. Wiz `REJECTED` is
+  reported as Ignored in the workbook and Accepted Risk in the decks; an
+  `IGNORED` input row is normalized to `REJECTED`. Raw evidence keeps the
+  Wiz status unchanged.
+- Status at a cutoff: findings created after it are excluded; a finding is
+  closed only if RESOLVED/REJECTED with Resolved Time at or before the cutoff;
+  a finding closed after the cutoff counts as OPEN; IN_PROGRESS whose status
+  changed after the cutoff counts as OPEN.
+- Workbook, per severity and snapshot (cumulative): Total = findings created
+  by the snapshot; Open = no Resolved Time or resolved after it (includes In
+  Progress); Resolved = RESOLVED by it; Ignored = REJECTED by it.
+  Total = Open + Resolved + Ignored must reconcile. Resolution % and Total
+  Closed use (Resolved + Ignored); the resolved detail sheet lists both.
+- Decks: Open includes In Progress; period closures have Resolved Time after
+  the previous cutoff and at or before the current cutoff, split into resolved
+  and accepted. Team-credited accepted never exceeds tenant accepted.
+- Resolved and Ignored are always collected, counted and shown separately.
+  Ignored is closed progress, never technical remediation or eliminated
+  exposure, and is never merged into Resolved or dropped.
+
 ### Fallback when no complete change feed exists
 
 Reuse approved history and collect these fresh populations:
@@ -137,6 +207,10 @@ standalone workbook command retains its generic severity capabilities.
 Retain page cursors, failures, unique counts and collection timestamps so an
 interruption resumes rather than restarts. Reconcile live count drift before
 generation. Never claim background collection continues after a task has stopped.
+The reusable local paginator must persist each lossless raw response, its terminal
+cursor and activity record before requesting the next page; it must resume only
+when the saved query identity matches, reject repeated or missing cursors, and
+fail closed when totalCount changes or terminal rows do not reconcile.
 The verification CLI checks supplied inputs and replay, not the completeness of
 a change feed or this collection plan; source-completeness remains a separate gate.
 
@@ -165,10 +239,50 @@ Mark the operational snapshot `collection_strategy: "reuse_history"` and supply
 `--reconciliation AUDIT.json` to verification. Changed sources, CSV or observation
 cutoff invalidate that audit.
 
+### Approved collection plan must run before generation
+
+The Monthly Governance console uses a single end-to-end Proceed action. This
+removes the separate console approval click between collection and generation;
+it does not remove the collection receipt, source-completeness, validation,
+replay or release gates below. A failed gate stops the run.
+
+An approved current-period collection plan is an execution instruction, not
+merely background context for generation. Before using retained evidence, compare
+the plan's approval timestamp, reporting cutoff and collection watermark with
+the evidence on disk. If the approved plan is newer than the retained collection
+or covers a later cutoff, execute its read-only partitions and write a fresh
+activity log, collection manifest, raw evidence and reconciliation output.
+Run `wizexpert workflow-qa collection-check` against those fresh outputs. Do not
+use an older collection-check pass, retained snapshot or "generation approved"
+label as a substitute. If the approved plan cannot be executed, stop with the
+specific capability or authentication blocker rather than silently falling back
+to stale evidence.
+
 ## 3. Build the reviewed snapshot and decisions
+
+Build the operational snapshot only with `wizexpert governance snapshot` (MG-REL-04);
+no ad-hoc scripts:
+
+```powershell
+wizexpert governance snapshot --reviewed reviewed-YYYYMMDD.csv `
+  --resolved-raw grouped-resolved-high-raw.json grouped-resolved-medium-raw.json `
+  --in-progress-raw grouped-in-progress-raw.json --prior-snapshot <prior>.governance.json `
+  --cutoff 2026-11-15T23:59:59Z --collected-through <actual UTC time> `
+  --metrics metrics.json [--decisions decisions.json] --output <period>.governance.json
+```
+
+It sets `end_inclusive`, `backlog_as_of` and `resolved_through` to the cutoff, merges
+multiple RESOLVED files by source-rule id (conflicting duplicates fail) and rejects a
+`--backlog-as-of` later than the period end. See the metrics input in the
+[snapshot guide](GOVERNANCE-SNAPSHOT.md#building-the-snapshot-with-the-cli).
+`governance verify` enforces the cutoff on the period and the deck "As of" text (MG-CUT-04).
 
 - Use UTC cutoffs exactly. Counts stop at the configured snapshot day, 23:59:59.
   Later events belong to the following reporting period.
+- Snapshot `end_inclusive`, `backlog_as_of`, `resolved_through` and every
+  deliverable "As of" date, title and filename date equal the cutoff;
+  `collected_through` records the actual collection. Never use an evidence or
+  source watermark as the report date (MG-CUT-04).
 - Use actual coverage timestamps for early collections and label them
   EARLY OBSERVATION - NOT FINAL. A prior `final_approval` is a period-specific exception, not proof
   that a collection covers later hours. Never inherit it. Any new approved early
@@ -180,6 +294,10 @@ cutoff invalidate that audit.
   backlog-reduction versus net-closure formulas.
 - Record metric observation dates and exact compliance framework versions.
   A newly generated deck does not make old security/HIPAA/HITRUST values fresh.
+  Fetch Security Score, HIPAA and HITRUST read-only from Wiz during the run; if
+  Wiz cannot return a value, an owner-supplied Wiz dashboard screenshot is an
+  approved source when retained privately with its sha256, observation date and
+  framework version (MG-INT-09).
   Unavailable metrics are qualified, never zero; technical posture is not certification.
 - Tenant closures and credited team work are different populations. Retain the
   approved attribution basis with issue-level support. Current assignee, history
@@ -196,7 +314,12 @@ cutoff invalidate that audit.
 Use the [snapshot schema and attribution guide](GOVERNANCE-SNAPSHOT.md). Retain a
 private decision record naming sources, review date and unresolved questions.
 
-## 4. Generate in an isolated review directory
+## 4. Generate in the canonical period report directory
+
+Generate directly in the period folder (for example `November2026-report`) with
+one canonical filename per deliverable; archive the prior version in
+`report-backups` first and create no separate review folder or `.generated`
+copy (MG-REL-01).
 
 Use `governance monthly` for the workbook/executive pair and `governance deck`
 for the operational presentation. Use only approved templates. Preserve workbook
@@ -262,6 +385,25 @@ Only then identify the approved attachment set and draft the stakeholder message
 using the standard private HTML email wrapper and established email sections.
 No auto-send, no TXT companions, no Wiz/cloud mutation. Wiz tracking stays with
 the operator. Report preparation is not authorization to remediate.
+
+Enforce the retained-watermark gate locally with `wizexpert governance reconcile
+--plan DELTA.json --retained-evidence EVIDENCE_DIR
+--require-cutoff 2026-11-15T23:59:59Z`. It reads the retained
+`collection-plan.json` `collected_through` watermark. If that is earlier than the
+cutoff, it requires an approved delta plan with `approved_by`, `approved_at`,
+`retained_watermark`, `previous_collected_at` equal to the watermark,
+`changes_since` no later than the watermark, and `collected_through` equal to the
+cutoff. If the delta plan does not exist, a draft is written outside the retained
+evidence and the command still fails. A valid plan authorizes execution of the
+read-only collection; it is not fresh evidence. Retained evidence is never
+modified.
+
+The Stage collection gate uses `wizexpert governance collect plan` before the
+agent executes the approved read-only Wiz partitions and
+`wizexpert governance collect check` afterward. The check requires new activity
+log, manifest, raw-evidence and reconciliation outputs outside retained
+evidence. Only a ready collection receipt may be supplied to
+`governance verify --collection-gate`; generation remains blocked otherwise.
 
 **Stop on any unresolved gate.** Describe the blocker and preserve the draft.
 This workflow makes deviations detectable; it is not a guarantee against

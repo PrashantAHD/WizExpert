@@ -412,7 +412,7 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(table.cell(row, 3).text, "Improved DNS query visibility.")
         self.payload["closure_wording"][0]["id"] = "progress"
         self.save()
-        with self.assertRaisesRegex(DashboardError, "must name a team-resolved rule group"):
+        with self.assertRaisesRegex(DashboardError, "must name a resolved rule group"):
             load_snapshot(self.source)
         del self.payload["closure_wording"], team_group["resolution"]
         accepted_only["resolution"]["reasons"] = {"EXCEPTION": 1}
@@ -658,6 +658,58 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(
             next_step("### Protect highly privileged principals\n* " + text), first_sentence(text)
         )
+
+    def test_rule_owner_fills_missing_assignee_but_verified_wins(self):
+        progress = self.payload["in_progress_groups"]["groups"][0]
+        owners = {"progress": "Casey Example, Drew Example"}
+        title, _, _, status = table_row(progress, False, owners=owners)
+        self.assertIn("(Casey Example, Drew Example)", title)
+        self.assertNotIn("Assignee not verified", title)
+        self.assertEqual(status, "ETA and blockers need team confirmation.")
+        verified = {
+            **progress,
+            "assignments": {
+                "verified_at": "2025-10-13T11:00:00Z",
+                "source": "In-progress checks",
+                "entries": [{"id": "a", "name": "Alex", "count": 2}],
+            },
+        }
+        title, *_ = table_row(verified, False, owners=owners)
+        self.assertIn("(Alex)", title)
+        self.assertNotIn("Casey", title)
+        title, *_ = table_row(progress, False, ["Blair"], owners=owners)
+        self.assertIn("(Blair)", title)
+        self.payload["rule_status"] = [
+            {"id": "progress", "owner": "Casey Example", "status": "Working.", "source": "Team"}
+        ]
+        self.save()
+        self.assertEqual(load_snapshot(self.source).rule_owner(), {"progress": "Casey Example"})
+        for bad in ("A/B", "Casey (Lead)", "x" * 61, "Two\nLines"):
+            self.payload["rule_status"][0]["owner"] = bad
+            self.save()
+            with self.assertRaisesRegex(DashboardError, "owner must be one line"):
+                load_snapshot(self.source)
+
+    def test_closure_wording_for_non_credited_resolved_group(self):
+        self.assertNotIn("team_resolved", self.payload)
+        resolved = self.payload["resolved_groups"]["groups"][0]
+        self.payload["closure_wording"] = [
+            {
+                "id": resolved["id"],
+                "changed": "Synthetic change text.",
+                "risk": "Synthetic risk text.",
+                "source": "Team",
+                "as_of": "2025-10-14T06:30:00Z",
+            }
+        ]
+        self.save()
+        data = load_snapshot(self.source)
+        _, _, change, risk = table_row(resolved, True, wording=data.closure_wording())
+        self.assertEqual((change, risk), ("Synthetic change text.", "Synthetic risk text."))
+        self.payload["closure_wording"][0]["id"] = "unknown"
+        self.save()
+        with self.assertRaisesRegex(DashboardError, "must name a resolved rule group"):
+            load_snapshot(self.source)
 
     def test_owner_status_replaces_pending_confirmation_for_that_owner(self):
         progress = self.payload["in_progress_groups"]["groups"][0]

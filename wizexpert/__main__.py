@@ -19,19 +19,25 @@ GOVERNANCE_COMMANDS = {
     "dashboard": "wizexpert.governance.dashboard",
     "monthly": "wizexpert.governance.monthly",
     "deck": "wizexpert.governance.governance",
+    "snapshot": "wizexpert.governance.snapshot_build",
     "verify": "wizexpert.governance.verify",
     "reconcile": "wizexpert.governance.reconcile",
+    "collect": "wizexpert.governance.collection_gate",
+    "rules": "wizexpert.governance.workflow_rules",
 }
 GOVERNANCE_USAGE = (
     "usage: wizexpert governance "
-    "{setup,workbook,dashboard,monthly,deck,verify,reconcile} [options]\n\n"
+    "{setup,workbook,dashboard,monthly,deck,snapshot,verify,reconcile,collect,rules} [options]\n\n"
     "  setup      create or update the client profile (client name, snapshot day, baseline, logo)\n"
     "  workbook   build or modify the governance Excel workbook from Wiz CSV exports\n"
     "  dashboard  build the executive dashboard deck from a reviewed workbook\n"
     "  monthly    create or refresh the month's workbook + dashboard pair, with backups\n"
     "  deck       build the ten-slide operational governance deck from a reviewed snapshot\n"
+    "  snapshot   build the operational snapshot JSON from reviewed CSV + grouped Wiz responses\n"
     "  verify     replay and check the report set without modifying it (not release approval)\n\n"
     "  reconcile  check collection plans and reconcile retained/fresh issue evidence\n\n"
+    "  collect    derive the delta plan and gate fresh read-only collection\n\n"
+    "  rules      list the canonical end-to-end Monthly workflow rules (--json for JSON)\n\n"
     'Requires the governance extra: pip install "wizexpert[governance]"\n'
 )
 
@@ -58,7 +64,7 @@ def governance_main(arguments: list[str]) -> int:
     try:
         result = (
             module.main(rest)
-            if command in {"setup", "deck", "verify", "reconcile"}
+            if command in {"setup", "deck", "snapshot", "verify", "reconcile", "collect", "rules"}
             else module.main()
         )
     finally:

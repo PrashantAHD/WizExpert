@@ -174,6 +174,7 @@ def table_row(
     rule_status: dict[str, str] | None = None,
     wording: dict[str, dict[str, str]] | None = None,
     next_steps: dict[str, str] | None = None,
+    owners: dict[str, str] | None = None,
 ) -> tuple[str, str, str, str]:
     closed = closed_counts(group)
     count = sum(closed[s] for s in DISPLAY_SEVERITIES)
@@ -200,6 +201,11 @@ def table_row(
         and sum(entry["count"] for entry in assignments["entries"]) == count
     ):
         assignees = "Unassigned"
+    reported_owner = None
+    if not resolved and not names and owners and group["id"] in owners:
+        # Verified Wiz assignments always win; a team-reported owner only fills the gap.
+        reported_owner = owners[group["id"]]
+        assignees = reported_owner
     title = f"{group['name'].strip()}\n({assignees}) ({count:,}\u00a0{noun})"
     if resolved and credited:
         resolved_count = sum(group["counts"][s] for s in DISPLAY_SEVERITIES)
@@ -229,8 +235,14 @@ def table_row(
             )
             risk = excerpt(annotation["risk"])
         else:
-            change = f"Wiz recorded {count:,} resolved.\nSpecific remediation not verified."
-            risk = "Closure status is confirmed; actual risk reduction needs evidence."
+            team = (wording or {}).get(group["id"], {})
+            change = team.get(
+                "changed",
+                f"Wiz recorded {count:,} resolved.\nSpecific remediation not verified.",
+            )
+            risk = team.get(
+                "risk", "Closure status is confirmed; actual risk reduction needs evidence."
+            )
         return title, severity, change, risk
     recommendation = group.get("recommendation")
     if recommendation:
@@ -238,7 +250,7 @@ def table_row(
         action = action if action.endswith((".", "!", "?")) else action + "."
     else:
         action = "Review Wiz recommendation; confirm remediation owner and target date."
-    pending = "ETA and blockers" if names else "Assignee, ETA and blockers"
+    pending = "ETA and blockers" if names or reported_owner else "Assignee, ETA and blockers"
     # The issue column already carries the count, so the status is text only.
     status = f"{pending} need team confirmation."
     updates = [
@@ -323,6 +335,7 @@ def fill_tables(deck, data: GovernanceData, field: str, indices: tuple[int, ...]
                     None if resolved else data.rule_status(),
                     data.closure_wording() if resolved else None,
                     None if resolved else data.rule_next_step(),
+                    None if resolved else data.rule_owner(),
                 )
                 if group is not None
                 else ("", "", "", "")
@@ -715,6 +728,7 @@ def import_slide_edits(snapshot: Path, deck_path: Path, editor: str) -> list[str
                     None if resolved else data.rule_status(),
                     data.closure_wording() if resolved else None,
                     None if resolved else data.rule_next_step(),
+                    None if resolved else data.rule_owner(),
                 )
                 label = f"{group['name'].strip()[:60]} ({group['id']})"
                 for column, key in (

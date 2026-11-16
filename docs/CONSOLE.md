@@ -83,6 +83,14 @@ passwords, MFA codes or tokens.
 
 ### Approvals
 
+Monthly Governance Reporting uses a single end-to-end **Proceed** action. It no longer
+shows separate collection-plan or generation approval gates. The run page shows the
+milestones **Run started**, **Wiz connected**, **Data fetching**, **Data collected**,
+**Report generating** and **Report generated**; successful milestones have a green check
+and failed milestones have a red cross. Proceed does not bypass read-only collection,
+receipt, validator, replay or release gates: those remain run-time safety checks, and a
+failure stops the run. No email or external mutation is performed.
+
 - **Settings template.** `scripts/console-workspace/settings.template.json` is a workspace
   `.vscode/settings.json` template that auto-approves only read-only terminal commands
   (`git status/diff/log/show` and read-only listing cmdlets) and keeps prompting for anything

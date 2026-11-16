@@ -429,14 +429,12 @@ def test_cli_fallback_is_opt_in_and_uses_agent_and_prompt(env):
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None, cli=fake_cli)
     run = manager.start("monthly-governance-reporting", {"month": "2026-09"})
     assert run.status == "running"
-    assert calls[0][1:] == [
-        "chat",
-        "--mode",
-        "WizExpert",
-        "--reuse-window",
+    assert calls[0][1:5] == ["chat", "--mode", "WizExpert", "--reuse-window"]
+    assert calls[0][5].startswith(
         "Monthly Governance Reporting category: "
-        "prepare the monthly governance reporting for 2026-09",
-    ]
+        "prepare the monthly governance reporting for 2026-09"
+    )
+    assert "governance collect check" in calls[0][5]
 
 
 def test_allow_skip_presses_only_the_waiting_prompt(env, monkeypatch):

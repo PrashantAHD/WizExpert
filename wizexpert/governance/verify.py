@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -20,7 +21,12 @@ from wizexpert.governance.assignment_history import write_actions_csv
 from wizexpert.governance.dashboard import build_deck
 from wizexpert.governance.dashboard_data import DashboardError, read_workbook, require
 from wizexpert.governance.governance import render_deck
-from wizexpert.governance.governance_data import DISPLAY_SEVERITIES, cutoff_counts, load_snapshot
+from wizexpert.governance.governance_data import (
+    DISPLAY_SEVERITIES,
+    cutoff_counts,
+    load_snapshot,
+    timestamp,
+)
 from wizexpert.governance.monthly import build_monthly_workbook, validate_rows
 from wizexpert.governance.monthly_files import check_unchanged, digest
 from wizexpert.governance.profile import active, ensure, find_profile, load
@@ -60,6 +66,74 @@ def require_matching_package(expected: Path, actual: Path, label: str) -> None:
     )
 
 
+def _slide_paragraphs(path: Path) -> list[str]:
+    """Visible paragraph text of every slide (parsed from the package XML; no XML parser)."""
+    import html
+    import re
+    from zipfile import ZipFile
+
+    out: list[str] = []
+    with ZipFile(path) as package:
+        for name in sorted(
+            n for n in package.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)
+        ):
+            xml = package.read(name).decode("utf-8", "replace")
+            for para in re.findall(r"<a:p[ >].*?</a:p>", xml, flags=re.S):
+                out.append(html.unescape("".join(re.findall(r"<a:t[^>]*>(.*?)</a:t>", para, re.S))))
+    return out
+
+
+_AS_OF = re.compile(
+    r"(?:\bAs of|\bData as of|\bData collected through)\s+"
+    r"([A-Z][a-z]{2,8}\.? \d{1,2})(?:st|nd|rd|th)?,? (\d{4})"
+)
+
+
+def check_cutoff(data, *, workbook: Path, decks: dict[str, Path]) -> str:
+    """MG-CUT-04: period bounds, workbook date and deck "As of" text all equal the cutoff."""
+    period = data.payload["period"]
+    if data.preliminary:  # early observation: dated by its actual, labelled coverage
+        cutoff = data.backlog_as_of
+    else:
+        cutoff = data.end
+        require(
+            period.get("backlog_as_of") is not None,
+            "MG-CUT-04: period.backlog_as_of must be set to the cutoff.",
+        )
+        for field in ("end_inclusive", "backlog_as_of", "resolved_through"):
+            require(
+                timestamp(period[field], field) == cutoff,
+                f"MG-CUT-04: period.{field} differs from the cutoff {cutoff:%Y-%m-%d}.",
+            )
+    require(
+        read_workbook(workbook, allow_preliminary=data.preliminary).latest == cutoff.date(),
+        f"MG-CUT-04: workbook latest snapshot date differs from the cutoff {cutoff:%Y-%m-%d}.",
+    )
+    for label, path in decks.items():
+        found = 0
+        for text in _slide_paragraphs(path):
+            for match in _AS_OF.finditer(text):
+                found += 1
+                day = f"{match.group(1).rstrip('.')} {match.group(2)}"
+                shown = None
+                for fmt in ("%B %d %Y", "%b %d %Y"):
+                    try:
+                        shown = datetime.strptime(day, fmt).date()
+                        break
+                    except ValueError:
+                        continue
+                require(
+                    shown == cutoff.date(),
+                    f"MG-CUT-04: {label} says 'As of {day}', not the cutoff "
+                    f"{cutoff:%Y-%m-%d}; an evidence watermark is not the report date.",
+                )
+        require(
+            found > 0 or label != "Operational deck",
+            f"MG-CUT-04: {label} has no 'As of' date to check.",
+        )
+    return cutoff.date().isoformat()
+
+
 def verify_preparation(
     *,
     inputs: list[Path],
@@ -76,6 +150,7 @@ def verify_preparation(
     profile_path: Path | None = None,
     reconciliation: Path | None = None,
     workflow_review: Path | None = None,
+    collection_gate: Path | None = None,
 ) -> dict:
     from wizexpert.workflow_qa import ROOT, rule_hashes
 
@@ -98,6 +173,7 @@ def verify_preparation(
         *([profile_path] if profile_path else []),
         *([reconciliation] if reconciliation else []),
         *([workflow_review] if workflow_review else []),
+        *([collection_gate] if collection_gate else []),
     ]
     require(bool(inputs), "At least one complete, reviewed current CSV is required.")
     hashes = {}
@@ -138,6 +214,15 @@ def verify_preparation(
         from wizexpert.governance.reconcile import verify_reconciliation
 
         verify_reconciliation(reconciliation, inputs, data.backlog_as_of)
+    if data.payload.get("collection_strategy") == "reuse_history":
+        require(
+            collection_gate is not None,
+            "History-reuse preparation requires its collection gate receipt.",
+        )
+    if collection_gate is not None:
+        from wizexpert.governance.collection_gate import require_ready_receipt
+
+        require_ready_receipt(collection_gate, reconciliation, data.backlog_as_of)
     require(
         data.end.day == profile.snapshot_day and data.end.strftime("%H:%M:%S") == "23:59:59",
         "Snapshot period end must use the configured UTC snapshot-day EOD.",
@@ -157,6 +242,11 @@ def verify_preparation(
         "Operational companion differs from the reviewed snapshot.",
     )
     rows, ids = [], set()
+    check_cutoff(
+        data,
+        workbook=workbook,
+        decks={"Executive dashboard": executive, "Operational deck": operational},
+    )
     for source in inputs:
         current = load_wiz_csv(str(source))
         validate_rows(current, source)
@@ -256,7 +346,14 @@ def main(argv: list[str] | None = None) -> int:
         "operational",
     ):
         parser.add_argument(f"--{name}", type=Path, required=True)
-    for name in ("history", "actions-csv", "font-dir", "profile", "reconciliation"):
+    for name in (
+        "history",
+        "actions-csv",
+        "font-dir",
+        "profile",
+        "reconciliation",
+        "collection-gate",
+    ):
         parser.add_argument(f"--{name}", type=Path)
     args = vars(parser.parse_args(argv))
     explicit_profile = args.pop("profile")

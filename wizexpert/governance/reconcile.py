@@ -69,6 +69,16 @@ def check_plan(path: Path) -> dict:
             type(expected) is int and expected >= 0 and type(limit) is int and limit > 0,
             "Partition counts/page sizes must be nonnegative/positive integers.",
         )
+        require(
+            limit == 500,
+            f"MG-COL-02: partition {role!r} page_size must be 500 (first=500), got {limit!r}.",
+        )
+        query = partition.get("query")
+        if isinstance(query, dict) and "first" in query:
+            require(
+                query["first"] == 500,
+                f"MG-COL-02: partition {role!r} query first must be 500, got {query['first']!r}.",
+            )
         require(bool(partition.get("query")), "Each partition needs its actual planned query.")
         pages += max(1, math.ceil(expected / limit))
     require(
@@ -82,6 +92,83 @@ def check_plan(path: Path) -> dict:
             "Full historical refresh needs a reason and report-owner agreement.",
         )
     return {"plan": plan, "estimated_page_requests": pages, "share_ready": False}
+
+
+def retained_watermark(evidence_dir: Path) -> datetime:
+    """Read the actual collection watermark without modifying retained evidence."""
+    retained = evidence_dir / "collection-plan.json"
+    require(retained.is_file(), f"Retained collection-plan.json is missing in {evidence_dir}.")
+    data = json.loads(retained.read_text(encoding="utf-8"))
+    require(
+        isinstance(data, dict) and isinstance(data.get("collected_through"), str),
+        "Retained collection plan has no collected_through watermark.",
+    )
+    return utc(data["collected_through"])
+
+
+def require_current_delta(evidence_dir: Path, cutoff: str, plan_path: Path) -> dict:
+    """Require current retained evidence or an approved delta plan for ``cutoff``."""
+    target = utc(cutoff)
+    watermark = retained_watermark(evidence_dir)
+    if watermark >= target:
+        return {"status": "retained_evidence_current", "watermark": watermark.isoformat()}
+
+    stamp = watermark.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not plan_path.exists():
+        resolved = plan_path.resolve()
+        require(
+            plan_path.parent.is_dir()
+            and evidence_dir.resolve() not in (resolved, *resolved.parents),
+            "Delta plan must go in an existing directory outside the retained evidence.",
+        )
+        skeleton = {
+            "schema_version": 1,
+            "strategy": "reuse_history",
+            "previous_collected_at": stamp,
+            "changes_since": stamp,
+            "collected_through": cutoff,
+            "retained_watermark": stamp,
+            "approved_by": "",
+            "approved_at": "",
+            "approved_sources": {},
+            "partitions": [],
+        }
+        with plan_path.open("x", encoding="utf-8") as stream:
+            json.dump(skeleton, stream, indent=2)
+            stream.write("\n")
+        raise DashboardError(
+            f"Retained evidence ends {stamp}, before cutoff {cutoff}. Draft delta plan written "
+            f"to {plan_path}; add approved sources, partitions and approval, then run the "
+            "read-only collection and reconcile. Retained evidence is not fresh."
+        )
+
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    require(isinstance(plan, dict), "Delta plan must be a JSON object.")
+    require(
+        str(plan.get("approved_by", "")).strip() and str(plan.get("approved_at", "")).strip(),
+        f"Delta plan {plan_path} is not approved (approved_by/approved_at required).",
+    )
+    require(
+        all(k in plan for k in ("previous_collected_at", "changes_since", "collected_through")),
+        "Delta plan needs previous_collected_at, changes_since and collected_through.",
+    )
+    require(
+        utc(plan["collected_through"]) == target,
+        f"Delta plan collected_through must equal the requested cutoff {cutoff}.",
+    )
+    require(
+        plan.get("retained_watermark") == stamp
+        and utc(plan["previous_collected_at"]) == watermark
+        and utc(plan["changes_since"]) <= watermark,
+        f"Delta plan must be based on the retained watermark {stamp}.",
+    )
+    check_plan(plan_path)
+    return {
+        "status": "delta_plan_ready_execute_readonly_collection",
+        "watermark": stamp,
+        "collected_through": cutoff,
+        "evidence_is_fresh": False,
+    }
 
 
 def read_rows(paths: list[Path]) -> dict[str, dict]:
@@ -285,9 +372,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument(f"--{name}", type=Path, nargs="+")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--audit", type=Path)
+    parser.add_argument("--retained-evidence", type=Path)
+    parser.add_argument("--require-cutoff")
     args = parser.parse_args(argv)
     try:
-        if args.plan_only:
+        if args.require_cutoff or args.retained_evidence:
+            require(
+                args.require_cutoff and args.retained_evidence,
+                "--require-cutoff and --retained-evidence must be used together.",
+            )
+            result = require_current_delta(args.retained_evidence, args.require_cutoff, args.plan)
+        elif args.plan_only:
             checked = check_plan(args.plan)
             result = {
                 "status": "collection_plan_checked",

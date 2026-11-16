@@ -118,6 +118,13 @@ main { padding: 1.5rem; max-width: 1180px; width: 100%; }
 main:focus, .view:focus, .route-heading:focus { outline: none; }
 .route-heading:focus-visible { outline: 3px solid #f2a900; }
 .banner { background: var(--bad-soft); border: 1px solid #efb8b8; padding: .7rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; }
+.milestone-list { list-style: none; display: flex; flex-wrap: wrap; gap: .6rem; padding: 0; margin: 0; }
+.milestone { display: inline-flex; align-items: center; gap: .45rem; border: 1px solid var(--line); border-radius: 8px; padding: .55rem .75rem; background: var(--surface-2); }
+.milestone-icon { display: inline-flex; width: 1.45rem; height: 1.45rem; align-items: center; justify-content: center; border-radius: 50%; font-weight: 700; border: 2px solid var(--line-strong); color: var(--muted); }
+.milestone.ok .milestone-icon { background: var(--ok); border-color: var(--ok); color: #fff; }
+.milestone.reused .milestone-icon { background: var(--ok); border-color: var(--ok); color: #fff; opacity: .75; }
+.milestone.failed .milestone-icon { background: var(--bad); border-color: var(--bad); color: #fff; }
+.milestone.running .milestone-icon { border-color: var(--warn); color: var(--warn); }
 
 /* Page structure */
 .page-head { margin-bottom: 1rem; }
@@ -274,6 +281,13 @@ textarea { resize: vertical; }
 .tl-copy span { color: var(--muted); font-size: .88rem; }
 .tl-item time { color: var(--muted); font-size: .78rem; white-space: nowrap; }
 .raw-progress summary { cursor: pointer; color: var(--brand); font-weight: 600; }
+.workflow-rules { margin: .8rem 0; }
+.workflow-rules summary { cursor: pointer; color: var(--brand); font-weight: 600; }
+.workflow-rules summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.workflow-rules h3 { font-size: 1rem; margin: .8rem 0 .3rem; }
+.workflow-rules .rule-list { margin: 0; padding-left: 1.2rem; }
+.workflow-rules .rule-list li { margin: .25rem 0; }
+.workflow-rules code { font-family: var(--mono); font-size: .82rem; white-space: nowrap; }
 .log { background: #0f1729; color: #d8e2f6; border-radius: 8px; padding: .7rem; max-height: 360px; overflow: auto; font-family: var(--mono); font-size: .8rem; margin-top: .6rem; }
 .line { white-space: pre-wrap; word-break: break-word; }
 .line.error, .line.failed { color: #ff9b9b; }
