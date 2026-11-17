@@ -350,7 +350,6 @@ def fill_tables(deck, data: GovernanceData, field: str, indices: tuple[int, ...]
 
 RISK_BOX_TITLE = "Critical and High Findings: Where the Risk Sits"
 RISK_RULE_CAP = 3
-RISK_BOX_FILL = RGBColor(0xF7, 0xF4, 0xF2)
 RISK_BOX_ACCENT = RGBColor(0x1F, 0x3A, 0x5F)
 RISK_SEVERITY_COLORS = {"CRITICAL": RGBColor(0xB0, 0x1E, 0x1E), "HIGH": RGBColor(0xB8, 0x5A, 0x00)}
 
@@ -413,10 +412,8 @@ def write_risk_box(slide, sid: int, lines: list[tuple[str, int]]) -> None:
     reference = paragraphs[1]._p.pPr if len(paragraphs) > 1 else None
     base = int(reference.get("marL") or 0) if reference is not None else 0
     box = shape(slide, sid)
-    box.fill.solid()
-    box.fill.fore_color.rgb = RISK_BOX_FILL
-    box.line.color.rgb = RISK_BOX_ACCENT
-    box.line.width = Pt(1.5)
+    box.fill.background()  # rounded frame 24 is the only container
+    box.line.fill.background()
     frame.margin_left = frame.margin_right = Inches(0.15)
     frame.margin_top = frame.margin_bottom = Inches(0.08)
     for paragraph, (text, level) in zip(paragraphs, lines, strict=True):

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pptx import Presentation
+from pptx.enum.dml import MSO_FILL
 from pptx.util import Inches, Pt
 from synthetic import mail
 
@@ -890,6 +891,9 @@ class GovernanceTests(unittest.TestCase):
         box_paragraphs = shape(deck.slides[3], 25).text_frame.paragraphs
         self.assertTrue(box_paragraphs[0].runs[0].font.bold)
         self.assertTrue(box_paragraphs[1].runs[0].font.bold)
+        risk_shape = shape(deck.slides[3], 25)
+        self.assertEqual(risk_shape.fill.type, MSO_FILL.BACKGROUND)
+        self.assertEqual(risk_shape.line.fill.type, MSO_FILL.BACKGROUND)
         self.assertTrue(shape(deck.slides[3], 9).text.startswith("Open backlog"))
         self.assertTrue(shape(deck.slides[3], 9).text.endswith(" in progress"))
         # Pre-December-2026 test period: severity cards keep the as-of date.
