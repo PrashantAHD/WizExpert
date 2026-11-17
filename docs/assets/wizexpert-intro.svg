@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-labelledby="t d">
+  <title id="t">WizExpert: from security findings to review-ready deliverables</title>
+  <desc id="d">Animated introduction: four workflows feed one evidence-first pipeline of collection, checks, pinned templates, QA and human review.</desc>
+  <defs>
+    <radialGradient id="g1" cx="12%" cy="8%" r="70%"><stop offset="0" stop-color="#1b4a7a"/><stop offset="1" stop-color="#071526" stop-opacity="0"/></radialGradient>
+    <radialGradient id="g2" cx="95%" cy="95%" r="65%"><stop offset="0" stop-color="#0f6b66"/><stop offset="1" stop-color="#071526" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gl" x1="0" x2="1"><stop offset="0" stop-color="#5eead4"/><stop offset="1" stop-color="#60a5fa"/></linearGradient>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#ffffff" stroke-opacity=".045"/></pattern>
+    <path id="rail" d="M200 640H1400"/>
+  </defs>
+  <style>
+    text{font-family:'Segoe UI',system-ui,Arial,sans-serif}
+    .fade{opacity:0}
+    .wm{font-size:112px;font-weight:700;letter-spacing:-3px;fill:#fff}
+    .tag{font-size:34px;fill:#bcd0e2}
+    .cardt{font-size:30px;font-weight:650;fill:#fff}
+    .cards{font-size:20px;fill:#a8c7de}
+    .nodet{font-size:23px;font-weight:600;fill:#e6f0f9;text-anchor:middle}
+    .chip{font-size:22px;fill:#dceaf6;text-anchor:middle}
+    .step{font-size:18px;font-weight:700;fill:#5eead4;letter-spacing:3px;text-anchor:middle}
+  </style>
+  <rect width="1600" height="900" fill="#071526"/>
+  <rect width="1600" height="900" fill="url(#g1)"/>
+  <rect width="1600" height="900" fill="url(#g2)"/>
+  <rect width="1600" height="900" fill="url(#grid)"/>
+  <g class="fade">
+    <animate attributeName="opacity" from="0" to="1" begin="0.3s" dur="0.9s" fill="freeze"/>
+    <g transform="translate(535 122) scale(.95)">
+      <path d="M0 -58 L50 -34 V14 C50 50 26 72 0 84 C-26 72 -50 50 -50 14 V-34Z" fill="none" stroke="url(#gl)" stroke-width="7"/>
+      <path d="M-22 14 L-4 34 L26 -8" fill="none" stroke="#5eead4" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text class="wm" x="880" y="188" text-anchor="middle">WizExpert</text>
+    <text class="tag" x="800" y="250" text-anchor="middle">Security findings, to review-ready deliverables</text>
+  </g>
+  <rect x="560" y="275" width="0" height="4" rx="2" fill="url(#gl)">
+    <animate attributeName="width" from="0" to="480" begin="1.1s" dur="0.9s" fill="freeze"/>
+  </rect>
+  <g id="wf">
+    <g class="fade" transform="translate(120 330)">
+      <animate attributeName="opacity" from="0" to="1" begin="2.4s" dur="0.6s" fill="freeze"/>
+      <rect width="320" height="150" rx="16" fill="#ffffff0d" stroke="#5eead4" stroke-opacity=".55"/>
+      <text class="step" x="160" y="38">01</text>
+      <text class="cardt" x="160" y="82" text-anchor="middle">Risk Issues</text>
+      <text class="cards" x="160" y="116" text-anchor="middle">Rule to case pack</text>
+    </g>
+    <g class="fade" transform="translate(470 330)">
+      <animate attributeName="opacity" from="0" to="1" begin="3.0s" dur="0.6s" fill="freeze"/>
+      <rect width="320" height="150" rx="16" fill="#ffffff0d" stroke="#5eead4" stroke-opacity=".55"/>
+      <text class="step" x="160" y="38">02</text>
+      <text class="cardt" x="160" y="82" text-anchor="middle">Daily Progress</text>
+      <text class="cards" x="160" y="116" text-anchor="middle">Campaign status</text>
+    </g>
+    <g class="fade" transform="translate(820 330)">
+      <animate attributeName="opacity" from="0" to="1" begin="3.6s" dur="0.6s" fill="freeze"/>
+      <rect width="320" height="150" rx="16" fill="#ffffff0d" stroke="#5eead4" stroke-opacity=".55"/>
+      <text class="step" x="160" y="38">03</text>
+      <text class="cardt" x="160" y="82" text-anchor="middle">Weekly Progress</text>
+      <text class="cards" x="160" y="116" text-anchor="middle">Trends and review deck</text>
+    </g>
+    <g class="fade" transform="translate(1170 330)">
+      <animate attributeName="opacity" from="0" to="1" begin="4.2s" dur="0.6s" fill="freeze"/>
+      <rect width="320" height="150" rx="16" fill="#ffffff0d" stroke="#5eead4" stroke-opacity=".55"/>
+      <text class="step" x="160" y="38">04</text>
+      <text class="cardt" x="160" y="82" text-anchor="middle">Monthly Governance</text>
+      <text class="cards" x="160" y="116" text-anchor="middle">Workbook, dashboard, deck</text>
+    </g>
+  </g>
+  <path d="M280 480V560M630 480V560M980 480V560M1330 480V560" fill="none" stroke="#5eead4" stroke-opacity=".5" stroke-width="2" stroke-dasharray="6 8" class="fade">
+    <animate attributeName="opacity" from="0" to="1" begin="5s" dur="0.6s" fill="freeze"/>
+  </path>
+  <path d="M200 640H1400" stroke="#ffffff22" stroke-width="6" stroke-linecap="round" fill="none"/>
+  <path d="M200 640H1400" stroke="url(#gl)" stroke-width="6" stroke-linecap="round" fill="none" stroke-dasharray="1200" stroke-dashoffset="1200">
+    <animate attributeName="stroke-dashoffset" from="1200" to="0" begin="5.6s" dur="3.2s" fill="freeze"/>
+  </path>
+  <g>
+    <g class="fade"><animate attributeName="opacity" from="0" to="1" begin="5.8s" dur=".4s" fill="freeze"/>
+      <circle cx="200" cy="640" r="20" fill="#071526" stroke="#5eead4" stroke-width="5"/>
+      <text class="nodet" x="200" y="700">Read-only evidence</text></g>
+    <g class="fade"><animate attributeName="opacity" from="0" to="1" begin="6.6s" dur=".4s" fill="freeze"/>
+      <circle cx="500" cy="640" r="20" fill="#071526" stroke="#5eead4" stroke-width="5"/>
+      <text class="nodet" x="500" y="700">Collection checks</text></g>
+    <g class="fade"><animate attributeName="opacity" from="0" to="1" begin="7.4s" dur=".4s" fill="freeze"/>
+      <circle cx="800" cy="640" r="20" fill="#071526" stroke="#5eead4" stroke-width="5"/>
+      <text class="nodet" x="800" y="700">Pinned templates</text></g>
+    <g class="fade"><animate attributeName="opacity" from="0" to="1" begin="8.2s" dur=".4s" fill="freeze"/>
+      <circle cx="1100" cy="640" r="20" fill="#071526" stroke="#5eead4" stroke-width="5"/>
+      <text class="nodet" x="1100" y="700">Workflow QA</text></g>
+    <g class="fade"><animate attributeName="opacity" from="0" to="1" begin="9.0s" dur=".4s" fill="freeze"/>
+      <circle cx="1400" cy="640" r="20" fill="#5eead4" stroke="#5eead4" stroke-width="5"/>
+      <text class="nodet" x="1400" y="700">Human review</text></g>
+  </g>
+  <circle r="11" fill="#fff" class="fade">
+    <animate attributeName="opacity" from="0" to="1" begin="9.4s" dur=".2s" fill="freeze"/>
+    <animateMotion begin="9.4s" dur="3.4s" repeatCount="indefinite"><mpath xlink:href="#rail"/></animateMotion>
+  </circle>
+  <g class="fade">
+    <animate attributeName="opacity" from="0" to="1" begin="9.8s" dur=".8s" fill="freeze"/>
+    <text class="chip" x="400" y="820">Read-only access</text>
+    <text class="chip" x="800" y="820">Local drafts, nothing sent</text>
+    <text class="chip" x="1200" y="820">Evidence before conclusions</text>
+  </g>
+</svg>

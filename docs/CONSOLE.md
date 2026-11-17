@@ -501,7 +501,7 @@ files, work-item folders, VS Code session logs and workflow configuration are no
 The reset is refused while any run is active. Prior risk issues can be re-added through
 Existing / In-progress. The browser's per-tab cache key was bumped so stale history is not shown.
 
-The Home page has an **About WizExpert** section describing the four workflows.
+The Home page has an **About WizExpert** section describing the four workflows. A **See it in action** section above the workflow cards plays a narrated demo video with fictional workflow data, including template and deliverable previews for each workflow (`assets/console-demo.mp4`, loaded only on play). The 7:10 guided walkthrough opens with an [animated SVG intro](assets/wizexpert-intro.svg), then follows console actions, agent handoff, evidence checks, deliverables, case lifecycle and reporting workflows. The creator's display picture appears in the console and on the outro with permission; all workflow data remains fictional. The silent outro shows **Developed by Prashant.** and **Cloud Security Engineer @AHEAD India**; neither the name nor designation is narrated. Future demo revisions should preserve this visual-only credit and portrait treatment unless the owner requests otherwise. Native playback controls are supplemented by play/pause, 10-second rewind/fast-forward, and a 0.75x-2x speed selector. The README GIF is a silent, sped-up preview; use the Home player or the MP4 for narration and seeking.
 
 ## Spend-Guard handoffs
 
