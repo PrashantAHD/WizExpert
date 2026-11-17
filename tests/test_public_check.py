@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shutil
 import stat
 import subprocess
@@ -409,3 +410,68 @@ def test_audit_flags_and_inventory_are_accepted_without_network(repository):
     )
     assert result.returncode == 0, result.stderr
     assert "would have audited" in result.stderr
+
+
+MEDIA = "docs/assets/demo.gif"
+MEDIA_BYTES = b"GIF89a\x00synthetic-approved-bytes" * 3
+
+
+@pytest.fixture
+def approved(monkeypatch):
+    digest = hashlib.sha256(MEDIA_BYTES).hexdigest()
+    monkeypatch.setitem(public_check.APPROVED_MEDIA, MEDIA, (len(MEDIA_BYTES), digest))
+
+
+def commit_media(root: Path, name: str, data: bytes) -> None:
+    target = root / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    run_git(root, "add", "-f", name)
+    run_git(root, "commit", "-qm", "Add synthetic media")
+
+
+def test_exact_approved_media_passes_index_working_and_history(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    assert public_check.inspect_repository(repository) == []
+
+
+@pytest.mark.parametrize(
+    "data", [MEDIA_BYTES[:-1], MEDIA_BYTES[:-1] + b"X", b"benign text\n", b""]
+)
+def test_changed_or_truncated_media_fails_in_every_variant(repository, approved, data):
+    commit_media(repository, MEDIA, data)
+    issues = public_check.inspect_repository(repository)
+    for source in ("index", "history", "working"):
+        assert any(i.startswith(source) and "approved media" in i for i in issues)
+
+
+def test_working_copy_of_approved_media_must_stay_exact(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    (repository / MEDIA).write_text("benign\n", encoding="utf-8")
+    issues = public_check.inspect_repository(repository)
+    assert [i for i in issues if i.startswith("working")]
+    assert not [i for i in issues if i.startswith("index")]
+
+
+def test_approval_is_path_specific_even_for_identical_bytes(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    for other in ("docs/assets/moved.gif", "docs/assets/demo.png"):
+        (repository / other).write_bytes(MEDIA_BYTES)
+        run_git(repository, "add", "-f", other)
+    run_git(repository, "commit", "-qm", "Copy media elsewhere")
+    issues = public_check.inspect_repository(repository)
+    for other in ("moved.gif", "demo.png"):
+        assert any(other in i for i in issues)
+    assert not any("demo.gif" in i for i in issues)
+
+
+def test_unrelated_binary_remains_rejected(approved):
+    assert public_check.content_issues(MEDIA_BYTES) == ["binary content is not allowed"]
+    assert public_check.path_issues("docs/assets/other.gif")
+
+
+def test_workflow_sync_svg_is_historical_only():
+    name = "wizexpert/console/static/assets/workflow-sync.svg"
+    assert public_check.path_issues(name, historical=True) == []
+    assert public_check.path_issues(name)
+    assert public_check.content_issues(("1" * 12).encode(), allow_bom=True)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
 import subprocess  # nosec B404
 import sys
+from collections.abc import Callable
 from importlib.metadata import distributions
 from pathlib import Path, PurePosixPath
 
@@ -45,8 +47,27 @@ HISTORICAL_FILES = {
     ".github/instructions/production-workflow.instructions.md",
     # A generic local task was briefly committed before the publication allowlist was checked.
     ".vscode/tasks.json",
+    # Unrelated retained local history holds this exact text SVG; it is still content-scanned.
+    "wizexpert/console/static/assets/workflow-sync.svg",
 }
 MAX_FILE_BYTES = 1_000_000
+# Owner-approved immutable demonstration media: exact path, byte length and SHA-256 only.
+# Any change, move, rename or truncation is rejected; nothing else is exempt from the
+# binary/size rules. Adding an entry needs explicit owner approval (docs/PUBLICATION.md).
+APPROVED_MEDIA = {
+    "docs/assets/console-demo.gif": (
+        15511555,
+        "187972" "710305fe6dbca5e9f6f7fee655eeb381fae5a5da0ccb350763e5cc2939",
+    ),
+    "wizexpert/console/static/assets/console-demo.mp4": (
+        23660384,
+        "fbf168ad7e00beec1b8f7496ba96641038f9c05004f5ca53e406d039c578b3ef",
+    ),
+    "wizexpert/console/static/assets/console-demo-poster.jpg": (
+        143441,
+        "c6ebdce1f2bf659491f6735c1f5eee86cb9931cbb9ff18736b0ca767b337c53a",
+    ),
+}
 OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 SYNTHETIC_MERGE_SUBJECT = re.compile(
     r"\AMerge ([0-9a-f]{40}|[0-9a-f]{64}) into ([0-9a-f]{40}|[0-9a-f]{64})(?=\n|\Z)"
@@ -137,6 +158,18 @@ def content_issues(
     ]
 
 
+def approved_media_issues(name: str, size: int, read: Callable[[], bytes]) -> list[str] | None:
+    """Return None for non-approved paths, else issues for the exact pinned media."""
+    pinned = APPROVED_MEDIA.get(name)
+    if pinned is None:
+        return None
+    if size != pinned[0]:
+        return ["approved media size does not match the pinned value"]
+    if hashlib.sha256(read()).hexdigest() != pinned[1]:
+        return ["approved media digest does not match the pinned value"]
+    return []
+
+
 def path_issues(name: str, *, historical: bool = False) -> list[str]:
     path = PurePosixPath(name)
     if (
@@ -148,6 +181,7 @@ def path_issues(name: str, *, historical: bool = False) -> list[str]:
         return ["unsafe file path"]
     issues = [label for label, pattern in PATTERNS if pattern.search(name)]
     allowed = name in ROOT_FILES or name in PUBLIC_FILES or name == ".githooks/pre-push"
+    allowed |= name in APPROVED_MEDIA  # bytes are pinned separately
     allowed |= historical and name in HISTORICAL_FILES
     if len(path.parts) >= 2:
         suffixes = set(SOURCE_SUFFIXES.get(path.parts[0], set()))
@@ -199,7 +233,7 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
     if git(root, "rev-parse", "--is-shallow-repository").strip() != b"false":
         raise GuardError("Shallow history cannot be checked. Fetch complete history first.")
     problems: set[str] = set()
-    checked_blobs: dict[tuple[str, bool], list[str]] = {}
+    checked_blobs: dict[tuple[str, bool, str], list[str]] = {}
     checked_entries: set[tuple[str, str, str]] = set()
 
     def report(source: str, issues: list[str]) -> None:
@@ -213,11 +247,17 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
         if mode not in {"100644", "100755"}:
             report(source, ["symlinks, submodules and non-regular files are not allowed"])
             return
-        cache_key = (oid, historical)
+        # The path is part of the key so an approval never transfers to another path.
+        cache_key = (oid, historical, name if name in APPROVED_MEDIA else "")
         if cache_key not in checked_blobs:
             size = int(git(root, "cat-file", "-s", oid))
+            media = approved_media_issues(
+                name, size, lambda: git(root, "cat-file", "blob", oid)
+            )
             checked_blobs[cache_key] = (
-                ["file exceeds publication size limit"]
+                media
+                if media is not None
+                else ["file exceeds publication size limit"]
                 if size > MAX_FILE_BYTES
                 else content_issues(
                     git(root, "cat-file", "blob", oid), allow_bom=historical
@@ -241,6 +281,10 @@ def inspect_repository(root: Path, outgoing: list[str] | None = None) -> list[st
         elif file.exists():
             if not file.is_file():
                 report(f"working {name!r}", ["non-regular file is not allowed"])
+            elif (
+                media := approved_media_issues(name, file.stat().st_size, file.read_bytes)
+            ) is not None:
+                report(f"working {name!r}", media)
             elif file.stat().st_size > MAX_FILE_BYTES:
                 report(f"working {name!r}", ["file exceeds publication size limit"])
             else:

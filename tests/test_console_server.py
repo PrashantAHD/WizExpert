@@ -82,6 +82,7 @@ def test_binds_loopback_only_and_headers(console):
     assert status == 200 and b"__CSRF_TOKEN__" not in body
     assert "script-src 'self'" in headers["Content-Security-Policy"]
     assert "img-src 'self' data: blob:" in headers["Content-Security-Policy"]
+    assert "media-src 'self'" in headers["Content-Security-Policy"]
     assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
     assert headers["X-Content-Type-Options"] == "nosniff" and headers["Cache-Control"] == "no-store"
 
@@ -192,6 +193,19 @@ def test_static_assets_are_served(console):
     ):
         status, headers, _b = request(server, "GET", f"/static/{name}")
         assert status == 200 and kind in headers["Content-Type"]
+
+
+def test_demo_video_served_when_present_and_404_when_missing(console, tmp_path, monkeypatch):
+    from wizexpert.console import server as server_module
+
+    server, *_ = console
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    monkeypatch.setattr(server_module, "STATIC_DIR", static)
+    (static / "assets" / "console-demo.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    status, headers, body = request(server, "GET", "/static/assets/console-demo.mp4")
+    assert status == 200 and headers["Content-Type"] == "video/mp4" and body.startswith(b"\x00")
+    assert request(server, "GET", "/static/assets/console-demo-poster.jpg")[0] == 404
 
 
 def test_invalid_input_is_rejected_over_http_and_not_started(console):
