@@ -29,6 +29,8 @@ dist/
 *.png
 *.jpg
 *.jpeg
+# Demo video poster (fictional demo data only)
+!wizexpert/console/static/assets/console-demo-poster.jpg
 wizexpert-profile.json
 wizgov-profile.json
 profiles/

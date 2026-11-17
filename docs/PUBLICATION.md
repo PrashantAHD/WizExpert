@@ -72,6 +72,20 @@ archive, binary, and log files are not. Symlinks, submodules, non-UTF-8 text, an
 files larger than 1 MB are rejected. The scanner reports categories, not matched
 secret values.
 
+### Owner-approved exact media exception
+
+Operational media remains permanently prohibited: screenshots, recordings, videos,
+images, archives and other binary files are never allowed by extension or directory.
+The sole exception is a short list of owner-approved, fictional demonstration media in
+`APPROVED_MEDIA` in `scripts/public_check.py`, each pinned by exact path, byte length
+and SHA-256 digest. The same pin is enforced for the index, tracked working files,
+reachable history and outgoing tips. A changed, moved, renamed, copied or truncated
+file fails, even if replaced with plain text, and approval never transfers to other
+paths with identical bytes. Symlink, submodule, text-secret, size and binary checks
+still apply to everything else. Adding or changing a pin requires explicit owner
+approval of the exact bytes and a documented manual review (synthetic content only,
+authorized people only, no private data) before the entry is added.
+
 Heuristics reject likely private keys, common service tokens, credential
 assignments, AWS account identifiers and resource names, Azure subscription
 resource paths, email addresses, and a restricted organization-name marker.
