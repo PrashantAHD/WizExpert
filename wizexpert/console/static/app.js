@@ -25,6 +25,38 @@ const STAGE_HELP = {
 };
 const VIEWS = ["home", "dashboard", "progress", "history", "workflow", "run"];
 
+// Narrated demo: native controls plus an accessible row for play/pause, seek and speed.
+function demoVideoSection() {
+  const video = h("video", { controls: "", preload: "none", playsinline: "", poster: "/static/assets/console-demo-poster.jpg", width: "100%", "aria-describedby": "demo-keys" },
+    h("source", { src: "/static/assets/console-demo.mp4", type: "video/mp4" }),
+    "Your browser cannot play this demo video.");
+  const seek = (d) => { const t = video.currentTime + d; video.currentTime = Math.max(0, isFinite(video.duration) ? Math.min(video.duration, t) : t); };
+  const play = h("button", { class: "secondary small", type: "button", "aria-pressed": "false" }, "Play");
+  const sync = () => { const on = !video.paused; play.textContent = on ? "Pause" : "Play"; play.setAttribute("aria-pressed", String(on)); };
+  play.addEventListener("click", () => {
+    if (!video.paused) { video.pause(); return; }
+    const p = video.play();
+    if (p && p.catch) p.catch(() => {
+      play.disabled = true; play.textContent = "Play unavailable"; play.setAttribute("aria-pressed", "false");
+      play.title = "The browser could not play this demo video. Use the video's own controls or reload the page.";
+    });
+  });
+  video.addEventListener("play", sync); video.addEventListener("pause", sync); video.addEventListener("ended", sync);
+  const speed = h("select", { id: "demo-speed" },
+    [0.75, 1, 1.25, 1.5, 2].map((s) => h("option", { value: s, selected: s === 1 }, s + "x")));
+  speed.addEventListener("change", () => { video.playbackRate = Number(speed.value); });
+  return h("section", { class: "block demo-video", "aria-labelledby": "h-demo" },
+    h("h2", { id: "h-demo" }, "See it in action"),
+    h("p", { class: "help" }, "A narrated tour with fictional demo data: each workflow and its deliverables, a live agent run, refreshing a case, sync, and the guardrails that keep people in control."),
+    video,
+    h("div", { class: "demo-controls", role: "group", "aria-label": "Demo video controls" },
+      play,
+      h("button", { class: "secondary small", type: "button", onclick: () => seek(-10), "aria-label": "Rewind 10 seconds" }, "-10s"),
+      h("button", { class: "secondary small", type: "button", onclick: () => seek(10), "aria-label": "Fast-forward 10 seconds" }, "+10s"),
+      h("label", { for: "demo-speed" }, "Speed "), speed),
+    h("p", { id: "demo-keys", class: "help" }, "Keyboard: focus the video, then Space plays or pauses and the arrow keys seek."));
+}
+
 // ---- small DOM helpers ------------------------------------------------------------------------------
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -817,6 +849,7 @@ function buildHome() {
         h("ul", { class: "principles" }, principles.map((x) => h("li", {}, x)))),
       h("div", { class: "hero-art", "aria-hidden": "true" },
         h("img", { src: "/static/assets/logo.svg", alt: "", width: "320" }))),
+      demoVideoSection(),
       h("section", { class: "block", "aria-labelledby": "h-wf" }, h("h2", { id: "h-wf" }, "Start a workflow"), home.workflows),
     aboutSection(),
     h("p", {}, link("/dashboard", "secondary", "Open Dashboard for runs and activity")));

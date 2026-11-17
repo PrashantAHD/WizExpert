@@ -2,100 +2,129 @@
 
 <img src="docs/assets/logo.svg" alt="WizExpert" width="380">
 
-**Evidence-led Wiz investigation and client reporting.**
+**From Wiz evidence to review-ready security reporting.**
 
-Analyze. Communicate. Remediate. Validate. Update.
-Read-only Wiz evidence in, reviewed reports out — a person approves everything that leaves.
+Investigate findings. Track remediation. Explain progress.
+Read-only evidence in; validated local drafts out. People stay in control.
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![Wiz MCP](https://img.shields.io/badge/Wiz-MCP%20read--only-1D4ED8)
 ![VS Code](https://img.shields.io/badge/VS%20Code-agent%20mode-007ACC?logo=visualstudiocode&logoColor=white)
-![Cloud](https://img.shields.io/badge/cloud-AWS%20%2B%20Azure-0EA5E9)
-![Tests](https://img.shields.io/badge/tests-876%20collected-2EA44F)
-![License](https://img.shields.io/badge/license-MIT-yellow)
+![License: MIT](https://img.shields.io/badge/license-MIT-yellow)
 
-**[Beats](#risk-issues-in-seven-beats) · [Why](#why-wizexpert) · [What's new](#whats-new) · [Categories](#reporting-categories) · [Quick start](#quick-start) · [Console](#workflow-console) · [Governance](#monthly-governance) · [Guides](#guides)**
-
-<img src="docs/assets/how-it-works.svg" alt="Risk Issues workflow: every stage goes out from WizExpert and back. After approval, remediate then validate then update, or risk acceptance skips to update." width="920">
-
-<sub>Open the SVG in a browser if GitHub shows a still frame. WizExpert is the hub — the ball returns after every stage. Pass A: remediate → validate → update. Pass B: risk acceptance → update.</sub>
+**[Watch the walkthrough](#see-it-in-action) · [Quick start](#quick-start) · [Workflows](#reporting-categories) · [Console](#workflow-console) · [Guides](#guides)**
 
 </div>
 
-WizExpert is an **independent** reporting assistant for Wiz, not an official Wiz product.
-You describe a reporting scope; authorized **Wiz MCP** tools collect evidence; local tools
-turn that into reviewed reports.
+## See it in action
 
-> [!IMPORTANT]
-> **Nothing is sent, published or changed in Wiz or cloud without a person approving it;**
-> only local drafts may be refreshed automatically. Wiz MCP is read-only, the tool never sends
-> email, and it never changes Wiz, ticketing or cloud resources.
+<div align="center">
 
-## Risk Issues, in seven beats
+<a href="wizexpert/console/static/assets/console-demo.mp4"><img src="docs/assets/console-demo.gif" alt="Open the 7-minute 10-second WizExpert walkthrough: Risk Issues investigation, report previews, Refresh and Update, daily, weekly and monthly reporting, Sync and Dashboard" width="920"></a>
 
-1. **Collect.** Read-only Wiz MCP queries, with gaps recorded.
-2. **Draft.** Analysis, spreadsheet and email — in a **private folder outside this repo**.
-3. **Communicate.** A person sends the package. The tool never sends.
-4. **Approval.** Receive the response. Remediate, or **risk acceptance** skips to update.
-5. **Remediate.** Coordinate the fix. The tool does not change cloud.
-6. **Validate.** Fresh Wiz evidence.
-7. **Update.** Refresh the reports and drafts. Always last.
+<p><b><a href="wizexpert/console/static/assets/console-demo.mp4">Watch the narrated walkthrough — 7:10 (MP4)</a></b></p>
 
-You don't wire tools together. Open a chat with the `WizExpert` agent and ask.
+<sub>Silent animated preview above · Full video: 1600 × 900, H.264/AAC, approximately 24 MB</sub>
+
+</div>
+
+Follow a guided workflow from an issue ID to validated local drafts:
+
+- **Investigate:** start a Risk Issues run, follow evidence collection and see the QA checks.
+- **Maintain:** compare Refresh with Update, review resolved cases and follow status Sync.
+- **Report:** explore template and deliverable previews across all four reporting categories.
+- **Stay in control:** tour the Dashboard and the read-only, no-send guardrails.
+
+The demo uses fictional **Contoso** workflow data. It includes an animated tool intro,
+the developer's authorized portrait and a silent closing credit:
+**Developed by Prashant. — Cloud Security Engineer @AHEAD India.**
+
+GitHub may open the MP4 as a repository file rather than an inline player. Use its
+**Raw/Download** option if needed, or play the same video on the local console Home page,
+with play/pause, seeking, skip controls and playback speed.
 
 ## Why WizExpert
 
-| ❌ Manual reporting | ✅ With WizExpert |
+WizExpert is an **independent reporting assistant for Wiz**, built for cloud security
+engineers turning findings into actionable reports and recurring progress updates.
+An authorized agent collects evidence through **Wiz MCP**; local tools build and
+validate drafts using the workspace's reporting rules and approved templates.
+
+| Reporting challenge | How WizExpert helps |
 |---|---|
-| Copy-paste from the Wiz portal into spreadsheets | Read-only MCP collection with a retained, hashed evidence snapshot |
-| Every report looks different | Fixed deliverable slots, template builders and validators per category |
-| "What changed since last time?" is guesswork | **Refresh** computes a delta vs retained evidence and writes a change summary |
-| Each new teammate rebuilds the Wiz connection | `.vscode/mcp.json` ships in the repo — clone, sign in with SSO, done |
-| Drafts accidentally sent or overwritten | No send, no mutate; previous versions archived before any update |
-| Client data creeps into Git | Publication guard and CI keep evidence and reports out of the repo |
+| Repeated portal-to-spreadsheet copying | Read-only collection with retained evidence and provenance |
+| Inconsistent report formats | Defined deliverable slots, template builders and validators |
+| Unclear changes since the last report | Refresh compares retained and current evidence and produces a change summary |
+| Fragmented investigation history | Case and campaign workflows retain observations and previous deliverables |
+| Drafts mistaken for approved communications | Local-only drafts, explicit QA and human-controlled release |
+| Sensitive data entering source control | Private output storage, publication checks and CI safeguards |
 
-## What's new
+> [!IMPORTANT]
+> **WizExpert never sends email or changes Wiz, ServiceNow or cloud resources.**
+> People approve release, send communications and perform remediation through their
+> authorized processes. Workflow checks and tool approvals remain in force; a successful
+> build is not release approval. Keep evidence, client templates and reports outside this repository.
 
-### 🔌 Wiz MCP ready on clone
+## Quick start
 
-The repo ships [`.vscode/mcp.json`](.vscode/mcp.json) registering the Wiz MCP server
-(`https://mcp.app.wiz.io`). Open the folder in VS Code, start the `wiz` server, and sign in
-through your organization's SSO with **your own** credentials. No tokens or secrets are stored
-in the repo. Details: [docs/SETUP.md](docs/SETUP.md).
+### 1. Install the local tools
 
-### 🔄 Ungated status sync, in two visible phases
+You need **Python 3.12+**, **Git**, and an organization-approved **VS Code / GitHub Copilot
+agent-mode** setup. Live collection also requires authorized Wiz access.
 
-Status sync no longer waits for an approval click. **Phase 1** checks Wiz status per Risk
-Issues case; **Phase 2** runs Refresh plus deliverables only for changed cases, one at a time.
-Both phases show in a strip under the console topbar and in notifications.
+```powershell
+git clone https://github.com/PrashantAHD/WizExpert.git
+Set-Location .\WizExpert
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[governance]"
+.\.venv\Scripts\wizexpert.exe --help
+```
 
-### 📄 PDF change summary
+Stop if a command fails. Use `-e .` instead if you do not need governance presentation
+tools. Virtual-environment activation is not required.
 
-Every Refresh produces a PDF change summary alongside the new evidence snapshot, so the
-"what moved" story is ready to attach.
+### 2. Connect and verify Wiz access
 
-### ✉️ Four-stage Risk Issues email lifecycle
+1. Open the project in VS Code. [`.vscode/mcp.json`](.vscode/mcp.json) registers the
+   workspace's Wiz MCP endpoint; it contains no credentials.
+2. Sign in to your organization's SSO in the approved browser profile.
+3. Run **MCP: List Servers → wiz → Start**, review trust prompts and complete Wiz sign-in
+   with your own identity.
+4. Ask the agent to confirm the available read-only tools and run a small, scoped query.
+   A registered or running server alone does not prove access.
 
-| Stage | File | When |
-|---|---|---|
-| Email-1 | `{rule}-Email-1-InitialStakeholder.html` | Work starts on an issue rule |
-| Email-2 | `{rule}-Email-2-StatusUpdateRequest.html` | Ask for status on the previous communication |
-| Email-3 | `{rule}-Email-3-Refresh.html` | New findings: confirm approach or approve the change, offer help |
-| Email-4 | `{rule}-Email-4-FollowUpResponse.html` | Draft a reply to the stakeholder's response |
+See the [setup guide](docs/SETUP.md) for authentication and environment requirements.
+Never paste passwords, MFA codes or tokens into chat.
 
-All drafts are built from templates and never sent by the tool.
+### 3. Prepare a private workspace and start a task
+
+Choose approved output storage **outside the public checkout**. Production workflows need
+your workspace's `WizExpert` agent, instructions, private templates and category bindings;
+installing the CLI alone does not supply client-specific reporting configuration.
+
+In the configured workspace, open a chat with the `WizExpert` agent and ask:
+
+> Prepare today's progress report for `<CVE-list>` in `<approved-scope>`. Use the applicable
+> collection and QA rules, retain previous observations, and separate remaining from resolved
+> findings. Save drafts to `<private-output-folder>`. Do not send anything.
+
+Prefer a visual entry point? Use the [workflow console](#workflow-console).
 
 ## Reporting categories
 
 Every run selects one category and follows its fixed slots:
 **category → deliverable slots → builder → validator → workflow QA/review**.
 
-| Category | Fixed deliverables |
+| Category | Purpose and outputs |
 |---|---|
-| 🛡️ **Risk Issues** | Internal Analysis · Client Assessment · Stakeholder Emails 1–4 · Detailed Report · Updated Detailed Report · PDF change summary |
-| 📅 **Daily Progress** | Daily Progress Report · Day-to-Day Movements · VM/CVE Details · Stakeholder Reply |
-| 🗓️ **Weekly Progress** | Excel Workbook · Slide Deck · HTML · PDF · Email Draft (in-progress items plus resolved since the previous Monday) |
-| 📊 **Monthly Governance** | Governance Workbook · Slide Deck · Executive Dashboard |
+| **Risk Issues** | Investigate a rule or issue: internal analysis, client assessment, detailed and updated reports, stakeholder email drafts and Refresh change summaries |
+| **Daily Progress** | Track a campaign: daily progress report, day-to-day movements, VM/CVE details and a stakeholder reply draft |
+| **Weekly Progress** | Summarize current in-progress work and in-period resolutions: an editable slide deck, optional deck PDF and private email draft |
+| **Monthly Governance** | Report a reviewed snapshot: governance workbook, operational slide deck and executive dashboard |
+
+The [category definitions](docs/categories/README.md) describe the deliverable contracts.
+Weekly reporting uses the slide deck as its primary output; the former workbook and
+standalone report HTML are retired.
 
 <details>
 <summary><b>Category workflows (animated)</b></summary>
@@ -114,82 +143,100 @@ Every run selects one category and follows its fixed slots:
 
 </details>
 
-Changes to a category or template need an owner-requested change record, version bump,
-template re-pinning and a QA rerun. Campaigns: [docs/CAMPAIGNS.md](docs/CAMPAIGNS.md).
+Category or template changes require a recorded owner request, a version bump,
+template re-pinning and a QA rerun. See [Workflow QA](docs/WORKFLOW-QA.md) and
+[Campaigns](docs/CAMPAIGNS.md).
 
-## Quick start
+## Risk Issues, in seven beats
 
-Python 3.12+ and VS Code with GitHub Copilot agent mode.
+1. **Collect:** query Wiz read-only and record evidence gaps.
+2. **Draft:** build analysis, reports and email drafts in private storage.
+3. **Communicate:** a person reviews and sends the package; the tool never sends.
+4. **Approve:** record the response. Remediation continues below; risk acceptance skips to Update.
+5. **Remediate:** coordinate the authorized fix outside WizExpert.
+6. **Validate:** check fresh Wiz evidence; do not infer closure from a response alone.
+7. **Update:** refresh the reports and drafts while preserving prior versions.
 
-```powershell
-git clone https://github.com/PrashantAHD/WizExpert.git
-Set-Location .\WizExpert
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[governance]"   # omit [governance] if not needed
-.\.venv\Scripts\wizexpert.exe --help
-```
+<details>
+<summary><b>View the workflow diagram and email lifecycle</b></summary>
 
-1. **Open the folder in VS Code.** The `wiz` MCP server is already configured.
-2. **Sign in.** Start the server, complete your organization's SSO and Wiz sign-in in the browser.
-3. **Check access.** Ask the agent to list read-only Wiz tools and run a small scoped query.
-4. **Pick a private output folder** outside this repository.
+<img src="docs/assets/how-it-works.svg" alt="Risk Issues workflow: collect, draft, communicate and approve; remediation continues through validation to update, while risk acceptance goes directly to update" width="920">
 
-Then ask, for example:
+Open the SVG in a browser if GitHub displays a still frame.
 
-> Prepare today's progress report for `<CVE-list>` in `<approved-scope>`. Use fresh Wiz
-> evidence, keep previous observations and separate remaining from resolved findings. Do not send it.
+| Draft | Purpose |
+|---|---|
+| Email-1: Initial stakeholder | Introduce the issue and proposed work |
+| Email-2: Status update request | Ask for progress on the previous communication |
+| Email-3: Refresh | Explain new findings and request confirmation or approval |
+| Email-4: Follow-up response | Draft a reply to the stakeholder's response |
+
+All four are template-based local drafts, never messages sent by the tool.
+
+</details>
 
 ## Workflow console
 
-A local frontend for the VS Code agent chat — it adds no workflow rules of its own.
+A local frontend for the VS Code agent chat, not a separate automation engine.
+It uses the workspace's existing agent, tools, instructions and approvals.
+
+From the installed checkout, use the same virtual environment as above. Replace the
+workspace example with the folder open in VS Code; `code.cmd` must be on your PATH.
 
 ```powershell
-wizexpert console install-helper --code <path to code.cmd>   # once, then "Developer: Reload Window"
-wizexpert console --workspace <workspace folder>             # http://127.0.0.1:8765/
+.\.venv\Scripts\wizexpert.exe console install-helper --code (Get-Command code.cmd).Source
 ```
 
+Run **Developer: Reload Window** once after installing the helper, then start the console:
+
+```powershell
+.\.venv\Scripts\wizexpert.exe console --workspace "C:\path\to\your-workspace"
+```
+
+Open **http://127.0.0.1:8765/**. Follow any native VS Code approval prompts.
 Pick a category, enter its input, press Start: the console opens a **new agent-mode chat** with
 the `WizExpert` agent and mirrors it (progress, "input needed", summary, files).
 
 | Feature | What it does |
 |---|---|
-| 🗂️ **Category cards** | Each private case or campaign folder is a card grouped by category |
-| 🔄 **Refresh** | Latest read-only Wiz status → delta → new snapshot, change summary (incl. PDF) → regenerated deliverables |
-| ✏️ **Update deliverables** | Owner free text saved verbatim and applied to the latest deliverables (archived first); no Wiz fetch |
-| 📡 **Status sync** | Ungated Phase 1 check + Phase 2 refresh of changed cases, one at a time |
-| ✅ **Completion checklist** | Per-run workflow checklist so finished runs show what was done |
-| 🔔 **Notifications** | Unread badge, mark-all-read, links to each run with its phase/action |
-| 🏁 **Resolved stage** | Fully resolved cases move to Resolved with rule title, rule ID and resolution notes |
-| 🧑 **Profile avatar** | Initials or optional photo (PNG/JPEG ≤ 1 MB), stored outside the repo |
-| 🔐 **Approval gates** | Weekly/Monthly runs and Weekly Update still need explicit approval |
+| **Home walkthrough** | The narrated demo with play/pause, seeking, skip controls and playback speed |
+| **Category cards** | Private case and campaign folders grouped by reporting category |
+| **Refresh** | Read-only evidence refresh, delta, new snapshot, change summary including PDF, and rebuilt deliverables |
+| **Update deliverables** | Apply the owner's requested edits to retained evidence without a Wiz fetch; archive previous outputs first |
+| **Status Sync** | A visible status-check phase followed by sequential Refresh runs for changed cases |
+| **Dashboard and notifications** | Operational summaries, recent runs and links to progress or input-needed states |
+| **Completion checklist** | Per-run evidence of the workflow steps completed |
+| **Resolved stage** | Resolved cases with rule title, rule ID and resolution notes |
+| **Profile avatar** | Initials or an optional PNG/JPEG photo, stored outside the repository |
 
-Full reference: [docs/CONSOLE.md](docs/CONSOLE.md).
+The console does not bypass workflow QA or VS Code tool approvals. Action-specific
+requirements and troubleshooting are in the [console guide](docs/CONSOLE.md).
 
 ## Monthly governance
 
-**One tool, any client: each client's rules live in a private profile.**
-
-```powershell
-wizexpert governance setup      # once per client
-wizexpert governance monthly --month 2026-10 --input <csv...> `
-  --previous-report <last workbook> --template <last dashboard> --output-dir <private folder>
-```
+Client-specific rules live in **private profiles**, not in the public source code.
+Reporting preserves prior snapshots and uses reviewed comparison sources and templates.
 
 | Command | Builds |
 |---|---|
+| `governance setup` | A private client profile |
 | `governance monthly` | Workbook + executive dashboard |
 | `governance workbook` / `dashboard` / `deck` | Pieces on their own |
 | `governance verify` | Read-only replay of the four-severity set |
 
-Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated verification does not replace release review.
+These are `wizexpert` subcommands; use `--help` for their required inputs.
+The `monthly` command builds the report pair, not the separate operational deck.
+Follow the [governance runbook](docs/GOVERNANCE-RUNBOOK.md) for the complete workflow.
+Automated verification does not replace release review.
 
 ## Guardrails worth knowing
 
-- **Client names, evidence and reports never live in this repository.**
-- **No credentials in the repo.** `.vscode/mcp.json` holds only the server URL; each user authenticates with their own SSO.
-- Hostile files: `defusedxml`; Excel values as text; no silent overwrites; SHA-256 on templates.
-- CI: publication guard, tests, Bandit, Ruff, `pip-audit`. `main` is PR-only.
-- AI analysis is not proof of compromise; a Wiz resolution is not proof of a successful fix. Review every deliverable.
+- **Private by design:** keep real client identities, evidence, profiles, templates and reports outside this repository.
+- **Individual authentication:** the MCP configuration holds the server endpoint, not credentials; each operator uses their own authorized identity.
+- **Evidence before conclusions:** collection checks gate generation; gaps and conflicting evidence must stay visible.
+- **Controlled local updates:** retain evidence, archive previous deliverables and pin templates with SHA-256.
+- **Human-controlled release:** review every output. AI analysis is not proof of compromise; a Wiz resolution is not proof of a successful fix.
+- **Publication safeguards:** follow the repository's verification and PR process before publishing code; never publish private evidence.
 - Found a security issue? Report it privately to the maintainer.
 
 ## Guides
@@ -197,9 +244,11 @@ Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated ver
 | Guide | Covers |
 |---|---|
 | [Setup](docs/SETUP.md) | Wiz MCP sign-in, install |
+| [Category definitions](docs/categories/README.md) | Deliverable slots, bindings and category contracts |
 | [Workflow QA](docs/WORKFLOW-QA.md) | Evidence-bound QA, Refresh and Update rules |
 | [Campaigns](docs/CAMPAIGNS.md) | Repeated fixed-scope collection |
 | [Governance](docs/GOVERNANCE.md) | Profiles, workbook, dashboard, deck |
+| [Governance runbook](docs/GOVERNANCE-RUNBOOK.md) | Collection, reconciliation, generation and release |
 | [Workflow console](docs/CONSOLE.md) | Local frontend that starts and mirrors an agent chat |
 | [Publication](docs/PUBLICATION.md) | Verification and pre-push checks |
 
@@ -211,7 +260,7 @@ Runbook: [docs/GOVERNANCE-RUNBOOK.md](docs/GOVERNANCE-RUNBOOK.md). Automated ver
 
 <div align="center">
 
-**[Prashant Kumar](https://github.com/PrashantAHD)** · Cloud Security Engineer @AHEAD
+**Developed by [Prashant Kumar](https://github.com/PrashantAHD)** · Cloud Security Engineer @AHEAD India
 
 **Evidence before conclusions. Approval before changes. Verification before closure.**
 

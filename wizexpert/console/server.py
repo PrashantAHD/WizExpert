@@ -57,6 +57,8 @@ STATIC_FILES = {
     "assets/workflow-daily-progress.svg": "image/svg+xml",
     "assets/workflow-weekly-progress.svg": "image/svg+xml",
     "assets/workflow-monthly-governance.svg": "image/svg+xml",
+    "assets/console-demo.mp4": "video/mp4",
+    "assets/console-demo-poster.jpg": "image/jpeg",
 }
 MAX_BODY = 256 * 1024
 PHOTO_UPLOAD_TIMEOUT = 15.0  # seconds, overall deadline for one photo upload body
@@ -68,7 +70,8 @@ RUN_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{6}")
 AGENT_NAME = re.compile(r"[A-Za-z0-9 ._-]{1,60}")
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    "img-src 'self' data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    "img-src 'self' data: blob:; media-src 'self'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'none'"
 )
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
@@ -450,7 +453,11 @@ class ConsoleHandler(BaseHTTPRequestHandler):
     def _static(self, name: str) -> None:
         if name not in STATIC_FILES or name == "index.html":
             return self._error(HTTPStatus.NOT_FOUND, "Not found.")
-        self._send(HTTPStatus.OK, (STATIC_DIR / name).read_bytes(), STATIC_FILES[name])
+        try:
+            data = (STATIC_DIR / name).read_bytes()
+        except OSError:  # optional asset (e.g. demo video) not present on disk
+            return self._error(HTTPStatus.NOT_FOUND, "Not found.")
+        self._send(HTTPStatus.OK, data, STATIC_FILES[name])
 
     # -- helper bridge (HMAC-signed) ---
     def _signed_json(self, nonce: str, value: Any) -> None:

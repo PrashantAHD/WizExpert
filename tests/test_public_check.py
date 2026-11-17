@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import shutil
 import stat
 import subprocess
@@ -11,17 +13,61 @@ import pytest
 
 from scripts import public_check
 
+_REAL_RUN = subprocess.run
+_LOCAL_ENV = None
+
+
+def local_git_env_names():
+    """Repository-local variables a Git hook may export (Git's documented list)."""
+    global _LOCAL_ENV
+    if _LOCAL_ENV is None:
+        executable = shutil.which("git")
+        assert executable is not None, "Git is required to run publication tests."
+        out = _REAL_RUN(
+            [executable, "rev-parse", "--local-env-vars"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        _LOCAL_ENV = frozenset(out)
+    return _LOCAL_ENV
+
+
+def _is_local(key):
+    key = key.upper()
+    return key in local_git_env_names() or key.startswith(
+        ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
+    )
+
+
+def scrubbed_env():
+    return {k: v for k, v in os.environ.items() if not _is_local(k)}
+
 
 def run_git(root: Path, *args: str) -> str:
     executable = shutil.which("git")
     assert executable is not None, "Git is required to run publication tests."
-    result = subprocess.run(
+    result = _REAL_RUN(
         [executable, "-C", str(root), *args],
         check=True,
         capture_output=True,
         text=True,
+        env=scrubbed_env(),
     )
     return result.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def isolate_git_env(monkeypatch):
+    """Insulate fixtures and public_check from hook-inherited repository env."""
+    for key in [k for k in os.environ if _is_local(k)]:
+        monkeypatch.delenv(key)
+
+    def scrubbed_run(*args, **kwargs):
+        kwargs.setdefault("env", scrubbed_env())
+        return _REAL_RUN(*args, **kwargs)
+
+    monkeypatch.setattr(public_check.subprocess, "run", scrubbed_run)
 
 
 def remove_readonly(function, path, error):
@@ -409,3 +455,115 @@ def test_audit_flags_and_inventory_are_accepted_without_network(repository):
     )
     assert result.returncode == 0, result.stderr
     assert "would have audited" in result.stderr
+
+
+MEDIA = "docs/assets/demo.gif"
+MEDIA_BYTES = b"GIF89a\x00synthetic-approved-bytes" * 3
+
+
+@pytest.fixture
+def approved(monkeypatch):
+    digest = hashlib.sha256(MEDIA_BYTES).hexdigest()
+    monkeypatch.setitem(public_check.APPROVED_MEDIA, MEDIA, (len(MEDIA_BYTES), digest))
+
+
+def commit_media(root: Path, name: str, data: bytes) -> None:
+    target = root / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    run_git(root, "add", "-f", name)
+    run_git(root, "commit", "-qm", "Add synthetic media")
+
+
+def test_exact_approved_media_passes_index_working_and_history(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    assert public_check.inspect_repository(repository) == []
+
+
+@pytest.mark.parametrize(
+    "data", [MEDIA_BYTES[:-1], MEDIA_BYTES[:-1] + b"X", b"benign text\n", b""]
+)
+def test_changed_or_truncated_media_fails_in_every_variant(repository, approved, data):
+    commit_media(repository, MEDIA, data)
+    issues = public_check.inspect_repository(repository)
+    for source in ("index", "history", "working"):
+        assert any(i.startswith(source) and "approved media" in i for i in issues)
+
+
+def test_working_copy_of_approved_media_must_stay_exact(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    (repository / MEDIA).write_text("benign\n", encoding="utf-8")
+    issues = public_check.inspect_repository(repository)
+    assert [i for i in issues if i.startswith("working")]
+    assert not [i for i in issues if i.startswith("index")]
+
+
+def test_approval_is_path_specific_even_for_identical_bytes(repository, approved):
+    commit_media(repository, MEDIA, MEDIA_BYTES)
+    for other in ("docs/assets/moved.gif", "docs/assets/demo.png", "docs/assets/copied.svg"):
+        (repository / other).write_bytes(MEDIA_BYTES)
+        run_git(repository, "add", "-f", other)
+    run_git(repository, "commit", "-qm", "Copy media elsewhere")
+    issues = public_check.inspect_repository(repository)
+    for other in ("moved.gif", "demo.png", "copied.svg"):
+        assert any(other in i for i in issues)
+    assert not any("demo.gif" in i for i in issues)
+    # An allowed text extension must still be rejected as binary content.
+    assert any(
+        "copied.svg" in i and "binary content is not allowed" in i
+        for i in issues
+    )
+
+
+def test_hook_environment_cannot_mutate_a_separate_repository(repository, monkeypatch):
+    parent = repository.parent / ("parent-" + uuid.uuid4().hex)
+    parent.mkdir()
+    try:
+        run_git(parent, "init", "-q", "-b", "main")
+        run_git(parent, "config", "user.name", "Parent Author")
+        run_git(parent, "config", "user.email", "parent@" + "example.invalid")
+        (parent / "a.md").write_text("parent\n", encoding="utf-8")
+        run_git(parent, "add", ".")
+        run_git(parent, "commit", "-qm", "Parent")
+        git_dir = parent / ".git"
+        before = (
+            run_git(parent, "rev-parse", "HEAD"),
+            run_git(parent, "for-each-ref"),
+            (git_dir / "config").read_bytes(),
+            (git_dir / "index").read_bytes(),
+        )
+        # Simulate a hook in a disposable parent: variables point at it, not the project.
+        monkeypatch.setenv("GIT_DIR", str(git_dir))
+        monkeypatch.setenv("GIT_WORK_TREE", str(parent))
+        monkeypatch.setenv("GIT_INDEX_FILE", str(git_dir / "index"))
+        monkeypatch.setenv("GIT_COMMON_DIR", str(git_dir))
+        monkeypatch.setenv("GIT_PREFIX", "")
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.bare")
+        monkeypatch.setenv("GIT_CONFIG_VALUE_0", "true")
+        before_child = run_git(repository, "rev-parse", "HEAD")
+        run_git(repository, "config", "commit.gpgsign", "false")
+        run_git(repository, "commit", "--allow-empty", "-qm", "Child only")
+        assert run_git(repository, "rev-parse", "HEAD") != before_child
+        assert public_check.inspect_repository(repository) == []
+        after = (
+            run_git(parent, "rev-parse", "HEAD"),
+            run_git(parent, "for-each-ref"),
+            (git_dir / "config").read_bytes(),
+            (git_dir / "index").read_bytes(),
+        )
+        assert after == before
+    finally:
+        shutil.rmtree(parent, onexc=remove_readonly)
+
+
+def test_unrelated_binary_remains_rejected(approved):
+    assert public_check.content_issues(MEDIA_BYTES) == ["binary content is not allowed"]
+    assert public_check.path_issues("docs/assets/other.gif")
+
+
+def test_workflow_sync_svg_is_historical_only():
+    name = "wizexpert/console/static/assets/workflow-sync.svg"
+    assert public_check.path_issues(name, historical=True) == []
+    assert public_check.path_issues(name)
+    assert public_check.content_issues(("1" * 12).encode(), allow_bom=True)
