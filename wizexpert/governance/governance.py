@@ -9,13 +9,14 @@ import shutil
 import tempfile
 import textwrap
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.oxml.ns import qn
-from pptx.util import Inches, Pt
+from pptx.util import Emu, Inches, Pt
 
 from wizexpert.governance.assignment_history import action_lines, write_actions_csv
 from wizexpert.governance.dashboard import full_date, pct, replace_text, shape
@@ -52,6 +53,7 @@ TEXT_IDS = {
 }
 TABLE_CAPACITY = {4: 4, 5: 6, 6: 4, 7: 6, 8: 4}
 TABLE_BODY_FONT_SIZE = 12
+SEVERITY_CARD_PROGRESS_FROM = date(2026, 12, 15)
 
 
 def validate_template(deck) -> None:
@@ -346,38 +348,100 @@ def fill_tables(deck, data: GovernanceData, field: str, indices: tuple[int, ...]
                 cell_text(table.cell(row, col), value, TABLE_BODY_FONT_SIZE)
 
 
-def trend_statement(current: dict, before: dict, in_progress: int, prior_month: str) -> list[str]:
-    """Narrative posture trend in the style of the approved deck's "Trend statement" box.
+RISK_BOX_TITLE = "Critical and High Findings: Where the Risk Sits"
+RISK_RULE_CAP = 3
+RISK_BOX_FILL = RGBColor(0xF7, 0xF4, 0xF2)
+RISK_BOX_ACCENT = RGBColor(0x1F, 0x3A, 0x5F)
+RISK_SEVERITY_COLORS = {"CRITICAL": RGBColor(0xB0, 0x1E, 0x1E), "HIGH": RGBColor(0xB8, 0x5A, 0x00)}
 
-    Returns a heading plus 3 lines.
-    """
-    top, old_top = current["CRITICAL"] + current["HIGH"], before["CRITICAL"] + before["HIGH"]
-    if top == 0:
-        severity = (
-            "Critical and High remain at zero, sustaining the downward trend."
-            if old_top == 0
-            else "Critical and High findings dropped to zero."
+
+def _plural(count: int, word: str) -> str:
+    return f"{count:,} {word}{'' if count == 1 else 's'}"
+
+
+def risk_box(payload: dict) -> list[tuple[str, int]]:
+    """Heading plus (text, level) lines: open Critical/High findings by rule at the cutoff."""
+    rules = payload.get("open_top_rules")
+    require(
+        isinstance(rules, list),
+        "Snapshot has no open_top_rules; rebuild it with wizexpert governance snapshot "
+        "(open Critical/High by rule is required for operational slide 4).",
+    )
+    lines: list[tuple[str, int]] = [(RISK_BOX_TITLE, 0)]
+    for severity in ("CRITICAL", "HIGH"):
+        mine = sorted(
+            (r for r in rules if r["severity"] == severity),
+            key=lambda r: (-r["count"], r["title"]),
         )
-    else:
-        severity = f"Critical and High: {top:,} open ({delta(old_top, top)} vs {prior_month})."
-    total, old_total = (
-        sum(current[s] for s in DISPLAY_SEVERITIES),
-        sum(before[s] for s in DISPLAY_SEVERITIES),
-    )
-    largest = max(("MEDIUM", "LOW"), key=lambda s: current[s])
-    share = pct(current[largest] / total * 100) if total else "0%"
-    focus = (
-        f"Focus: {largest.title()} remains the largest volume "
-        f"({current[largest]:,}; {share} of backlog), "
-        f"{in_progress:,} in progress."
-    )
-    outlook = (
-        "Medium and Low still call for steady remediation focus."
-        if top <= old_top
-        else "Prioritise top-severity findings ahead of Medium and Low."
-    )
-    overall = f"Backlog {delta(old_total, total)} since {prior_month}; {outlook}"
-    return ["Trend statement", severity, focus, overall]
+        total = sum(r["count"] for r in mine)
+        if not total:
+            continue
+        progress = sum(r["status_counts"]["IN_PROGRESS"] for r in mine)
+        waiting = total - progress
+        if progress == total:
+            state = (
+                ", in progress"
+                if total == 1
+                else (", both in progress" if total == 2 else ", all in progress")
+            )
+        elif progress:
+            state = f", {progress:,} in progress, {waiting:,} open"
+        else:
+            state = ""
+        scope = "on 1 rule" if len(mine) == 1 else f"across {len(mine):,} rules"
+        lines.append((f"{_plural(total, severity.title() + ' finding')} {scope}{state}:", 1))
+        for rule in mine[:RISK_RULE_CAP]:
+            mixed = rule["status_counts"]["IN_PROGRESS"] and rule["status_counts"]["OPEN"]
+            extra = f", {rule['status_counts']['IN_PROGRESS']:,} in progress" if mixed else ""
+            lines.append((f"{rule['title']} ({rule['count']:,}{extra})", 2))
+        rest = mine[RISK_RULE_CAP:]
+        if rest:
+            lines.append(
+                (f"+{len(rest):,} more rules ({sum(r['count'] for r in rest):,} findings)", 2)
+            )
+    if len(lines) == 1:
+        lines.append(("No open Critical or High findings at the cutoff.", 1))
+    return lines
+
+
+def write_risk_box(slide, sid: int, lines: list[tuple[str, int]]) -> None:
+    """Write the box; level-2 lines are real indented (level 1) paragraphs, body >= 12 pt."""
+    size = 14 if len(lines) <= 8 else 12
+    write_text(slide, sid, [text for text, _ in lines], size)
+    frame = shape(slide, sid).text_frame
+    paragraphs = frame.paragraphs
+    reference = paragraphs[1]._p.pPr if len(paragraphs) > 1 else None
+    base = int(reference.get("marL") or 0) if reference is not None else 0
+    box = shape(slide, sid)
+    box.fill.solid()
+    box.fill.fore_color.rgb = RISK_BOX_FILL
+    box.line.color.rgb = RISK_BOX_ACCENT
+    box.line.width = Pt(1.5)
+    frame.margin_left = frame.margin_right = Inches(0.15)
+    frame.margin_top = frame.margin_bottom = Inches(0.08)
+    for paragraph, (text, level) in zip(paragraphs, lines, strict=True):
+        if level == 0:
+            paragraph.space_after = Pt(4)
+            for run in paragraph.runs:
+                run.font.size = Pt(16)
+                run.font.bold = True
+                run.font.color.rgb = RISK_BOX_ACCENT
+            continue
+        if reference is not None and paragraph._p.pPr is not None:
+            for attr in ("marL", "indent"):
+                if reference.get(attr) is not None:
+                    paragraph._p.pPr.set(attr, reference.get(attr))
+        if level == 1:
+            paragraph.space_before = Pt(4)
+            paragraph.space_after = Pt(1)
+            colour = RISK_SEVERITY_COLORS.get(text.split()[1].upper() if " " in text else "")
+            for run in paragraph.runs:
+                run.font.bold = True
+                if colour is not None:
+                    run.font.color.rgb = colour
+        if level == 2:
+            paragraph.level = 1
+            paragraph._p.get_or_add_pPr().set("marL", str(base + 342900))
 
 
 def metric_phrase(label: str, value: dict, prior: dict) -> str:
@@ -537,7 +601,6 @@ def render_deck(data: GovernanceData, template: Path, destination: Path, source_
         ],
     )
     current, before = payload["open"], prior["open"]
-    total = data.total("open")
     score, old_score = payload["security_score"]["value"], prior["security_score"]["value"]
     score_change = "Comparison unavailable"
     if score is not None and old_score is not None:
@@ -577,14 +640,19 @@ def render_deck(data: GovernanceData, template: Path, destination: Path, source_
     messages, takeaways = client_messages(data)
     write_text(summary, 20, ["Key messages", *messages], 19)
     posture = deck.slides[3]
-    for sid, heading, number in (
-        (9, "Open backlog", total),
-        (12, "Critical", current["CRITICAL"]),
-        (15, "High", current["HIGH"]),
-        (18, "Medium", current["MEDIUM"]),
-        (21, "Low", current["LOW"]),
+    in_progress = payload["in_progress"]
+    # Owner rule: severity cards show their in-progress count from the December 2026
+    # report onward; earlier reports, and any card with none in progress, show the date.
+    card_progress = data.end.date() >= SEVERITY_CARD_PROGRESS_FROM
+    for sid, heading, number, working in (
+        (9, "Open backlog", data.total("open"), data.total("in_progress")),
+        (12, "Critical", current["CRITICAL"], in_progress["CRITICAL"]),
+        (15, "High", current["HIGH"], in_progress["HIGH"]),
+        (18, "Medium", current["MEDIUM"], in_progress["MEDIUM"]),
+        (21, "Low", current["LOW"], in_progress["LOW"]),
     ):
-        write_text(posture, sid, [heading, f"{number:,}", "C/H/M/L only" if sid == 9 else as_of])
+        caption = f"{working:,} in progress" if sid == 9 or (card_progress and working) else as_of
+        write_text(posture, sid, [heading, f"{number:,}", caption])
         target = shape(posture, sid)
         target.width = Inches(2.05 if sid == 9 else 1.8)
         target.height = Inches(1.0)
@@ -593,32 +661,25 @@ def render_deck(data: GovernanceData, template: Path, destination: Path, source_
             paragraph.space_before = paragraph.space_after = Pt(0)
             for run in paragraph.runs:
                 run.font.size = Pt(size)
-    write_text(
-        posture,
-        26,
-        [
-            "Posture highlights",
-            f"Critical: {current['CRITICAL']:,}; High: {current['HIGH']:,}.",
-            f"Medium: {delta(before['MEDIUM'], current['MEDIUM'])}.",
-            f"Low: {delta(before['LOW'], current['LOW'])}.",
-            f"{data.total('in_progress'):,} in progress; "
-            f"{total - data.total('in_progress'):,} OPEN.",
-        ],
-        19,
+    # Owner layout: one full-width risk box. The retired posture box (frame 22, text 26)
+    # stays as an empty hidden placeholder so the deck remains a valid next-month template.
+    shape(posture, 26).text_frame.clear()
+    shapes = {target.shape_id: target for target in posture.shapes}
+    for sid in (22, 26):
+        if sid in shapes:
+            shapes[sid]._element.xpath("./*[1]/p:cNvPr")[0].set("hidden", "1")
+    box = shapes[25]
+    left, right = (
+        shapes[7].left if 7 in shapes else box.left,
+        (shapes[19].left + shapes[19].width if 19 in shapes else box.left + box.width),
     )
-    write_text(
-        posture,
-        25,
-        trend_statement(current, before, data.total("in_progress"), data.start.strftime("%B")),
-        16,
-    )
-    bullets = shape(posture, 25).text_frame.paragraphs[1:]
-    reference = bullets[0]._p.pPr if bullets else None
-    for paragraph in bullets[1:]:
-        if reference is not None and paragraph._p.pPr is not None:
-            for attr in ("marL", "indent"):
-                if reference.get(attr) is not None:
-                    paragraph._p.pPr.set(attr, reference.get(attr))
+    if 24 in shapes:
+        frame = shapes[24]
+        frame.left, frame.top = left, Emu(2433320)
+        frame.width, frame.height = right - left, Emu(3068320)
+    box.left, box.top = left + Emu(157537), Emu(2532888)
+    box.width, box.height = right - left - Emu(315074), Emu(2869184)
+    write_risk_box(posture, 25, risk_box(payload))
     fill_tables(deck, data, "resolved_groups", (4, 5, 6))
     fill_tables(deck, data, "in_progress_groups", (7, 8))
     write_text(deck.slides[9], 8, takeaways, 20)

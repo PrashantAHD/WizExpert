@@ -21,6 +21,7 @@ from wizexpert.governance.governance_data import (
     capture_groups,
     cutoff_counts,
     load_snapshot,
+    open_top_rules,
     timestamp,
 )
 from wizexpert.governance.monthly import validate_rows
@@ -33,6 +34,7 @@ COMPUTED = {
     "period",
     "prior",
     "open",
+    "open_top_rules",
     "in_progress",
     "resolved",
     "accepted",
@@ -182,6 +184,7 @@ def build_snapshot(
             **prior_metrics,
         },
         "open": counted["open"],
+        "open_top_rules": open_top_rules(rows, end.replace(tzinfo=None)),
         "in_progress": counted["in_progress"],
         "resolved": counted["resolved"],
         "accepted": counted["accepted"],

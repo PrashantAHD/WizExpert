@@ -3,7 +3,7 @@
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 const $ = (id) => document.getElementById(id);
 const state = {
-  categories: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "", view: "",
+  categories: [], workflows: [], helper: {}, runId: null, timer: null, since: 0, progress: [], shown: "", view: "",
   active: [], history: [], notifications: [], updated: 0, stale: false, refreshing: false, refreshError: "", loaded: false, dataBars: [],
   hf: { status: "", category: "", q: "" }, hvResults: null, hvCategory: null, hvClear: null, pvResults: null,
   activityBox: null, activityCategory: "", wfId: "", runStatus: "", runCategory: "", focusNext: "", restoreY: null, routeSeq: 0,
@@ -226,8 +226,8 @@ function updateNav() {
   });
 }
 function renderNavWorkflows() {
-  mount($("nav-workflows"), JSON.stringify(state.categories.map((c) => [c.id, c.title])), (box) => {
-    for (const c of state.categories) box.append(bindLink(h("a", { href: wfPath(c.id), class: "nav-link sub", title: c.title }, h("span", { class: "ico", "aria-hidden": "true" }, (c.title || "?").charAt(0)), h("span", { class: "nav-label" }, c.title))));
+  mount($("nav-workflows"), JSON.stringify([state.categories.map((c) => [c.id, c.title]), state.workflows.map((w) => [w.id, w.title])]), (box) => {
+    for (const c of [...state.categories, ...state.workflows]) box.append(bindLink(h("a", { href: wfPath(c.id), class: "nav-link sub", title: c.title }, h("span", { class: "ico", "aria-hidden": "true" }, (c.title || "?").charAt(0)), h("span", { class: "nav-label" }, c.title))));
     updateNav();
   });
 }
@@ -255,7 +255,8 @@ async function route() {
     openRun(m[1]);
   } else if ((m = ROUTE_WF.exec(path))) {
     let category = state.categories.find((c) => c.id === m[1]);
-    if (!category) {
+    const findWorkflow = () => (state.workflows || []).find((w) => w.id === m[1]);
+    if (!category && !findWorkflow()) {
       showStatusPage("loading", "Loading workflow", "Fetching the available workflows.");
       try { await refresh(); } catch (e) {
         if (seq !== state.routeSeq) return;
@@ -265,7 +266,8 @@ async function route() {
       if (seq !== state.routeSeq) return;
       category = state.categories.find((c) => c.id === m[1]);
     }
-    if (!category) showStatusPage("error", "Workflow not found", "No workflow named \u201c" + m[1] + "\u201d is available.");
+    if (!category && findWorkflow()) showSyncWorkflow(findWorkflow());
+    else if (!category) showStatusPage("error", "Workflow not found", "No workflow named \u201c" + m[1] + "\u201d is available.");
     else showWorkflow(category, m[2], m[3]);
   } else {
     if (path !== "/") history.replaceState(history.state, "", "/");
@@ -306,7 +308,7 @@ function refresh() {
   inflight = (async () => {
     try {
       const data = await api("GET", "/api/bootstrap");
-      state.categories = data.categories; state.helper = data.helper; renderHelper();
+      state.categories = data.categories; state.workflows = data.workflows || []; state.helper = data.helper; renderHelper();
       if (state.helper.connected && (!state.mcpAt || Date.now() - state.mcpAt > 30000)) { state.mcpAt = Date.now(); refreshMcp(); }
       autoConnect();
       state.active = data.active || []; state.history = data.history || [];
@@ -746,12 +748,14 @@ const WF_ART = {
   "daily-progress-reporting": "workflow-daily-progress.svg",
   "weekly-progress-reporting": "workflow-weekly-progress.svg",
   "monthly-governance-reporting": "workflow-monthly-governance.svg",
+  sync: "workflow-sync.svg",
 };
 const WF_BLURB = {
   "risk-issues": "Prepare deliverables for Wiz issue IDs.",
   "daily-progress-reporting": "Prepare today's progress report.",
   "weekly-progress-reporting": "Prepare Weekly report of AHEAD team work-items.",
   "monthly-governance-reporting": "Prepare the monthly governance reporting.",
+  sync: "Check Risk Issues status in Wiz, then refresh approved cases.",
 };
 const ABOUT_JOURNEY = [
   ["Collect", "Read-only Wiz MCP queries gather fresh evidence and note any gaps."],
@@ -780,6 +784,9 @@ const ABOUT_CASES = [
   ["monthly-governance-reporting", "Monthly Governance Reporting", "A consistent monthly governance pack.",
     "Roll the month forward, keep prior reporting decisions and check the workbook, dashboard and deck agree with each other.",
     ["Governance workbook", "Executive dashboard", "Call slide deck"]],
+  ["sync", "Sync", "Keep Risk Issues status current.",
+    "Run a read-only Wiz status check, review the result and daily report, then let the owner approve a Refresh for each changed case. Nothing is changed in Wiz or sent without a person.",
+    ["Status check result", "Daily report", "Owner-approved Refresh"]],
 ];
 function aboutSection() {
   return h("section", { class: "block about", "aria-labelledby": "h-about" },
@@ -848,12 +855,12 @@ function renderHome() {
     if (!state.active.length) box.append(stateBox("empty", "Nothing is running", "Running tasks appear here. See In progress in the sidebar for the full list."));
     else box.append(h("div", { class: "run-cards" }, state.active.map(runCard)));
   });
-  mount(home.workflows, JSON.stringify([state.categories.map((c) => c.id), state.refreshError]), (box) => {
+  mount(home.workflows, JSON.stringify([state.categories.map((c) => c.id), state.workflows.map((w) => w.id), state.refreshError]), (box) => {
     if (!state.categories.length) {
       box.append(state.refreshError ? stateBox("error", "Could not load workflows", state.refreshError, "Retry", () => loadData()) : stateBox("loading", "Loading workflows..."));
       return;
     }
-    box.append(h("div", { class: "wf-grid" }, state.categories.map((c) => {
+    box.append(h("div", { class: "wf-grid" }, [...state.categories, ...(state.workflows || [])].map((c) => {
       const art = WF_ART[c.id];
       const card = link(wfPath(c.id), "wf-card",
         art ? h("img", { class: "wf-art", src: "/static/assets/" + art, alt: "", decoding: "async" }) : null,
@@ -1137,6 +1144,8 @@ function showWorkflow(category, stageId, actionId) {
   arrowNav(stageBar);
   main.append(stageBar);
   if (category.rules && category.rules.length) main.append(rulesPanel(category));
+  const flowAnimation = workflowAnimation(category);
+  if (flowAnimation) main.append(flowAnimation);
   main.append(detail);
   const stage = stageId ? category.stages.find((s) => s.id === stageId) : null;
   if (stage) showStage(stage, actionId);
@@ -1144,14 +1153,266 @@ function showWorkflow(category, stageId, actionId) {
   else detail.append(stateBox("empty", "Choose a stage", "Select a stage above to continue."));
 }
 // ---- imported local deliverables (read-only listings) and approval gates --------------------------
-// Collapsed list of the canonical end-to-end workflow rules (read-only; source: workflow_rules.py).
+// Animated Sync design diagram: inline SVG generated from the payload steps (no external assets; the CSP
+// forbids inline styles, so all styling is in style.css and the token uses SVG animateMotion).
+const SVG_NS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) if (v != null && v !== false) el.setAttribute(k, String(v));
+  for (const kid of kids.flat()) if (kid != null) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return el;
+}
+function syncRuleLabel(wf, code) {
+  const nums = [];
+  for (const g of wf.rules || []) for (const r of g.rules || []) { const m = /^SY-([A-Z]{3})-(\d+)$/.exec(r.id || ""); if (m && m[1] === code) nums.push(m[2]); }
+  if (!nums.length) return "";
+  return "SY-" + code + "-" + nums[0] + (nums.length > 1 ? ".." + nums[nums.length - 1] : "");
+}
+function wrapWords(text, max) {
+  const lines = []; let cur = "";
+  for (const w of String(text).split(" ")) {
+    if (cur && (cur + " " + w).length > max) { lines.push(cur); cur = w; } else cur = cur ? cur + " " + w : w;
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 3);
+}
+const SYNC_NODE_INFO = [
+  // [title pattern, rule code, small tag, read-only Wiz badge]
+  [/trigger/i, "SCP", "manual forces a check", false],
+  [/due/i, "CHK", "assignee validated first", false],
+  [/status check/i, "CHK", "one run \u00b7 failed = stop", true],
+  [/result|report/i, "STA", "changes? notify owner", false],
+  [/approve/i, "REF", "owner only \u00b7 never auto", false],
+  [/refresh/i, "REF", "no gate \u00b7 PDF + local drafts", true],
+  [/settle/i, "STA", "status-sync.json saved", false],
+];
+function syncDiagram(wf) {
+  const steps = wf.steps || [], n = steps.length;
+  const cols = 4, W = 200, H = 170, NW = 176, NH = 84, T = 14, ACTIVE = 12, PAD = 24;
+  const reduce = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const pos = steps.map((_, i) => { const r = Math.floor(i / cols), c = i % cols; return { x: PAD + 100 + W * (r % 2 ? cols - 1 - c : c), y: 110 + H * r }; });
+  const rows = Math.max(1, Math.ceil(n / cols)), vbW = cols * W + 2 * PAD, vbH = 110 + H * (rows - 1) + NH / 2 + 72;
+  const title = "Sync end-to-end workflow: " + steps.map((s) => s.title).join(" \u2192 ");
+  const svg = sv("svg", { class: "sync-diagram", viewBox: "0 0 " + vbW + " " + vbH, role: "img", "aria-label": title, preserveAspectRatio: "xMidYMid meet", focusable: "false" }, sv("title", {}, title));
+  svg.append(sv("rect", { class: "sx-frame", x: 4, y: 4, width: vbW - 8, height: vbH - 8, rx: 14 }),
+    sv("text", { class: "sx-frame-label", x: 16, y: 24 }, "Read-only boundary \u00b7 no email \u00b7 no Wiz or ServiceNow change" + (syntaxRule(wf) ? " (" + syntaxRule(wf) + ")" : "")));
+  // connectors (animated dashes) and the node boxes
+  for (let i = 1; i < n; i++) svg.append(sv("line", { class: "sx-link", x1: pos[i - 1].x, y1: pos[i - 1].y, x2: pos[i].x, y2: pos[i].y }));
+  const nodes = [];
+  const find = (re) => steps.findIndex((s) => re.test(s.title));
+  steps.forEach((s, i) => {
+    const info = SYNC_NODE_INFO.find((x) => x[0].test(s.title)) || [null, "", "", false];
+    const g = sv("g", { class: "sx-node" + (info[3] ? " ro" : ""), "data-step": i }, sv("title", {}, s.title + ": " + s.text));
+    g.append(sv("rect", { class: "sx-box", x: pos[i].x - NW / 2, y: pos[i].y - NH / 2, width: NW, height: NH, rx: 10 }),
+      sv("rect", { class: "sx-glow", x: pos[i].x - NW / 2, y: pos[i].y - NH / 2, width: NW, height: NH, rx: 10 },
+        reduce ? null : sv("animate", { attributeName: "opacity", values: "0;1;1;0;0", keyTimes: "0;0.02;0.08;0.13;1", dur: T + "s", begin: (n > 1 ? i * ACTIVE / (n - 1) : 0).toFixed(2) + "s", repeatCount: "indefinite" })));
+    const lines = wrapWords((i + 1) + ". " + s.title, 22), y0 = pos[i].y - 8 * (lines.length - 1) + (info[3] ? 2 : -2);
+    lines.forEach((l, k) => g.append(sv("text", { class: "sx-title", x: pos[i].x, y: y0 + 16 * k, "text-anchor": "middle" }, l)));
+    const rl = syncRuleLabel(wf, info[1]);
+    if (rl) g.append(sv("text", { class: "sx-rule", x: pos[i].x, y: pos[i].y + NH / 2 - 8, "text-anchor": "middle" }, rl));
+    if (info[3]) g.append(sv("text", { class: "sx-ro", x: pos[i].x, y: pos[i].y - NH / 2 + 16, "text-anchor": "middle" }, "READ-ONLY WIZ"));
+    if (info[2]) {
+      const down = i + 1 < n && pos[i + 1].x === pos[i].x;
+      g.append(sv("text", { class: "sx-tag", x: pos[i].x + (down ? -8 : 0), y: pos[i].y + NH / 2 + 16, "text-anchor": down ? "end" : "middle" }, info[2]));
+    }
+    nodes.push(g); svg.append(g);
+  });
+  // branches: failed result stops; no change ends; changes continue to owner approval
+  const chip = (i, text, cls) => { if (i < 0) return; const p = pos[i], yy = p.y - NH / 2 - 34;
+    svg.append(sv("line", { class: "sx-branch " + cls, x1: p.x, y1: p.y - NH / 2, x2: p.x, y2: yy + 22 }),
+      sv("rect", { class: "sx-chip " + cls, x: p.x - 66, y: yy, width: 132, height: 22, rx: 11 }),
+      sv("text", { class: "sx-chip-text", x: p.x, y: yy + 15, "text-anchor": "middle" }, text)); };
+  const iCheck = find(/status check/i), iRes = find(/result|report/i), iAppr = find(/approve/i);
+  if (iRes >= 0 && iRes === iCheck + 1) chip(iCheck, "Failed \u2192 stop", "bad");
+  chip(iRes, "No change \u2192 end", "ok");
+  if (iAppr > 0 && pos[iAppr].x === pos[iAppr - 1].x) svg.append(sv("text", { class: "sx-tag", x: pos[iAppr].x - 8, y: (pos[iAppr].y + pos[iAppr - 1].y) / 2 + 4, "text-anchor": "end" }, "Changes detected"));
+  svg.append(sv("text", { class: "sx-foot", x: vbW / 2, y: vbH - 22, "text-anchor": "middle" }, "State is persisted to status-sync.json and the daily change report; Wiz stays read-only and nothing is sent."));
+  if (!reduce && n > 1) {
+    // The token rides the top edge of each box (never over the text); row changes detour round the side.
+    const pts = [], at = [];
+    pos.forEach((p, i) => {
+      const top = { x: p.x, y: p.y - NH / 2 };
+      if (i && pos[i - 1].y !== p.y) {
+        const prev = pts[pts.length - 1], sx = p.x + (p.x >= vbW / 2 ? 1 : -1) * (NW / 2 + 10);
+        pts.push({ x: sx, y: prev.y }, { x: sx, y: top.y });
+      }
+      at.push(pts.length); pts.push(top);
+    });
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    const total = cum[cum.length - 1] || 1, d = "M" + pts.map((p) => p.x + " " + p.y).join(" L"), kp = [], kt = [];
+    at.forEach((j, i) => { kp.push((cum[j] / total).toFixed(4)); kt.push((i / (n - 1) * ACTIVE / T).toFixed(4)); });
+    kp.push("1"); kt.push("1");
+    svg.append(sv("circle", { class: "sx-token", r: 6, cx: 0, cy: 0 },
+      sv("animateMotion", { path: d, dur: T + "s", repeatCount: "indefinite", calcMode: "linear", keyPoints: kp.join(";"), keyTimes: kt.join(";") })));
+  }
+  const wrap = h("figure", { class: "sync-diagram-wrap" }, svg,
+    h("figcaption", { class: "help" }, "Flow: " + steps.map((s) => s.title).join(" \u2192 ") + ". A failed status check stops with nothing refreshed; no change ends the sync; changes wait for the owner's Approve refresh per case."));
+  wrap.svg = svg; wrap.nodes = nodes;
+  return wrap;
+}
+function syntaxRule(wf) { const a = syncRuleLabel(wf, "BND"); return a; }
+// Highlight the step that matches the last-sync state (checking, or changes awaiting approval).
+function markSyncDiagram(wrap, steps, s) {
+  if (!wrap || !wrap.nodes) return;
+  const want = s && s.phase === "checking" ? /status check/i : s && s.phase === "done" && (s.pending || []).length ? /approve/i : null;
+  wrap.nodes.forEach((g, i) => g.setAttribute("class", g.getAttribute("class").replace(/ sx-current/g, "") + (want && want.test(steps[i].title) ? " sx-current" : "")));
+}
+// Sync workflow page (kind "workflow", not a deliverable category): steps, rules and last sync state.
+// Only the dedicated status-sync button (POST /api/imports/risk-issues/sync) runs here; no Collect/Generate actions. The topbar Sync button keeps its behaviour.
+function showSyncWorkflow(wf) {
+  clearTimeout(state.timer); state.runId = null; state.runStatus = ""; banner("");
+  showView("workflow"); state.wfId = wf.id;
+  setTitle(wf.title);
+  const root = $("v-workflow"); clear(root);
+  const last = h("div", { class: "card" }, h("h2", {}, "Last sync"), h("p", { class: "help" }, "Loading\u2026"));
+  const steps = h("ol", { class: "sync-steps" });
+  for (const s of wf.steps || []) steps.append(h("li", {}, h("strong", {}, s.title + ". "), s.text));
+  const rules = rulesPanel(wf); rules.open = true;
+  const diagram = syncDiagram(wf);
+  const result = h("p", { class: "help", role: "status", "aria-live": "polite", id: "sync-page-result" });
+  const syncBtn = h("button", { type: "button", id: "sync-page-btn", class: "sync-page-btn" }, "Sync now");
+  const renderLast = (status, lastResult) => {
+    const s = status.state || {}; clear(last); markSyncDiagram(diagram, wf.steps || [], s);
+    last.append(h("h2", {}, "Last sync"), h("p", { role: "status" }, syncStatusText(s)));
+    const items = [];
+    const runLink = (label, id) => h("li", {}, link(runPath(id), "", label + " (run " + id + ")"));
+    if (s.check_run_id) items.push(runLink("Read-only Wiz status check", s.check_run_id));
+    for (const q of s.queued || []) items.push(runLink("Sync Refresh: " + q.case, q.run_id));
+    for (const q of (lastResult && lastResult.started) || []) if (q.run_id && !(s.queued || []).some((x) => x.run_id === q.run_id) && q.run_id !== s.check_run_id) items.push(runLink("Started: " + (q.case || "status check"), q.run_id));
+    if (s.report) items.push(h("li", {}, "Daily change report: ", h("code", {}, "Status-Check/" + s.report)));
+    if (s.result_name) items.push(h("li", {}, "Status-check result: ", h("code", {}, "Status-Check/" + s.result_name + ".json")));
+    last.append(items.length ? h("ul", {}, items) : h("p", { class: "help" }, "No sync runs recorded yet."));
+    const changed = s.changed || [], approved = s.approved || [];
+    if (changed.length) {
+      const list = h("ul", { class: "sync-changed" });
+      const note = h("p", { class: "help", role: "status" });
+      for (const c of changed) {
+        const done = approved.includes(c);
+        const btn = h("button", { type: "button", class: "small", disabled: done,
+          onclick: async () => {
+            btn.disabled = true;
+            try {
+              await api("POST", "/api/imports/risk-issues/approve-refresh", { case: c });
+              btn.textContent = "Refresh approved"; await refresh();
+              const fresh = await api("GET", "/api/imports/risk-issues/sync");
+              updateSyncStatus(fresh.state); renderLast(fresh, lastResult);
+            } catch (e) { btn.disabled = false; note.textContent = e.message; note.className = "bad"; }
+          } }, done ? "Refresh approved" : "Approve refresh");
+        list.append(h("li", {}, c + " \u2013 " + ((s.reasons || {})[c] || "changed") + " ", btn));
+      }
+      last.append(h("h3", {}, "Changed cases"),
+        h("p", { class: "help" }, "Nothing is refreshed until you approve it."), list, note);
+    }
+    last.append(h("p", { class: "help" }, "Next automatic check: " + (status.due ? "due now" : "after the next IST day starts") + "."));
+  };
+  const reportResult = (res) => {
+    const skipped = (res.skipped || []).length;
+    const note = skipped ? " Not started: " + res.skipped[0].reason : "";
+    result.className = "help";
+    result.textContent = res.busy
+      ? "A Wiz status check is already running; changed cases wait for your Approve refresh." + note
+      : (res.started || []).length
+        ? "Read-only Wiz status check started. Changed cases are listed below; nothing is refreshed until you click Approve refresh."
+        : "No Wiz status check was started." + note;
+  };
+  syncBtn.addEventListener("click", async () => {
+    if (syncBtn.disabled) return;
+    syncBtn.disabled = true; syncBtn.setAttribute("aria-busy", "true"); syncBtn.textContent = "Syncing\u2026";
+    result.className = "help"; result.textContent = "Starting read-only Wiz status check\u2026";
+    try {
+      await runStatusSync((res) => { reportResult(res); renderLast({ state: res.state, due: false }, res); });
+    } catch (e) { result.className = "bad"; result.textContent = "Status sync unavailable: " + e.message; }
+    finally { syncBtn.disabled = false; syncBtn.removeAttribute("aria-busy"); syncBtn.textContent = "Sync now"; }
+  });
+  root.append(breadcrumb({ label: "Home", href: "/" }, { label: wf.title }),
+    h("div", { class: "wf-head" }, pageHead(wf.title, wf.description),
+      h("div", { class: "wf-actions" }, syncBtn,
+        h("button", { class: "secondary back-btn", type: "button", onclick: () => go("/") }, "Back to workflows"))),
+    result,
+    h("div", { class: "card" }, h("h2", {}, "Workflow design"), diagram),
+    h("div", { class: "card" }, h("h2", {}, "End-to-end workflow steps"), steps,
+      h("p", { class: "help" }, "Use Sync now here or the Sync button in the top bar. Risk Issues only.")),
+    last, h("div", { class: "card" }, rules));
+  if (diagram.svg.setCurrentTime) diagram.svg.setCurrentTime(0);
+  api("GET", "/api/imports/risk-issues/sync").then((status) => renderLast(status))
+    .catch((e) => { clear(last); last.append(h("h2", {}, "Last sync"), h("p", { class: "bad" }, "Sync state unavailable: " + e.message)); });  state.activityCategory = ""; state.activityBox = null;
+}
+// Animated, generic end-to-end flow shown under each workflow's rules (CSS-only motion, data-driven per
+// category). Stage text is generic and non-client-specific; the heading uses the category title.
+const WORKFLOW_FLOWS = {
+  "daily-progress-reporting": { key: "daily-progress", kicker: "READ \u2192 VERIFY \u2192 REVIEW", stages: [
+    ["Fresh read-only collection", "Current data is read; nothing in the source is changed."],
+    ["Grouped and reconciled findings", "Findings are grouped and counts are reconciled."],
+    ["Exact-ID inventory", "Every item is listed by its exact identifier."],
+    ["Snapshot and inventory validation", "The snapshot and the inventory must agree."],
+    ["Report pack and inactive workbook", "The report pack is built with an inactive workbook."],
+    ["Draft-only human review", "A person reviews the draft; nothing is sent automatically."],
+  ] },
+  "risk-issues": { key: "risk-issues", kicker: "SCOPE \u2192 ANALYZE \u2192 REVIEW", stages: [
+    ["Read-only issue intake", "The issue is read from saved evidence; the source is not changed."],
+    ["Evidence and scope check", "Affected resources and supporting evidence are confirmed."],
+    ["Risk analysis", "Impact and exposure are assessed from the evidence."],
+    ["Remediation guidance", "Recommended fixes are drafted for the owning team."],
+    ["Deliverable pack", "The case files are prepared in the local deliverables folder."],
+    ["Draft-only human review", "A person reviews the draft; nothing is sent automatically."],
+  ] },
+  "weekly-progress-reporting": { key: "weekly-progress", kicker: "COLLECT \u2192 COMPARE \u2192 REVIEW", stages: [
+    ["Fresh read-only collection", "Current data is read; nothing in the source is changed."],
+    ["Week-over-week comparison", "This week is compared with the prior saved report."],
+    ["Reconciled counts", "Totals and groupings are checked for consistency."],
+    ["Weekly report pack", "The report and supporting files are built locally."],
+    ["Draft-only human review", "A person reviews the draft; nothing is sent automatically."],
+  ] },
+  "monthly-governance-reporting": { key: "monthly-governance", kicker: "BASELINE \u2192 VERIFY \u2192 REVIEW", stages: [
+    ["Prior-month baseline", "Earlier reporting decisions are carried forward."],
+    ["Fresh read-only collection", "Current data is read; nothing in the source is changed."],
+    ["Control and figure reconciliation", "Controls and governance figures must agree."],
+    ["Workbook and dashboard", "The workbook and executive dashboard are rebuilt."],
+    ["Operational deck and parity check", "The deck is built and checked against the workbook."],
+    ["Draft-only human review", "A person reviews the draft; nothing is sent automatically."],
+  ] },
+};
+const WORKFLOW_FLOW_GLYPHS = ["\u25CE", "\u2261", "#", "\u2713", "\u25A4", "\u270E"];
+const WORKFLOW_FLOW_HUES = [172, 205, 245, 280, 35, 12];
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight"];
+function workflowAnimation(category) {
+  const flow = WORKFLOW_FLOWS[category.id];
+  if (!flow) return null;
+  const list = h("ol", { class: "flow-steps" });
+  const rail = h("div", { class: "flow-rail", "aria-hidden": "true" },
+    h("span", { class: "flow-packet" }),
+    h("span", { class: "flow-packet flow-packet-b" }));
+  flow.stages.forEach(([title, text], i) => {
+    const hue = WORKFLOW_FLOW_HUES[i % WORKFLOW_FLOW_HUES.length];
+    list.append(h("li", { class: "flow-step", style: "--i:" + i + ";--hue:" + hue },
+      h("span", { class: "flow-num", "aria-hidden": "true" }, WORKFLOW_FLOW_GLYPHS[i % WORKFLOW_FLOW_GLYPHS.length]),
+      h("span", { class: "flow-kicker" }, "Stage " + String(i + 1).padStart(2, "0")),
+      h("strong", {}, title), h("span", { class: "help" }, text)));
+  });
+  const count = flow.stages.length;
+  return h("section", { class: "card flow-anim", "aria-labelledby": "flow-anim-title", "data-flow": flow.key, style: "--steps:" + count },
+    h("div", { class: "flow-heading" },
+      h("div", {},
+        h("span", { class: "flow-eyebrow" }, category.title),
+        h("h2", { id: "flow-anim-title" }, "The workflow, in motion")),
+      h("span", { class: "flow-live", "aria-hidden": "true" }, h("span", { class: "flow-live-dot" }), flow.kicker)),
+    h("p", { class: "help flow-intro" }, "A read-only signal moves through " + (NUMBER_WORDS[count] || String(count)) + " ordered stages. The animation is decorative and pauses when reduced motion is preferred."),
+    h("div", { class: "flow-visual", "aria-hidden": "true" },
+      h("span", { class: "flow-orbit flow-orbit-a" }),
+      h("span", { class: "flow-orbit flow-orbit-b" }),
+      h("span", { class: "flow-beacon" }),
+      h("span", { class: "flow-signal" })),
+    h("div", { class: "flow-track" }, rail, list));
+}// Collapsed list of the category's canonical end-to-end workflow rules (read-only; every category;
+// sources: wizexpert/category_rules/ and governance/workflow_rules.py for Monthly).
 function rulesPanel(category) {
   const details = h("details", { class: "workflow-rules" });
   details.append(h("summary", {}, "End-to-end workflow rules (" + (category.rule_count || 0) + ")"));
   details.append(h("p", { class: "help" }, "These rules are always followed. A rule that cannot be satisfied stops the run, citing its id."));
   for (const group of category.rules) {
     const list = h("ul", { class: "rule-list" });
-    for (const r of group.rules) list.append(h("li", {}, h("code", {}, r.id), " ", r.text));
+    for (const r of group.rules) list.append(h("li", {}, h("code", {}, r.id), " ", r.text, h("span", { class: "help" }, " Enforced by: ", r.enforced_by)));
     details.append(h("section", { "aria-label": group.title }, h("h3", {}, group.title), list));
   }
   return details;

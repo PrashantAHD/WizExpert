@@ -81,6 +81,27 @@ All of these only read local files or ask the helper to run an allow-listed VS C
 The console sends no email, changes nothing in Wiz, ServiceNow or cloud, and never handles
 passwords, MFA codes or tokens.
 
+### End-to-end workflow rules (every category)
+
+Every category page has a collapsible **End-to-end workflow rules (N)** section showing that
+category's own canonical rules (owner decision: every category workflow has one). The lists
+are machine-readable and are the source of truth: Risk Issues `RI-`, Daily Progress
+Reporting `DP-` and Weekly Progress Reporting `WP-` in `wizexpert/category_rules/`; Monthly
+Governance `MG-` in `wizexpert/governance/workflow_rules.py`. Print one with
+`wizexpert rules <risk|daily|weekly|monthly|sync>` (`--json` for JSON; `wizexpert governance
+rules` still prints the Monthly list). The console only displays them and adds no rules. Daily Progress also carries the fresh-evidence gate (`DP-COL-08`, enforced by the console freshness check) and the daily new-detection worksheets (`DP-MET-06`); campaign-specific decisions stay in the private campaign rule registry (`DP-BND-04`) and are never shown here.
+
+**Sync page.** The sidebar lists **Sync** after the categories. It is a workflow page, not a
+deliverable category: no Collect/Generate/Start actions, and the topbar Sync button is
+unchanged. It shows the end-to-end Sync steps, the `SY-` rules (`wizexpert/category_rules/sync.py`,
+`wizexpert rules sync`) with their enforcing function, the last sync state and links to the
+status-check and approved Sync Refresh runs (the Status-Check files stay backend-only, so they
+are named, not opened). At the top it shows an animated **Workflow design** diagram: inline SVG
+generated in `app.js` from the payload's steps (so it cannot drift), with `SY-` rule ids per node,
+read-only/no-send boundary marks, a token travelling the flow, the failed/no-change/changes
+branches and a highlight of the current step. It uses no external assets and is static under
+`prefers-reduced-motion`. Bootstrap returns it under `workflows`. Daily Progress also carries the fresh-evidence gate (`DP-COL-08`, enforced by the console freshness check) and the daily new-detection worksheets (`DP-MET-06`); campaign-specific decisions stay in the private campaign rule registry (`DP-BND-04`) and are never shown here.
+
 ### Approvals
 
 Monthly Governance Reporting uses a single end-to-end **Proceed** action. It no longer
@@ -189,7 +210,9 @@ UI has no Deliverables button for them and they are not listed or opened. Email 
 follow-ups, replies, change summaries and update-deliverables outputs are direct files in the case
 folder (`inputs/` and `archives/` sub-folders are intentionally not listed). A test
 (`test_console_deliverables.py`) enforces a CATEGORY_DIRS entry plus an app.js button for every generated location.
-(Monthly files are flat, so its folder is the month). The **run detail page** shows the same
+(Monthly folder is the month `YYYY-MM`: legacy flat files in the category folder plus the direct
+files of the canonical period folder `<Month><YYYY>-report` (MG-REL-01), which wins on a name
+clash; `report-backups`, `-review` copies and `.generated` files are not listed.) The **run detail page** shows the same
 button for the exact folder that run produced: the server resolves `deliverables`
 `{category, folder, reason}` in the run view (from the run's case/report/month input, else from
 the files it wrote); with no folder yet the button is disabled with "No files generated yet". **Open**
@@ -251,7 +274,7 @@ launch, no helper).
   runs from every category. Each notification row is itself clickable and routes directly
   to its run or Refresh outcome page. Each row also shows the actual action performed (the run's canonical `action_id` and action title,
   exposed through bootstrap/history; runs saved before this field existed fall back to a generic line).
-  Status-sync notifications state that the Refresh started automatically (no approval step). The only polling is the browser's 60 s POST while a sync is in progress; the server runs no background job.
+  Status-sync notifications state that the Refresh started because the owner approved it (the `sync-refresh` run itself has no approval gate). The only polling is the browser's 60 s POST while a sync is in progress; the server runs no background job.
   **Update deliverables** (action `update-deliverables`, gated; legacy `update-case` maps to it)
   is the second, separate case button: a textarea takes the owner's free text (client/stakeholder
   response, decisions, notes, corrections, pasted email text; up to 1500 characters, cleaned and
@@ -292,7 +315,8 @@ launch, no helper).
   changed items from the retained `weekly-progress-data.json` files
   (`GET /api/imports/weekly-diff?current=&previous=`).
 - **Monthly Governance** (*Previous months* and *New month*): lists months from the workbook,
-  executive dashboard / deck and `*.governance.json` names; a month is **PRELIMINARY** unless a
+  executive dashboard / deck and `*.governance.json` names, both legacy flat files and the
+  canonical `<Month><YYYY>-report` period folder; a month is **PRELIMINARY** unless a
   non-preliminary workbook, dashboard or deck exists, otherwise *final*. **Compare vs previous
   month** shows parity (workbook, dashboard and governance.json present in both) and snapshot
   count deltas (`GET /api/imports/monthly-compare?month=YYYY-MM`). **New month** is gated and its
@@ -478,7 +502,7 @@ never writes to `session-state`.
 
 ## End-of-run checklist
 
-Every run that has ended (and any status check that is incomplete) shows a **Checklist** card. Each step is one of four states: `completed`, `skipped`, `blocked` or `not_applicable`. Steps: run finished, approval gates, outputs produced and, for a Risk Issues status check, the read-only check plus one `Refresh queued: <case>` step per changed case. The Risk Issues Sync rule is explicit: the read-only status check runs first, then a gated Refresh is queued for every changed case, one at a time. A status check with a changed case that has no queued or started Refresh (still waiting, skipped or refused, or a failed check) has outcome `incomplete`; it is shown as Incomplete and never as a successful completed run.
+Every run that has ended (and any status check that is incomplete) shows a **Checklist** card. Each step is one of four states: `completed`, `skipped`, `blocked` or `not_applicable`. Steps: run finished, approval gates, outputs produced and, for a Risk Issues status check, the read-only check plus one `Refresh queued: <case>` step per changed case. The Risk Issues Sync rule is explicit: the read-only status check runs first; a changed case is refreshed only after the owner's **Approve refresh** click (`SY-REF-02`) and shows `Refresh not approved yet` until then. A status check whose result is not yet read, or that failed, has outcome `incomplete`; it is shown as Incomplete and never as a successful completed run.
 
 ## Running tasks survive refreshes and restarts
 
@@ -561,7 +585,8 @@ poll and a loopback HTTP server; no VS Code, Wiz or agent run is needed.
 
 ## Risk Issues daily status check and owner-approved refresh (owner-approved, persistent rule)
 
-Replaces the earlier delta auto-approval. Applies to the Risk Issues workflow only.
+Replaces the earlier delta auto-approval. Applies to the Risk Issues workflow only. The
+canonical rule list is `SY-` (`wizexpert rules sync`, shown on the console Sync page).
 
 - The read-only status check/sync runs at most ONCE per calendar day (IST), automatically,
   gated by the persisted `last_started` date in the console state (`status-sync.json`); console

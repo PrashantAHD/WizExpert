@@ -31,6 +31,7 @@ PUBLIC_FILES = {
     "wizexpert/console/static/assets/workflow-monthly-governance.svg",
     "wizexpert/console/static/assets/workflow-weekly-progress.svg",
     "wizexpert/console/static/assets/workflow-risk-issues.svg",
+    "wizexpert/console/static/assets/workflow-sync.svg",
 }
 SOURCE_SUFFIXES = {
     "wizexpert": {".py", ".html", ".css", ".js"},

@@ -189,6 +189,7 @@ def test_static_assets_are_served(console):
         ("assets/workflow-daily-progress.svg", "svg"),
         ("assets/workflow-weekly-progress.svg", "svg"),
         ("assets/workflow-monthly-governance.svg", "svg"),
+        ("assets/workflow-sync.svg", "svg"),
     ):
         status, headers, _b = request(server, "GET", f"/static/{name}")
         assert status == 200 and kind in headers["Content-Type"]
@@ -336,6 +337,19 @@ def test_full_flow_progress_input_needed_summary_and_files(console):
         assert boot["active"] == []
         status, _h, body = api(server, token, "GET", "/api/runs/active")
         assert status == 200 and json.loads(body) == {"runs": []}
+
+
+def test_generic_runs_rejects_system_actions(console):
+    server, *_ = console
+    token = token_of(server)
+    for action in ("sync-refresh", "status-check"):
+        body = {
+            "category_id": "risk-issues",
+            "action_id": action,
+            "inputs": {"case_folder": "Case-wc-id-1"},
+        }
+        status, _h, _b = api(server, token, "POST", "/api/runs", body)
+        assert status == 400
 
 
 def _previous(server, token):

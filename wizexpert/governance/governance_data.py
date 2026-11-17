@@ -497,6 +497,73 @@ def cutoff_counts(rows: list[dict], start: datetime, cutoff: datetime) -> dict[s
     return result
 
 
+def open_top_rules(rows: list[dict], cutoff: datetime) -> list[dict]:
+    """Open Critical/High backlog at ``cutoff`` grouped by rule title.
+
+    Uses the same cutoff-state rule as ``cutoff_counts`` so per-severity sums reconcile with
+    ``payload["open"]`` by construction. Sorted by severity, count (desc), then title.
+    """
+    found: dict[tuple[str, str], dict[str, int]] = {}
+    for row in rows:
+        severity = row.get("Severity", "").strip().upper()
+        if severity not in ("CRITICAL", "HIGH"):
+            continue
+        status = status_at(row, cutoff)
+        if status in ("OPEN", "IN_PROGRESS"):
+            title = " ".join(row.get("Title", "").split()) or "Untitled rule"
+            found.setdefault((severity, title), {"OPEN": 0, "IN_PROGRESS": 0})[status] += 1
+    return [
+        {
+            "severity": severity,
+            "title": title,
+            "status_counts": status_counts,
+            "count": sum(status_counts.values()),
+        }
+        for (severity, title), status_counts in sorted(
+            found.items(),
+            key=lambda item: (item[0][0] != "CRITICAL", -sum(item[1].values()), item[0][1]),
+        )
+    ]
+
+
+def validate_open_top_rules(payload: dict) -> None:
+    """Fail closed unless Critical/High rule counts reconcile with the open totals."""
+    rules = payload["open_top_rules"]
+    require(isinstance(rules, list), "open_top_rules must be a list.")
+    sums = {"CRITICAL": 0, "HIGH": 0}
+    progress = {"CRITICAL": 0, "HIGH": 0}
+    for rule in rules:
+        require(
+            isinstance(rule, dict) and rule.get("severity") in sums,
+            f"open_top_rules entry {rule!r} needs severity CRITICAL or HIGH.",
+        )
+        text(rule.get("title"), "open_top_rules.title")
+        by_status = rule.get("status_counts")
+        require(
+            isinstance(by_status, dict)
+            and set(by_status) == {"OPEN", "IN_PROGRESS"}
+            and all(type(v) is int and v >= 0 for v in by_status.values()),
+            f"open_top_rules {rule['title']!r}: status_counts needs OPEN and IN_PROGRESS counts.",
+        )
+        require(
+            rule.get("count") == sum(by_status.values()) and rule["count"] > 0,
+            f"open_top_rules {rule['title']!r}: count must equal status_counts total.",
+        )
+        sums[rule["severity"]] += rule["count"]
+        progress[rule["severity"]] += by_status["IN_PROGRESS"]
+    for severity, total in sums.items():
+        require(
+            total == payload["open"][severity],
+            f"open_top_rules {severity} sum {total} != open {severity} "
+            f"{payload['open'][severity]}.",
+        )
+        require(
+            progress[severity] == payload["in_progress"][severity],
+            f"open_top_rules {severity} in-progress {progress[severity]} != "
+            f"in_progress {severity} {payload['in_progress'][severity]}.",
+        )
+
+
 def load_snapshot(path: Path) -> GovernanceData:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -584,6 +651,8 @@ def load_snapshot(path: Path) -> GovernanceData:
             all(payload["in_progress"][s] <= payload["open"][s] for s in SEVERITIES),
             "IN_PROGRESS must be a subset of OPEN + IN_PROGRESS.",
         )
+        if "open_top_rules" in payload:
+            validate_open_top_rules(payload)
         prior = payload["prior"]
         require(
             prior["date"] == data.start.date().isoformat(), "Prior date must match period start."

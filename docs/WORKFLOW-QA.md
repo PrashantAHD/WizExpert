@@ -52,6 +52,21 @@ replacement; do not create a separate review folder or leave duplicate
 naming rule only and does not waive collection, QA, approval or publication
 gates.
 
+## Canonical end-to-end rules per category (owner decision)
+
+Every category workflow has a canonical, machine-readable end-to-end rule list that is the
+source of truth, shown in the console under **End-to-end workflow rules (N)** on each
+category page and printed with `wizexpert rules <category>`: Risk Issues (`RI-`), Daily
+Progress Reporting (`DP-`) and Weekly Progress Reporting (`WP-`) in
+`wizexpert/category_rules/`; Monthly Governance (`MG-`) in
+`wizexpert/governance/workflow_rules.py`. The **Sync** workflow (Risk Issues status sync,
+not a deliverable category) has its own list (`SY-`, `wizexpert/category_rules/sync.py`,
+`wizexpert rules sync`) and a **Sync** page in the console navigation; RI-/WP- rules point to
+the SY- ids instead of restating them. Lists are authored only from the documented
+rules, `enforced_by` names a code gate or `agent-instruction`, drift tests verify ids,
+phases and gates, and rule changes need explicit owner approval and are made in those
+files. The sections below elaborate them.
+
 ## Monthly governance collection invariant (owner-approved, no bypass)
 
 The canonical, machine-readable rule list is `wizexpert/governance/workflow_rules.py`
@@ -128,16 +143,16 @@ Accepted with at least one such issue; any Open or In Progress issue keeps it In
 
 **Weekly inclusion (rule).** Weekly in-progress tables list only rows whose fresh Wiz status is In Progress; rows whose issues are all Open are not in progress and are left out. Items resolved before the reporting period are excluded entirely (rows and summary text); only items resolved inside the period may appear, with resolution evidence. `validate_weekly_dataset` fails closed otherwise.
 
-**Sync / status check (rule).** Sync is Risk Issues-only; Weekly Progress and Monthly Governance never trigger or are targets of it. Weekly generation reuses retained evidence for history only and always performs a fresh read-only Wiz status fetch for the current scope (never sync state alone). The console Sync button never queues Refresh directly. It first
+**Sync / status check (rule).** The canonical rules are `SY-` (`wizexpert rules sync`; summary below, the list is the source of truth). Sync is Risk Issues-only; Weekly Progress and Monthly Governance never trigger or are targets of it. Weekly generation reuses retained evidence for history only and always performs a fresh read-only Wiz status fetch for the current scope (never sync state alone). The console Sync button never queues Refresh directly. It first
 starts one read-only `status-check` run (owner-assigned eligible cases only; owner id comes from
-private config `status_sync_assignee`, never the public repo; refuse if unset). The run fetches
+private config `status_sync_assignee`, validated, never the public repo; refuse if unset). The run fetches
 Wiz status read-only, compares with each case's latest retained evidence, writes nothing to case
 deliverables or evidence, changes nothing in Wiz/ServiceNow/cloud, sends no email, and saves only
-`deliverables/Status-Check/<token>.json` (`checked`, `changed[{case, reason}]`). Only changed
-cases then get an automatic Refresh run (`sync-refresh`, **no approval gate**, queued one at a time; guard-blocked ones stay pending, other
-refused starts are recorded as skipped). Sync records two phases in its state, each with `started`/`running`/`completed`/`failed`
-(plus timestamps and error): `phase1` (status check) and `phase2` (Refresh plus deliverable regeneration; closes only when every queued run is terminal).
-Both are shown in the console. The ungated Refresh still makes no Wiz/ServiceNow/cloud change and sends no email (drafts only); the manual `refresh-case` action stays gated.
+`deliverables/Status-Check/<token>.json` (`checked`, `changed[{case, reason}]`). Nothing is refreshed
+automatically: each changed case needs the owner's per-case **Approve refresh** click (once per case per day),
+which starts one `sync-refresh` run (**no console approval gate**: the click is the approval; the manual `refresh-case` stays gated). Sync records
+`phase1` (status check) and `phase2` (Refresh; `awaiting_approval`, never failed, until a refresh is approved) in `status-sync.json`.
+The `sync-refresh` run still makes no Wiz/ServiceNow/cloud change and sends no email (drafts only).
 Every sync Refresh must also save a **PDF change summary**: what changed since the previous reporting, including when the INC was created
 and when it was communicated by email (never "Wiz detected" wording), the risk descriptions and the recommended remediation approach.
 The confidentiality footer is injected from private config/templates as a print-CSS footer on every page, and the in-page footer is hidden in print.
@@ -151,7 +166,7 @@ All are local HTML drafts, never sent. GET of the sync endpoint is read-only; on
 state (under a lock). Failed checks back off to the configured interval. Follow-up: resolved cases
 are not rechecked for reopening.
 
-**End-of-run checklist (rule).** Every console run ends with a checklist whose steps are `completed`, `skipped`, `blocked` or `not_applicable`. For Sync the read-only status check comes first, then a gated Refresh is queued for every changed case, one at a time. A changed case with no queued or started Refresh (waiting, skipped, refused or failed check) makes the outcome `incomplete`; it must not appear as a successful completed run.
+**End-of-run checklist (rule).** Every console run ends with a checklist whose steps are `completed`, `skipped`, `blocked` or `not_applicable`. For Sync the read-only status check comes first; a changed case then shows `Refresh queued: <case>` once the owner approved it, `Refresh not approved yet` (not_applicable, awaiting owner approval) until then, or `skipped` if its start was refused. A status check whose result is not yet read, or that failed, has outcome `incomplete`; it must not appear as a successful completed run (`SY-STA-04`).
 
 Record each such request in the optional top-level review field `owner_changes`
 (missing means none). Values below are illustrative only:
@@ -350,11 +365,13 @@ Generation/handoff records also require:
 
 ```powershell
 wizexpert workflow-qa check --review C:\PrivateEvidence\collection-review.json --phase collection
-wizexpert governance verify --workflow-review C:\PrivateEvidence\generation-review.json ...
+wizexpert governance verify ...
 wizexpert workflow-qa check --review C:\PrivateEvidence\handoff-review.json --phase handoff
 ```
 
-The governance verification CLI now requires a generation review. Existing
+The governance verification CLI takes no generation review (rule MG-REL-05); the
+agent's own manual-gate double-check (MG-REL-06) replaces it for the monthly workflow.
+Existing
 low-level Python builders remain available for tests and isolated development;
 they are not a workflow-QA bypass for production preparation. Do not use a
 successful low-level call as a claim of process compliance.
@@ -505,7 +522,7 @@ most once per IST day (persisted last-sync date), one daily change report under
 deliverables/Status-Check, console notification ("Sync completed > No change detected" /
 "Changes detected, click to view"), per-case "Approve refresh" click required, Collection plan and
 Generation never auto-approved, Phase 2 shows no status until a refresh is approved, and a stale
-no-change delta never blocks a manual Refresh.
+no-change delta never blocks a manual Refresh. Rule ids: `SY-` (`wizexpert rules sync`).
 
 ## Daily deliverables expire after 7 days (owner-approved, persistent rule)
 

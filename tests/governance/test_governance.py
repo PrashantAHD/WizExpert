@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from copy import deepcopy
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -103,6 +103,7 @@ def snapshot(template):
             **{key: deepcopy(score) for key in ("security_score", "hipaa", "hitrust")},
         },
         "open": severity_counts(MEDIUM=8, LOW=2, INFORMATIONAL=3),
+        "open_top_rules": [],
         "in_progress": severity_counts(MEDIUM=2),
         "resolved": severity_counts(MEDIUM=2, INFORMATIONAL=1),
         **{key: deepcopy(score) for key in ("security_score", "hipaa", "hitrust")},
@@ -444,6 +445,13 @@ class GovernanceTests(unittest.TestCase):
             self.source.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(DashboardError, message):
                 load_snapshot(self.source)
+
+    def test_severity_cards_show_in_progress_from_adoption_period(self):
+        with patch("wizexpert.governance.governance.SEVERITY_CARD_PROGRESS_FROM", date(2000, 1, 1)):
+            posture = Presentation(self.build()).slides[3]
+        self.assertTrue(shape(posture, 18).text.endswith("2 in progress"))
+        for sid in (12, 15, 21):
+            self.assertNotIn("in progress", shape(posture, sid).text)
 
     def test_final_run_after_cutoff_drops_preliminary_labels(self):
         self.assertIn(
@@ -873,17 +881,22 @@ class GovernanceTests(unittest.TestCase):
             self.assertIn("snapshot_sha256", slide.notes_slide.notes_text_frame.text)
         self.assertIn("EARLY OBSERVATION | NOT FINAL", shape(deck.slides[0], 7).text)
         self.assertIn("1 fewer", shape(deck.slides[2], 20).text)
-        self.assertIn("1 more", shape(deck.slides[3], 26).text)
+        self.assertEqual(shape(deck.slides[3], 26).text, "")
         trend = shape(deck.slides[3], 25).text
-        self.assertTrue(trend.startswith("Trend statement"))
-        self.assertIn("Critical and High remain at zero", trend)
-        self.assertIn(
-            "Focus: Medium remains the largest volume (8; 80% of backlog), 2 in progress.", trend
-        )
-        self.assertIn(
-            "Backlog 1 fewer (9.1%) since September; Medium and Low still call for steady", trend
-        )
-        self.assertEqual(len(shape(deck.slides[3], 25).text_frame.paragraphs), 4)
+        self.assertTrue(trend.startswith("Critical and High Findings: Where the Risk Sits"))
+        self.assertIn("No open Critical or High findings at the cutoff.", trend)
+        self.assertNotIn("Trend statement", trend)
+        self.assertEqual(len(shape(deck.slides[3], 25).text_frame.paragraphs), 2)
+        box_paragraphs = shape(deck.slides[3], 25).text_frame.paragraphs
+        self.assertTrue(box_paragraphs[0].runs[0].font.bold)
+        self.assertTrue(box_paragraphs[1].runs[0].font.bold)
+        self.assertTrue(shape(deck.slides[3], 9).text.startswith("Open backlog"))
+        self.assertTrue(shape(deck.slides[3], 9).text.endswith(" in progress"))
+        # Pre-December-2026 test period: severity cards keep the as-of date.
+        for sid in (12, 15, 18, 21):
+            self.assertNotIn("in progress", shape(deck.slides[3], sid).text)
+        posture_box = shape(deck.slides[3], 26)._element.xpath("./*[1]/p:cNvPr")[0]
+        self.assertEqual(posture_box.get("hidden"), "1")
         self.assertEqual(
             shape(deck.slides[2], 9).text_frame.paragraphs[0].runs[0].font.name, "Arial"
         )
@@ -1038,9 +1051,12 @@ class GovernanceTests(unittest.TestCase):
     def test_publication_failure_preserves_previous_output(self):
         output = self.build()
         old = output.read_bytes()
-        with patch(
-            "wizexpert.governance.governance.publish_pair", side_effect=OSError("File locked")
-        ), self.assertRaises(OSError):
+        with (
+            patch(
+                "wizexpert.governance.governance.publish_pair", side_effect=OSError("File locked")
+            ),
+            self.assertRaises(OSError),
+        ):
             self.build(refresh=True)
         self.assertEqual(output.read_bytes(), old)
         self.assertFalse(list(self.root.glob(".wiz-monthly-*.lock")))

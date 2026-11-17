@@ -57,7 +57,8 @@ PHASES: tuple[tuple[str, str], ...] = (
 RULES: tuple[Rule, ...] = (
     # -- Run and Proceed flow ---------------------------------------------------------------
     Rule(
-        "MG-RUN-01", "run",
+        "MG-RUN-01",
+        "run",
         "Monthly Governance uses a single end-to-end Proceed action. It removes the separate "
         "console approval click between collection and generation but not the collection "
         "receipt, source-completeness, validation, replay or release gates; a failed gate "
@@ -65,19 +66,22 @@ RULES: tuple[Rule, ...] = (
         "wizexpert.console.categories:gate_ids",
     ),
     Rule(
-        "MG-RUN-02", "run",
+        "MG-RUN-02",
+        "run",
         "Load this list with `wizexpert governance rules` at the start of every monthly run, "
         "follow every rule, and stop fail-closed on any rule that cannot be satisfied, citing "
         "its rule id.",
     ),
     Rule(
-        "MG-RUN-03", "run",
+        "MG-RUN-03",
+        "run",
         "This list is the source of truth. Any rule change requires explicit owner approval "
         "and must be made in workflow_rules.py; docs and the skill only reference it.",
     ),
     # -- Collection method ------------------------------------------------------------------
     Rule(
-        "MG-COL-01", "collection",
+        "MG-COL-01",
+        "collection",
         "Every monthly run uses the proven October partition design unchanged: separate "
         "OPEN+IN_PROGRESS active censuses for each severity; a new-findings partition "
         "covering all four statuses in the creation window; RESOLVED in the reporting "
@@ -86,25 +90,29 @@ RULES: tuple[Rule, ...] = (
         "planned get_issue lookups; and residual lookups.",
     ),
     Rule(
-        "MG-COL-02", "collection",
+        "MG-COL-02",
+        "collection",
         "Every list_issues page, including cursor continuations, must use first=500; "
         "first=20 is not permitted.",
         f"{_REC}:check_plan",
     ),
     Rule(
-        "MG-COL-03", "collection",
+        "MG-COL-03",
+        "collection",
         "Any change to the partition design, query method or page size requires explicit "
         "owner approval recorded in the current plan; never choose an alternative because "
         "it is easier or faster.",
     ),
     Rule(
-        "MG-COL-04", "collection",
+        "MG-COL-04",
+        "collection",
         "Use the events-log collector for every paginated query: read exact arguments and "
         "structuredContent from the session events.jsonl; never hand-type a cursor or "
         "payload.",
     ),
     Rule(
-        "MG-COL-05", "collection",
+        "MG-COL-05",
+        "collection",
         "Before accepting a page verify that after equals the saved endCursor "
         "byte-for-byte, ordering advances, issue IDs have no duplicates, totalCount stays "
         "stable, terminal rows equal totalCount, and the saved tool output cross-checks "
@@ -113,13 +121,15 @@ RULES: tuple[Rule, ...] = (
         "wizexpert.governance.pagination:paginate",
     ),
     Rule(
-        "MG-COL-06", "collection",
+        "MG-COL-06",
+        "collection",
         "Default to historical reuse, not a full historical re-fetch. A full refresh needs "
         "a recorded reason and report-owner agreement.",
         f"{_REC}:check_plan",
     ),
     Rule(
-        "MG-COL-07", "collection",
+        "MG-COL-07",
+        "collection",
         "The collection plan also includes the operational-deck grouped partitions: "
         "list_issues_grouped by SOURCE_RULE with status RESOLVED in the reporting window and "
         "status IN_PROGRESS, all supported issue types. When a response would exceed the "
@@ -129,51 +139,61 @@ RULES: tuple[Rule, ...] = (
     ),
     # -- Post-cutoff ledger -----------------------------------------------------------------
     Rule(
-        "MG-LED-01", "ledger",
+        "MG-LED-01",
+        "ledger",
         "Apply the post-cutoff ledger in build_cutoff_state.py: hold out findings created "
         "after the cutoff.",
     ),
     Rule(
-        "MG-LED-02", "ledger",
+        "MG-LED-02",
+        "ledger",
         "Keep a prior-active row when its closure occurs after the cutoff.",
     ),
     Rule(
-        "MG-LED-03", "ledger",
+        "MG-LED-03",
+        "ledger",
         "Keep a prior-closed row when its reopening occurs after the cutoff and confirm "
         "reopenedAt with get_issue.",
     ),
     Rule(
-        "MG-LED-04", "ledger",
+        "MG-LED-04",
+        "ledger",
         "Represent an in-window reopen that is closed after the cutoff as OPEN at cutoff.",
     ),
     Rule(
-        "MG-LED-05", "ledger",
+        "MG-LED-05",
+        "ledger",
         "Retain the observed status for active-to-active changes.",
     ),
     # -- Plan revision, approval and collection gate ----------------------------------------
     Rule(
-        "MG-PLN-01", "plan",
+        "MG-PLN-01",
+        "plan",
         "After execution, create a plan revision recording every executed query and "
         "observed count using the make_plan_r4.py pattern.",
     ),
     Rule(
-        "MG-PLN-02", "plan",
+        "MG-PLN-02",
+        "plan",
         "Obtain owner approval of the plan revision before reconciliation.",
         f"{_COL}:bind_console_approval",
     ),
     Rule(
-        "MG-PLN-03", "plan",
+        "MG-PLN-03",
+        "plan",
         "Run governance reconcile, then governance collect check.",
         f"{_REC}:reconcile",
     ),
     Rule(
-        "MG-PLN-04", "plan",
+        "MG-PLN-04",
+        "plan",
         "The collect check must be READY before any generation step. No partial, inferred, "
         "stale, hand-typed or method-drifted evidence may pass this gate.",
         f"{_COL}:require_ready_receipt",
     ),
     Rule(
-        "MG-PLN-05", "plan",
+        "MG-PLN-05",
+        "plan",
         "An approved plan newer than the retained collection, or covering a later cutoff, "
         "must be executed: run its read-only partitions and write a fresh activity log, "
         "manifest, raw evidence and reconciliation output. Never substitute an older "
@@ -183,13 +203,15 @@ RULES: tuple[Rule, ...] = (
     ),
     # -- Resolved/Ignored tracking ----------------------------------------------------------
     Rule(
-        "MG-TRK-01", "tracking",
+        "MG-TRK-01",
+        "tracking",
         "Statuses are OPEN, IN_PROGRESS, RESOLVED and REJECTED. Wiz REJECTED is reported as "
         "Ignored in the workbook and Accepted Risk in the decks; an IGNORED input row is "
         "normalized to REJECTED. Raw evidence keeps the Wiz status unchanged.",
     ),
     Rule(
-        "MG-TRK-02", "tracking",
+        "MG-TRK-02",
+        "tracking",
         "Status at a cutoff: findings created after it are excluded; a finding is closed "
         "only if RESOLVED/REJECTED with Resolved Time at or before the cutoff; a finding "
         "closed after the cutoff counts as OPEN; IN_PROGRESS whose status changed after the "
@@ -197,7 +219,8 @@ RULES: tuple[Rule, ...] = (
         f"{_DATA}:cutoff_counts",
     ),
     Rule(
-        "MG-TRK-03", "tracking",
+        "MG-TRK-03",
+        "tracking",
         "Workbook, per severity and snapshot (cumulative): Total = findings created by the "
         "snapshot; Open = no Resolved Time or resolved after it (includes In Progress); "
         "Resolved = RESOLVED by it; Ignored = REJECTED by it. Total = Open + Resolved + "
@@ -205,27 +228,31 @@ RULES: tuple[Rule, ...] = (
         "wizexpert.governance.dashboard_data:read_snapshots",
     ),
     Rule(
-        "MG-TRK-04", "tracking",
+        "MG-TRK-04",
+        "tracking",
         "Decks: Open includes In Progress; period closures have Resolved Time after the "
         "previous cutoff and at or before the current cutoff, split into resolved and "
         "accepted. Team-credited accepted never exceeds tenant accepted.",
         f"{_DATA}:validate_team_resolved",
     ),
     Rule(
-        "MG-TRK-05", "tracking",
+        "MG-TRK-05",
+        "tracking",
         "Resolved and Ignored are always collected, counted and shown separately. Ignored "
         "is closed progress, never technical remediation or eliminated exposure, and is "
         "never merged into Resolved or dropped.",
     ),
     # -- Cutoffs and early observation ------------------------------------------------------
     Rule(
-        "MG-CUT-01", "cutoff",
+        "MG-CUT-01",
+        "cutoff",
         "Use UTC cutoffs exactly. Counts stop at the configured snapshot day, 23:59:59; "
         "later events belong to the following reporting period.",
         f"{_VER}:verify_preparation",
     ),
     Rule(
-        "MG-CUT-02", "cutoff",
+        "MG-CUT-02",
+        "cutoff",
         "Use actual coverage timestamps for early collections and label them EARLY "
         "OBSERVATION - NOT FINAL. A prior final_approval is a period-specific exception and "
         "is never inherited; any new early final discloses actual coverage and retains its "
@@ -233,13 +260,15 @@ RULES: tuple[Rule, ...] = (
         "wizexpert.governance.governance:render_deck",
     ),
     Rule(
-        "MG-CUT-03", "cutoff",
+        "MG-CUT-03",
+        "cutoff",
         "Keep baseline and previous approved workbook figures fixed. Summary and Monthly "
         "Scope View must agree with the severity sheets and use their distinct documented "
         "backlog-reduction and net-closure formulas.",
     ),
     Rule(
-        "MG-CUT-04", "cutoff",
+        "MG-CUT-04",
+        "cutoff",
         "The snapshot period end_inclusive, backlog_as_of and resolved_through, and every "
         "deliverable 'As of' date, title and filename date, equal the reporting cutoff (for "
         "example 2026-11-15T23:59:59Z). collected_through records the actual collection time; "
@@ -248,51 +277,59 @@ RULES: tuple[Rule, ...] = (
     ),
     # -- Reconciliation and evidence integrity ----------------------------------------------
     Rule(
-        "MG-INT-01", "integrity",
+        "MG-INT-01",
+        "integrity",
         "Record each request/export with filters, timestamp, expected total, retrieved "
         "rows, unique IDs and pagination completion. Split truncated exports exhaustively; "
         "a 5,000-row warning is not a completeness check.",
     ),
     Rule(
-        "MG-INT-02", "integrity",
+        "MG-INT-02",
+        "integrity",
         "Failed or denied queries remain explicit gaps, never zeros. Unavailable metrics "
         "are qualified, never zero.",
     ),
     Rule(
-        "MG-INT-03", "integrity",
+        "MG-INT-03",
+        "integrity",
         "Keep raw Wiz status unchanged in evidence. Apply only documented, still-applicable "
         "exception decisions and record each reporting adjustment with the issue, original "
         "value, approved value/date and approval source.",
     ),
     Rule(
-        "MG-INT-04", "integrity",
+        "MG-INT-04",
+        "integrity",
         "No inferred, partial, stale or hand-typed evidence. Absence from a fresh inventory "
         "or a lookup error does not prove resolution, deletion or a scope change; prior "
         "active IDs missing and unexplained block reconciliation.",
         f"{_REC}:reconcile_rows",
     ),
     Rule(
-        "MG-INT-05", "integrity",
-        "Preserve raw inputs and their hashes, and reconcile live count drift before "
-        "generation.",
+        "MG-INT-05",
+        "integrity",
+        "Preserve raw inputs and their hashes, and reconcile live count drift before generation.",
         f"{_REC}:check_plan",
     ),
     Rule(
-        "MG-INT-06", "integrity",
+        "MG-INT-06",
+        "integrity",
         "Record metric observation dates and exact compliance framework versions; a newly "
         "generated deck does not make old security/HIPAA/HITRUST values fresh.",
     ),
     Rule(
-        "MG-INT-07", "integrity",
+        "MG-INT-07",
+        "integrity",
         "Team credit requires the approved, supported issue-level attribution basis; do not "
         "infer credit from a rule owner or sample.",
     ),
     Rule(
-        "MG-INT-08", "integrity",
+        "MG-INT-08",
+        "integrity",
         "Exclude informational findings from the report set.",
     ),
     Rule(
-        "MG-INT-09", "integrity",
+        "MG-INT-09",
+        "integrity",
         "Fetch the Wiz Security Score, HIPAA and HITRUST CSF values read-only from Wiz during "
         "the run. If Wiz cannot return a value, an owner-supplied Wiz dashboard screenshot is "
         "an approved source: retain it privately with its sha256 and disclose its observation "
@@ -301,7 +338,8 @@ RULES: tuple[Rule, ...] = (
     ),
     # -- Generation, validation, replay and release gates -----------------------------------
     Rule(
-        "MG-REL-01", "release",
+        "MG-REL-01",
+        "release",
         "Generate only after the collect check is READY, directly in the canonical "
         "period report directory (for example deliverables/Monthly-Governance-Reporting/"
         "November2026-report) with approved templates. Keep one canonical filename per "
@@ -309,36 +347,64 @@ RULES: tuple[Rule, ...] = (
         "separate review directory or duplicate .generated copy.",
     ),
     Rule(
-        "MG-REL-02", "release",
+        "MG-REL-02",
+        "release",
         "Pass the collect check receipt to governance verify with the collection-gate "
         "option; the replay gate compares every output with its reviewed inputs and any "
         "failure stops the run.",
         f"{_VER}:verify_preparation",
     ),
     Rule(
-        "MG-REL-04", "release",
+        "MG-REL-04",
+        "release",
         "Build the operational snapshot only with `wizexpert governance snapshot`; no ad-hoc "
         "scripts.",
         "wizexpert.governance.snapshot_build:build_snapshot",
     ),
     Rule(
-        "MG-REL-03", "release",
+        "MG-REL-03",
+        "release",
         "Run the validators and workflow QA gates; native/visual review of every sheet and "
         "slide and the release approval remain manual gates before any attachment is "
         "identified.",
     ),
+    Rule(
+        "MG-REL-05",
+        "release",
+        "governance verify runs without --workflow-review; the second-person generation "
+        "review is retired for the monthly workflow. Verify must pass with the "
+        "reconciliation and the READY collection-gate receipt.",
+        f"{_VER}:main",
+    ),
+    Rule(
+        "MG-REL-06",
+        "release",
+        "After verify returns automated_checks_passed, the agent performs the manual-gate "
+        "double-check itself before handoff: open the workbook read-only without repair and "
+        "inspect every sheet (counts, totals, footer, filters, no Assignee column); render "
+        "all 13 slides (3 executive + 10 operational) to images and inspect each for "
+        "clipping, fonts, overflow, editable text and client-facing wording; confirm "
+        "cutoff/As-of/title/filename dates equal the cutoff (MG-CUT-04); confirm Security "
+        "Score/HIPAA/HITRUST observation dates, framework versions and sources (MG-INT-09); "
+        "record a private double-check JSON with output sha256s, each check, findings and "
+        "timestamp next to the period evidence. Any failed check blocks handoff. Recipients, "
+        "attachments and the release decision remain the owner's.",
+    ),
     # -- No-send and no-mutate --------------------------------------------------------------
     Rule(
-        "MG-BND-01", "boundary",
+        "MG-BND-01",
+        "boundary",
         "Wiz and cloud access are read-only: mutate no Wiz issue, ServiceNow record or "
         "cloud resource.",
     ),
     Rule(
-        "MG-BND-02", "boundary",
+        "MG-BND-02",
+        "boundary",
         "Send nothing: no email or message is sent by a monthly run.",
     ),
     Rule(
-        "MG-BND-03", "boundary",
+        "MG-BND-03",
+        "boundary",
         "Retained evidence is immutable, and no client data goes in the public repository.",
     ),
 )

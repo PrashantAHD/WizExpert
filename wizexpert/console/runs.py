@@ -323,6 +323,12 @@ class RunManager:
     def categories(self) -> list[dict[str, Any]]:
         return [c.to_json() for c in categories.CATEGORIES.values()]
 
+    def workflows(self) -> list[dict[str, Any]]:
+        """Non-category workflow pages (Sync): rules and steps only, no start actions."""
+        from wizexpert.category_rules import workflow_payloads
+
+        return workflow_payloads()
+
     def helper_state(self) -> dict[str, Any]:
         workspace = str(self.config.resolved_workspace())
         return {
@@ -1582,6 +1588,8 @@ def run_deliverables(
             i = parts.index(directory)
             if category == "monthly":
                 candidates.append(imports.month_of(str(f.get("name") or "")) or "")
+                if i + 2 < len(parts):
+                    candidates.append(imports.period_folder_month(parts[i + 1]))
             elif i + 1 < len(parts):
                 candidates.append(parts[i + 1])
     for cand in candidates:

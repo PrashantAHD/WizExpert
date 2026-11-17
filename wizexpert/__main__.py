@@ -4,8 +4,9 @@ import sys
 from collections.abc import Sequence
 
 USAGE = (
-    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance,console} "
+    "usage: wizexpert {workflow-qa,email-qa,follow-up-email,campaign,governance,rules,console} "
     "[options]\n\n"
+    "  rules        list the end-to-end workflow rules of a category (wizexpert rules <category>)\n"
     "  workflow-qa  validate evidence-bound workflow QA reviews\n"
     "  email-qa     check an email draft against its reviewed contract\n"
     "  campaign     PHP2Shell campaign reporting\n"
@@ -89,6 +90,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return follow_up_main(arguments[1:])
     if command == "governance":
         return governance_main(arguments[1:])
+    if command == "rules":
+        from wizexpert.category_rules import main as rules_main
+
+        return rules_main(arguments[1:])
     if command == "campaign":
         from wizexpert.campaign import main as campaign_main
 

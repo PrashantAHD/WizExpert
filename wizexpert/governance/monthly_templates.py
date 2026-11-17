@@ -201,15 +201,40 @@ _TAGS = re.compile(r"<[^>]+>")
 _NAME_ATTR = re.compile(r'name\s*=\s*"([^"]*)"')
 _EXTERNAL = re.compile(r"""TargetMode\s*=\s*["']External["']""", re.I)
 _CORE_WB_PROPS = (
-    "creator", "lastModifiedBy", "title", "subject", "description", "keywords",
-    "category", "identifier", "language", "version", "contentStatus", "revision",
+    "creator",
+    "lastModifiedBy",
+    "title",
+    "subject",
+    "description",
+    "keywords",
+    "category",
+    "identifier",
+    "language",
+    "version",
+    "contentStatus",
+    "revision",
 )
 _CORE_DECK_PROPS = (
-    "author", "last_modified_by", "title", "subject", "comments", "keywords",
-    "category", "content_status", "identifier", "language", "version", "revision",
+    "author",
+    "last_modified_by",
+    "title",
+    "subject",
+    "comments",
+    "keywords",
+    "category",
+    "content_status",
+    "identifier",
+    "language",
+    "version",
+    "revision",
 )
 _HEADER_FOOTERS = (
-    "oddHeader", "oddFooter", "evenHeader", "evenFooter", "firstHeader", "firstFooter",
+    "oddHeader",
+    "oddFooter",
+    "evenHeader",
+    "evenFooter",
+    "firstHeader",
+    "firstFooter",
 )
 
 
@@ -333,8 +358,15 @@ def _check_workbook(path: Path) -> list[str]:
             text = f"{name} {defined.attr_text or ''}"
             problems += _privacy_problems(f"{ws.title}: defined name", text)
         for dv in ws.data_validations.dataValidation:
-            for part in (dv.formula1, dv.formula2, dv.prompt, dv.promptTitle, dv.error,
-                         dv.errorTitle, str(dv.sqref)):
+            for part in (
+                dv.formula1,
+                dv.formula2,
+                dv.prompt,
+                dv.promptTitle,
+                dv.error,
+                dv.errorTitle,
+                str(dv.sqref),
+            ):
                 problems += _privacy_problems(f"{ws.title}: data validation", str(part or ""))
         if getattr(ws, "_images", None) or getattr(ws, "_charts", None):
             problems.append(f"{ws.title}: contains pictures or charts")

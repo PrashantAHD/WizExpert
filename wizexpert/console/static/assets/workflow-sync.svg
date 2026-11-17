@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" role="img" aria-labelledby="title desc">
+  <title id="title">Sync</title>
+  <desc id="desc">WizExpert runs a read-only Wiz status check and produces a result and daily report. A person approves each Refresh, Sync Refresh updates only that case, and the case settles. Nothing leaves without a person.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="960" y2="760" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#0B2447"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <style>
+    .flow { stroke-dasharray: 10 10; animation: flow 1.6s linear infinite; }
+    .pulse { animation: pulse 2.4s ease-in-out infinite; }
+    .settle { animation: pulse 2.4s ease-in-out 1.2s infinite; }
+    @keyframes flow { to { stroke-dashoffset: -20; } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    @media (prefers-reduced-motion: reduce) { .flow, .pulse, .settle { animation: none; } }
+    @media (forced-colors: active) {
+      rect { stroke: CanvasText; fill: Canvas; }
+      text { fill: CanvasText; }
+      path { stroke: CanvasText; }
+    }
+  </style>
+  <rect width="960" height="700" rx="28" fill="url(#bg)"/>
+  <text x="48" y="42" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Sync</text>
+  <text x="48" y="66" fill="#94A3B8" font-family="Segoe UI, Arial, sans-serif" font-size="14">A read-only status check, then an owner-approved Refresh per changed case.</text>
+  <g class="flow" fill="none" stroke="#334155" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M480 126 V198"/>
+    <path d="M480 270 V298"/>
+    <path d="M480 298 H180 V332"/>
+    <path d="M480 298 V332"/>
+    <path d="M480 298 H780 V332"/>
+    <path d="M180 432 V470 H300"/>
+    <path d="M780 432 V470 H660"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <rect x="300" y="84" width="360" height="42" rx="14" fill="#1E293B" stroke="#334155"/>
+    <text x="480" y="110" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Risk Issues status sync</text>
+    <rect x="300" y="198" width="360" height="72" rx="16" fill="#1D4ED8" stroke="#60A5FA"/>
+    <text x="480" y="226" text-anchor="middle" fill="#BFDBFE" font-size="12">WIZEXPERT</text>
+    <text x="480" y="250" text-anchor="middle" fill="#F8FAFC" font-size="16" font-weight="700">sync hub</text>
+  </g>
+  <circle class="pulse" cx="480" cy="234" r="8" fill="#38BDF8" filter="url(#glow)"/>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <g transform="translate(40,332)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#3B82F6" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">1</text>
+      <text x="140" y="28" text-anchor="middle" fill="#3B82F6" font-size="11">CHECK</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Read-only status check</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">Wiz is never changed</text>
+    </g>
+    <g transform="translate(340,332)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#38BDF8" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">2</text>
+      <text x="140" y="28" text-anchor="middle" fill="#38BDF8" font-size="11">RESULT</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Result / daily report</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">changed cases listed</text>
+    </g>
+    <g transform="translate(640,332)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#F59E0B" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">3</text>
+      <text x="140" y="28" text-anchor="middle" fill="#F59E0B" font-size="11">OWNER</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Approve refresh</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">one person, per case</text>
+    </g>
+    <g transform="translate(160,470)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#A78BFA" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">4</text>
+      <text x="140" y="28" text-anchor="middle" fill="#A78BFA" font-size="11">REFRESH</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Sync Refresh</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">updates only that case</text>
+    </g>
+    <g class="settle" transform="translate(520,470)">
+      <rect width="280" height="100" rx="14" fill="url(#card)" stroke="#22C55E" stroke-width="2"/>
+      <text x="22" y="26" fill="#64748B" font-size="12" font-weight="700">5</text>
+      <text x="140" y="28" text-anchor="middle" fill="#22C55E" font-size="11">SETTLE</text>
+      <text x="140" y="54" text-anchor="middle" fill="#F8FAFC" font-size="14" font-weight="700">Case settles</text>
+      <text x="140" y="76" text-anchor="middle" fill="#94A3B8" font-size="11">status matches Wiz</text>
+    </g>
+    <text x="480" y="636" text-anchor="middle" fill="#64748B" font-size="12" letter-spacing="3">NOTHING LEAVES WITHOUT A PERSON</text>
+  </g>
+</svg>

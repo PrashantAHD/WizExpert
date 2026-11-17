@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from . import imports, launcher, sessions, stakeholder
+from . import categories, imports, launcher, sessions, stakeholder
 from .bridge import Bridge, load_or_create_token
 from .config import (
     MAX_PHOTO_BYTES,
@@ -57,6 +57,7 @@ STATIC_FILES = {
     "assets/workflow-daily-progress.svg": "image/svg+xml",
     "assets/workflow-weekly-progress.svg": "image/svg+xml",
     "assets/workflow-monthly-governance.svg": "image/svg+xml",
+    "assets/workflow-sync.svg": "image/svg+xml",
 }
 MAX_BODY = 256 * 1024
 PHOTO_UPLOAD_TIMEOUT = 15.0  # seconds, overall deadline for one photo upload body
@@ -507,6 +508,7 @@ class ConsoleHandler(BaseHTTPRequestHandler):
                 HTTPStatus.OK,
                 {
                     "categories": manager.categories(),
+                    "workflows": manager.workflows(),
                     "helper": manager.helper_state(),
                     "history": manager.history(),
                     "active": manager.active(),
@@ -624,6 +626,13 @@ class ConsoleHandler(BaseHTTPRequestHandler):
             action = body.get("action_id")
             if action is not None and not isinstance(action, str):
                 raise RunError("action_id must be text.")
+            known = categories.CATEGORIES.get(category)
+            if known is not None and any(
+                a.stage == "system" and a.action_id == categories.canonical_action(action)
+                for a in known.actions
+            ):
+                # System actions start only from approved internal paths.
+                raise RunError("This action cannot be started directly.")
             ensure_helper = self.app.ensure_helper if self.app.config.auto_install_helper else None
             run = manager.start(
                 category,

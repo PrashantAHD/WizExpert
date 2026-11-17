@@ -26,9 +26,17 @@ def test_ids_unique_and_well_formed():
 
 
 def test_each_id_matches_its_phase_prefix():
-    prefix = {"run": "RUN", "collection": "COL", "ledger": "LED", "plan": "PLN",
-              "tracking": "TRK", "cutoff": "CUT", "integrity": "INT", "release": "REL",
-              "boundary": "BND"}
+    prefix = {
+        "run": "RUN",
+        "collection": "COL",
+        "ledger": "LED",
+        "plan": "PLN",
+        "tracking": "TRK",
+        "cutoff": "CUT",
+        "integrity": "INT",
+        "release": "REL",
+        "boundary": "BND",
+    }
     for r in wr.RULES:
         assert r.rule_id.split("-")[1] == prefix[r.phase]
 
@@ -60,7 +68,6 @@ def test_console_payload_includes_rules():
     assert monthly["rule_count"] == len(wr.RULES)
     listed = [r["id"] for g in monthly["rules"] for r in g["rules"]]
     assert listed == [r.rule_id for r in wr.RULES]
-    assert "rules" not in categories.CATEGORIES["weekly-progress-reporting"].to_json()
 
 
 def test_cli_text_and_json(capsys):
@@ -79,12 +86,21 @@ def test_key_invariants_in_canonical_list_and_docs():
     qa = flat((ROOT / "docs" / "WORKFLOW-QA.md").read_text(encoding="utf-8"))
     invariants = [
         ("first=500", "first=500", "first=500"),
-        ("Total = Open + Resolved + Ignored", "Total = Open + Resolved + Ignored",
-         "Total = Open + Resolved + Ignored"),
-        ("REJECTED is reported as Ignored", "REJECTED is reported as Ignored",
-         "REJECTED = Ignored"),
-        ("collect check must be READY", "collection gate must be READY",
-         "collection gate is READY"),
+        (
+            "Total = Open + Resolved + Ignored",
+            "Total = Open + Resolved + Ignored",
+            "Total = Open + Resolved + Ignored",
+        ),
+        (
+            "REJECTED is reported as Ignored",
+            "REJECTED is reported as Ignored",
+            "REJECTED = Ignored",
+        ),
+        (
+            "collect check must be READY",
+            "collection gate must be READY",
+            "collection gate is READY",
+        ),
     ]
     for rule_text, runbook_text, qa_text in invariants:
         assert rule_text in canonical, rule_text

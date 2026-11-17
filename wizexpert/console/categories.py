@@ -118,11 +118,9 @@ class Category:
             "actions": [a.to_json() for a in self.all_actions()],
             "work_items": list(self.work_items),
         }
-        if self.category_id == "monthly-governance-reporting":
-            from wizexpert.governance import workflow_rules
+        from wizexpert.category_rules import rule_payload
 
-            data["rules"] = workflow_rules.grouped()
-            data["rule_count"] = len(workflow_rules.RULES)
+        data.update(rule_payload(self.category_id))
         return data
 
     def all_actions(self) -> tuple[Action, ...]:
@@ -312,7 +310,8 @@ RISK_ACTIONS: tuple[Action, ...] = (
         "system",
         "Read-only Wiz status check",
         "Started by Sync: read-only Wiz status check of the owner's open cases against their "
-        "retained evidence; only changed cases get an automatic (ungated) Refresh afterwards.",
+        "retained evidence; a changed case is refreshed (ungated sync-refresh) only after the "
+        "owner approves it.",
         (
             FieldSpec("assignee", "Assignee", "Owner whose cases are checked.", required=True,
                       max_length=64),
@@ -732,7 +731,8 @@ MONTHLY_END_TO_END_NOTE = (
     "the approved read-only Wiz collection, write fresh activity, manifest, raw evidence and "
     "reconciliation outputs, run governance collect check, and only when its receipt is ready "
     "generate the workbook and decks. Run validators, workflow QA, replay and release gates, "
-    "pass the receipt to governance verify with the collection-gate option, then stop; send "
+    "pass the receipt to governance verify with the collection-gate option (no workflow "
+    "review option), then perform the MG-REL-06 manual-gate double-check yourself and stop; send "
     "nothing and mutate no external system."
 )
 

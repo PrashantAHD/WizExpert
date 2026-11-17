@@ -341,7 +341,6 @@ a live lock or close a user's Office session to force publication.
 
 ```powershell
 wizexpert governance verify `
-  --workflow-review D:\PrivateReports\generation-review.json `
   --profile D:\PrivateReports\client-profile.json `
   --input D:\PrivateReports\current-reviewed.csv `
   --previous-report D:\PrivateReports\approved-previous.xlsx `
@@ -354,7 +353,8 @@ wizexpert governance verify `
   --actions-csv D:\PrivateReports\review\assignee-actions.csv
 ```
 
-Supply `--history` for an approved image-only executive template and `--font-dir`
+Verify takes no `--workflow-review` (MG-REL-05); add `--collection-gate` and
+`--reconciliation` for history-reuse preparation (MG-REL-02). Supply `--history` for an approved image-only executive template and `--font-dir`
 when required. The operational `.governance.json` companion must match the
 reviewed snapshot exactly. The actions CSV is required when assignment gaps exist.
 
@@ -371,16 +371,15 @@ Retain the returned JSON privately. `automated_checks_passed` deliberately inclu
 recorded hashes and requires another run. Office saving/restructuring a package
 can require review and regeneration; do not weaken comparison to force a pass.
 
-## 6. Native/visual review and release
+## 6. Manual-gate double-check and release
 
-Open Excel read-only without repair, inspect every sheet and count/footer/filter
-boundary, and render **all 13 slides**. Check fonts, clipping, chart labels,
-client-facing language, editable text, accepted-risk distinctions and team wording.
-Keep the client report clean; internal audit qualifications belong in private
-evidence, except material limitations needed to interpret the figures honestly.
+After `automated_checks_passed`, the agent performs the double-check defined in
+rule MG-REL-06 (see `wizexpert governance rules`) and records it privately; any
+failed check blocks handoff. Keep the client report clean; internal audit
+qualifications belong in private evidence, except material limitations needed to
+interpret the figures honestly.
 
-Retain the reviewer, time, reviewed output hashes and actual render evidence.
-Confirm source completeness, current-period decisions and the release approval.
+Confirm source completeness, current-period decisions and the owner's release approval.
 Only then identify the approved attachment set and draft the stakeholder message
 using the standard private HTML email wrapper and established email sections.
 No auto-send, no TXT companions, no Wiz/cloud mutation. Wiz tracking stays with

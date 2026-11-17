@@ -49,8 +49,7 @@ def paginate(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         saved_query = manifest.get("query")
         require(
-            isinstance(saved_query, Mapping)
-            and saved_query.get("first") == LIST_ISSUES_PAGE_SIZE,
+            isinstance(saved_query, Mapping) and saved_query.get("first") == LIST_ISSUES_PAGE_SIZE,
             f"MG-COL-02: saved pagination query must use first={LIST_ISSUES_PAGE_SIZE}.",
         )
         require(manifest.get("query_sha256") == identity, "Saved pagination query does not match.")
@@ -68,7 +67,8 @@ def paginate(
 
     if manifest.get("complete") is True and pages and pages[-1].get("has_next_page") is False:
         require(
-            manifest.get("rows") == manifest.get("total_count")
+            manifest.get("rows")
+            == manifest.get("total_count")
             == sum(page.get("rows", 0) for page in pages),
             "Saved complete pagination manifest does not reconcile.",
         )

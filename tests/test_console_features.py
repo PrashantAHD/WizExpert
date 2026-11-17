@@ -386,7 +386,10 @@ def test_risk_cases_panel_shows_empty_notification_state():
         and "syncStatusText" in js
     )
     assert "topbar-icon-btn" in css and ".sync-tooltip" in css and "automatic sync runs daily" in js
-    assert 'const sync = h("button"' not in js and '"Sync now"' not in js
+    assert 'const sync = h("button"' not in js
+    # "Sync now" exists only as the page-local button on the Sync page, never in the topbar.
+    page = js.split("function showSyncWorkflow(")[1].split("function rulesPanel(")[0]
+    assert js.count('"Sync now"') == page.count('"Sync now"')
 
 
 def test_risk_case_recognizes_case_prefixed_evidence_folder(env):  # noqa: F811
@@ -1156,6 +1159,33 @@ def test_monthly_lists_preliminary_and_final(env):  # noqa: F811
     }
     assert [m["month"] for m in imports.scan_monthly(config)] == ["2026-10", "2026-09"]
     assert "governance-evidence" not in json.dumps(months)
+
+
+def test_monthly_lists_and_opens_canonical_period_folder(env):  # noqa: F811
+    from wizexpert.console import launcher
+
+    config, workspace, _ = env
+    base = _monthly(workspace)
+    period = base / "November2026-report"
+    _touch(period / "Nov26_Org_Governance_Report.xlsx")
+    _touch(period / "Executive_Dashboard_11.15.26.pptx")
+    _touch(period / "November2026_Org_Monthly.governance.json", "{}")
+    _touch(period / "report-backups" / "old" / "Nov26_Org_Governance_Report.xlsx")
+    _touch(base / "November2026-review" / "Nov26_Org_Governance_Report.xlsx")
+    _touch(base / "November2026-review" / "November2026_Org_Monthly.generated.pptx")
+    months = {m["month"]: m for m in imports.scan_monthly(config)}
+    assert months["2026-11"]["status"] == "final" and months["2026-11"]["has_json"]
+    paths = [f["path"] for f in months["2026-11"]["files"]]
+    assert len(paths) == 3 and all("/November2026-report/" in p for p in paths)
+    assert [m["month"] for m in imports.scan_monthly(config)][0] == "2026-11"
+    listed = {f["name"] for f in launcher.list_files(config, "monthly", "2026-11")}
+    assert listed == {"Nov26_Org_Governance_Report.xlsx", "Executive_Dashboard_11.15.26.pptx"}
+    assert launcher.resolve_file(
+        config, "monthly", "2026-11", "Nov26_Org_Governance_Report.xlsx"
+    ).parent == period
+    with pytest.raises(ValueError):
+        launcher.resolve_file(config, "monthly", "2026-10", "Nov26_Org_Governance_Report.xlsx")
+    assert imports.compare_months(config, "2026-11")["previous_status"] == "PRELIMINARY"
 
 
 @pytest.mark.parametrize(

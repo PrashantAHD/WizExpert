@@ -46,7 +46,11 @@ SECTIONS = (  # weekly deck structure (owner-requested redesign, category versio
     "Thank you",
 )
 IN_PROGRESS_COLUMNS = (
-    "Issue / title", "Severity", "SNOW ticket number", "Assigned Team", "Current Status",
+    "Issue / title",
+    "Severity",
+    "SNOW ticket number",
+    "Assigned Team",
+    "Current Status",
     "Blockers",
 )
 FORBIDDEN_PHRASES = (
@@ -63,8 +67,12 @@ ITEM_STATES = ("carried", "new", "resolved", "dropped", "needs-status")
 def weight(item: Mapping[str, Any]) -> int:
     """Issues an item represents: issue_count for rule-aggregated rows, else 1."""
     count = item.get("issue_count")
-    if (item.get("rule_id") and isinstance(count, int)
-            and not isinstance(count, bool) and count >= 0):
+    if (
+        item.get("rule_id")
+        and isinstance(count, int)
+        and not isinstance(count, bool)
+        and count >= 0
+    ):
         return count
     return 1
 
@@ -195,10 +203,13 @@ def build_weekly_dataset(
         if row is None:
             if prior and prior.get("state") in ("resolved", "dropped"):
                 continue  # historical only; the prior report keeps the record unchanged
-            items.append({
-                **(prior or {}), "state": "needs-status",
-                "note": "No current Wiz status supplied; remains active until confirmed",
-            })
+            items.append(
+                {
+                    **(prior or {}),
+                    "state": "needs-status",
+                    "note": "No current Wiz status supplied; remains active until confirmed",
+                }
+            )
             continue
         status = str(row.get("status", "")).upper()
         entry = {**(prior or {}), **row, "status": status}
@@ -230,7 +241,8 @@ def build_weekly_dataset(
             count = entry.get("issue_count")
             if not _RULE_ID.match(str(entry["rule_id"])) or not _count_ok(count):
                 raise WeeklyDataError(
-                    f"{item_id}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0")
+                    f"{item_id}: rule rows need a wc-id-N or UUID rule_id and issue_count >= 0"
+                )
             entry["issue_count"] = int(count)
             entry["display_title"] = display_title(entry)
         if status != RESOLVED and row.get("owner_claims_closed"):
@@ -296,8 +308,13 @@ def placeholder_dataset() -> dict[str, Any]:
 
     def item(n: int, state: str, status: str) -> dict[str, Any]:
         return {
-            "item_id": f"[item {n} id]", "title": f"[item {n} title]", "severity": "[severity]",
-            "owner": "[owner]", "status": status, "state": state, "snow_status": "Pending",
+            "item_id": f"[item {n} id]",
+            "title": f"[item {n} title]",
+            "severity": "[severity]",
+            "owner": "[owner]",
+            "status": status,
+            "state": state,
+            "snow_status": "Pending",
             "response": f"[item {n} response]",
             "resolution_evidence": "[resolution evidence]" if state == "resolved" else "",
         }

@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import ConsoleConfig
+from .config import ASSIGNEE_PATTERN, ConsoleConfig
 from .sessions import DELIVERABLE_EXTENSIONS, confine, is_denied
 
 RISK_DIR = "Risk-Issues"
@@ -633,6 +633,18 @@ def mark_status_sync_started(
 
 
 STATUS_CHECK_DIR = "Status-Check"
+# The only two runs Sync may ever start (rule SY-REF-01): the read-only check, and the
+# owner-approved per-case refresh. Anything else (a normal refresh, another category) is refused.
+SYNC_ACTIONS = ("status-check", "sync-refresh")
+
+
+def _start_sync_run(start: Any, action: str, inputs: dict[str, str]) -> Any:
+    """Start a Sync run through ``start``, refusing any action Sync may not start."""
+    if action not in SYNC_ACTIONS:
+        raise ValueError("Sync may only start a status check or an approved sync-refresh.")
+    return start(action, inputs)
+
+
 _RUN_ACTIVE = ("starting", "running", "input_needed", "handed_off", "awaiting_gate")
 
 
@@ -800,7 +812,7 @@ def approve_refresh(config: ConsoleConfig, start: Any, case: str) -> dict[str, A
             raise ValueError("This case has no change in today's status check.")
         if case in (state.get("approved") or []):
             raise ValueError("A refresh was already approved for this case today.")
-        run = start("sync-refresh", {"case_folder": case})
+        run = _start_sync_run(start, "sync-refresh", {"case_folder": case})
         item = {"case": case, "run_id": run.id, "status": run.status, "kind": "sync-refresh"}
         state.setdefault("approved", []).append(case)
         state.setdefault("queued", []).append(item)
@@ -880,6 +892,11 @@ def _run_status_sync(
             "Status sync needs the owner assignee: set status_sync_assignee in the private "
             "console config. No status check was started."
         )
+    if not ASSIGNEE_PATTERN.fullmatch(config.status_sync_assignee):
+        raise ValueError(
+            "status_sync_assignee may only use letters, digits, . _ @ -. "
+            "No status check was started."
+        )
     candidates = eligible_sync_cases(config)
     if not candidates:
         state = mark_status_sync_started(
@@ -890,7 +907,8 @@ def _run_status_sync(
         return {"started": [], "skipped": [], "state": state}
     token = "sc-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(3).hex()
     try:
-        run = start(
+        run = _start_sync_run(
+            start,
             "status-check",
             {
                 "assignee": config.status_sync_assignee,
@@ -1260,18 +1278,60 @@ def _kind_of(name: str) -> str:
     return ""
 
 
-def scan_monthly(config: ConsoleConfig) -> list[dict[str, Any]]:
-    """Previous governance months (newest first); PRELIMINARY unless a final artifact exists."""
+#: Canonical period folder (MG-REL-01), e.g. ``November2026-report``.
+_PERIOD_DIR = re.compile(r"(?i)(" + "|".join(MONTHS) + r")(20\d\d)-report")
+
+
+def period_folder_month(name: str) -> str:
+    """``YYYY-MM`` for a canonical ``<Month><YYYY>-report`` folder name, or ''."""
+    m = _PERIOD_DIR.fullmatch(name)
+    return f"{m.group(2)}-{MONTHS[m.group(1).lower()]:02d}" if m else ""
+
+
+def monthly_period_dirs(config: ConsoleConfig) -> dict[str, Path]:
+    """Month -> canonical period folder directly under the monthly category folder."""
+    base = _base(config, MONTHLY_DIR)
+    out: dict[str, Path] = {}
+    if base is None:
+        return out
+    for entry in _children(base, config):
+        month = period_folder_month(entry.name)
+        if month and entry.is_dir() and month not in out:
+            out[month] = entry
+    return out
+
+
+def monthly_files(config: ConsoleConfig, month: str = "") -> list[tuple[str, Path]]:
+    """(month, file) pairs: legacy flat files plus direct files of each period folder.
+
+    Period-folder files win over a same-named flat file; ``report-backups`` and any other
+    subfolder are never visited.
+    """
     base = _base(config, MONTHLY_DIR)
     if base is None:
         return []
-    months: dict[str, dict[str, Any]] = {}
-    for entry in _children(base, config):
-        if not entry.is_file():
+    out: list[tuple[str, Path]] = []
+    seen: set[tuple[str, str]] = set()
+    for period, folder in monthly_period_dirs(config).items():
+        if month and period != month:
             continue
+        for entry in _children(folder, config):
+            if entry.is_file():
+                seen.add((period, entry.name))
+                out.append((period, entry))
+    for entry in _children(base, config):
+        flat = month_of(entry.name) if entry.is_file() else ""
+        if flat and (not month or flat == month) and (flat, entry.name) not in seen:
+            out.append((flat, entry))
+    return out
+
+
+def scan_monthly(config: ConsoleConfig) -> list[dict[str, Any]]:
+    """Previous governance months (newest first); PRELIMINARY unless a final artifact exists."""
+    months: dict[str, dict[str, Any]] = {}
+    for month, entry in monthly_files(config):
         kind = _kind_of(entry.name)
-        month = month_of(entry.name)
-        if not kind or not month:
+        if not kind or ".generated." in entry.name.lower():
             continue
         info = months.setdefault(month, {"month": month, "files": [], "kinds": {}})
         item = {

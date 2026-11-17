@@ -17,7 +17,7 @@ from test_monthly import save_csv, synthetic_rows
 from wizexpert.__main__ import main
 from wizexpert.governance.dashboard_data import DashboardError
 from wizexpert.governance.governance import build_governance
-from wizexpert.governance.governance_data import cutoff_counts
+from wizexpert.governance.governance_data import cutoff_counts, open_top_rules
 from wizexpert.governance.monthly import build_monthly_workbook, run_monthly
 from wizexpert.governance.monthly_files import digest
 from wizexpert.governance.profile import active, save
@@ -54,6 +54,7 @@ def prepared(tmp_path):
     payload.update(
         cutoff_counts(rows, datetime(2026, 9, 15, 23, 59, 59), datetime(2026, 10, 15, 23, 59, 59))
     )
+    payload["open_top_rules"] = open_top_rules(rows, datetime(2026, 10, 15, 23, 59, 59))
     resolved = group("resolved", count=1)
     resolved["samples"][0].update(
         id=medium["Issue ID"],
@@ -223,16 +224,7 @@ def test_verify_cli_is_discoverable_and_missing_arguments_fail(capsys):
 
 def test_verify_cli_returns_machine_readable_gate_result(prepared, tmp_path, capsys):
     profile_path = save(active(), tmp_path / "profile.json")
-    review = tmp_path / "workflow-review.json"
-    review.write_text('{"synthetic": true}', encoding="utf-8")
-    arguments = [
-        "governance",
-        "verify",
-        "--profile",
-        str(profile_path),
-        "--workflow-review",
-        str(review),
-    ]
+    arguments = ["governance", "verify", "--profile", str(profile_path)]
     for name, value in prepared.items():
         if name == "inputs":
             arguments.extend(["--input", *(str(path) for path in value)])
@@ -249,20 +241,16 @@ def test_verify_cli_returns_machine_readable_gate_result(prepared, tmp_path, cap
             "wizexpert.governance.verify.build_monthly_workbook",
             side_effect=rebuilding_with_warning,
         ),
-        patch(
-            "wizexpert.workflow_qa.require_generation_review",
-            return_value={"status": "workflow_checks_passed"},
-        ) as workflow_qa,
     ):
+        assert "--workflow-review" not in arguments
         assert main(arguments) == 0
-    assert workflow_qa.call_args.args[0] == review
     captured = capsys.readouterr()
     assert "verify export completeness" in captured.err
     result = json.loads(captured.out)
     assert result["status"] == "automated_checks_passed"
     assert result["share_ready"] is False
     assert result["source_and_output_sha256"][str(profile_path)] == digest(profile_path)
-    assert result["workflow_qa"]["status"] == "workflow_checks_passed"
+    assert "workflow_qa" not in result
 
 
 def _retext(path, old, new):
@@ -313,9 +301,9 @@ def test_period_bounds_must_equal_the_cutoff(prepared):
 
     path = prepared["snapshot"]
     payload = json.loads(path.read_text())
-    assert check_cutoff(
-        load_snapshot(path), workbook=prepared["workbook"], decks={}
-    ) == "2026-10-15"
+    assert (
+        check_cutoff(load_snapshot(path), workbook=prepared["workbook"], decks={}) == "2026-10-15"
+    )
     del payload["period"]["backlog_as_of"]
     payload["period"].update(
         collected_from="2026-10-15T23:00:00Z", collected_through="2026-10-15T23:59:59Z"

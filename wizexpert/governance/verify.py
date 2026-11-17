@@ -149,7 +149,6 @@ def verify_preparation(
     font_dir: Path | None = None,
     profile_path: Path | None = None,
     reconciliation: Path | None = None,
-    workflow_review: Path | None = None,
     collection_gate: Path | None = None,
 ) -> dict:
     from wizexpert.workflow_qa import ROOT, rule_hashes
@@ -172,7 +171,6 @@ def verify_preparation(
         *([actions_csv] if actions_csv else []),
         *([profile_path] if profile_path else []),
         *([reconciliation] if reconciliation else []),
-        *([workflow_review] if workflow_review else []),
         *([collection_gate] if collection_gate else []),
     ]
     require(bool(inputs), "At least one complete, reviewed current CSV is required.")
@@ -191,21 +189,6 @@ def verify_preparation(
             "The active profile differs from the hashed preparation profile.",
         )
     data = load_snapshot(snapshot)
-    workflow_result = None
-    if workflow_review is not None:
-        from wizexpert.workflow_qa import require_generation_review
-
-        workflow_result = require_generation_review(
-            workflow_review,
-            [
-                *inputs,
-                previous_report,
-                executive_template,
-                operational_template,
-                snapshot,
-                *([profile_path] if profile_path else []),
-            ],
-        )
     require(
         data.payload.get("collection_strategy") != "reuse_history" or reconciliation is not None,
         "History-reuse preparation requires its reconciliation audit.",
@@ -328,13 +311,11 @@ def verify_preparation(
         "implementation_sha256": {str(path): value for path, value in implementation.items()},
         "early_final_exception": data.payload["period"].get("final_approval"),
         "manual_gates_required": MANUAL_GATES,
-        "workflow_qa": workflow_result,
     }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workflow-review", type=Path, required=True)
     parser.add_argument("--input", nargs="+", type=Path, required=True, dest="inputs")
     for name in (
         "previous-report",

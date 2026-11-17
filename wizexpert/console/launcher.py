@@ -124,12 +124,15 @@ def list_case_files(config: ConsoleConfig, case: str) -> list[dict[str, Any]]:
 
 def list_files(config: ConsoleConfig, category: str, folder_name: str) -> list[dict[str, Any]]:
     folder = _category_folder(config, category, folder_name)
+    entries = (
+        [p for _, p in imports.monthly_files(config, folder_name)]
+        if category == "monthly"
+        else imports._children(folder, config)
+    )
     out: list[dict[str, Any]] = []
-    for entry in imports._children(folder, config):
+    for entry in entries:
         ext = entry.suffix.lower()
         if not entry.is_file() or ext not in _allowed(category):
-            continue
-        if category == "monthly" and imports.month_of(entry.name) != folder_name:
             continue
         if category == "daily" and imports._mtime(entry) < imports.daily_cutoff():
             continue  # daily deliverables expire after 7 days
@@ -160,6 +163,10 @@ def resolve_file(config: ConsoleConfig, category: str, folder_name: str, name: s
         or "/" in name
     ):
         raise ValueError("Unsupported file name.")
+    if category == "monthly":
+        period = imports.monthly_period_dirs(config).get(folder_name)
+        if period is not None and (period / name).is_file():
+            folder = period
     candidate = folder / name
     path = confine(candidate, folder)
     workspace = config.resolved_workspace()
@@ -173,7 +180,11 @@ def resolve_file(config: ConsoleConfig, category: str, folder_name: str, name: s
         raise ValueError("That file is not available.")
     if path.suffix.lower() not in _allowed(category):
         raise ValueError("That file type cannot be opened from the console.")
-    if category == "monthly" and imports.month_of(path.name) != folder_name:
+    if (
+        category == "monthly"
+        and imports.period_folder_month(folder.name) != folder_name
+        and imports.month_of(path.name) != folder_name
+    ):
         raise ValueError("That file is not available.")
     return path
 
@@ -204,6 +215,11 @@ def open_relative(config: ConsoleConfig, relative: str) -> str:
     n = len(root)
     if len(parts) == n + 2 and parts[:n] == root and parts[n] == imports.MONTHLY_DIR:
         month = imports.month_of(parts[-1])  # flat monthly file
+        return open_file(config, "monthly", month, parts[-1])
+    if len(parts) == n + 3 and parts[:n] == root and parts[n] == imports.MONTHLY_DIR:
+        month = imports.period_folder_month(parts[n + 1])
+        if not month:
+            raise ValueError("That file is not available.")
         return open_file(config, "monthly", month, parts[-1])
     if len(parts) == n + 3 and parts[:n] == root and parts[n] in by_dir:
         return open_file(config, by_dir[parts[n]], parts[n + 1], parts[-1])

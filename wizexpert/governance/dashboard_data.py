@@ -209,9 +209,7 @@ def read_workbook(path: Path, allow_preliminary: bool = False) -> WorkbookData:
     wb = load_workbook(path, data_only=False)
     try:
         flags = [
-            str(ws["A2"].value or "").startswith(
-                ("EARLY OBSERVATION |", "PRELIMINARY |")
-            )
+            str(ws["A2"].value or "").startswith(("EARLY OBSERVATION |", "PRELIMINARY |"))
             for ws in wb
         ]
         preliminary = any(flags)

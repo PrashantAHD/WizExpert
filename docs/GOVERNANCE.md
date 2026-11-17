@@ -38,8 +38,8 @@ does not change how workbooks are read.
 | Plan collection and reconcile historical/fresh evidence | `wizexpert governance reconcile` | Request estimate, issue-level changes and a hash-bound reconciliation audit |
 
 Every command accepts `--help`. Reporting commands accept `--profile PATH`;
-`reconcile` instead uses an explicit collection plan. `verify` also requires a
-generation-phase `--workflow-review` from [workflow QA](WORKFLOW-QA.md).
+`reconcile` instead uses an explicit collection plan. `verify` runs without a
+generation review (rule MG-REL-05; see `wizexpert governance rules`).
 The two presentation
 workflows are distinct: the executive dashboard is derived from the Excel
 workbook; the operational deck is derived from a reviewed Wiz snapshot. Neither
@@ -339,6 +339,13 @@ and approval checks.
 - `--actions-csv PATH` saves the list of issues missing a Wiz assignee.
 - `--import-edits <deck> --editor <name>` records team wording edits from a
   generated deck into the snapshot before regeneration.
+- Operational slide 4 has one full-width box, "Critical and High Findings: Where the
+  Risk Sits": open Critical/High at the cutoff by rule (payload `open_top_rules`, built by
+  `wizexpert governance snapshot` and reconciled to `open`/`in_progress`; older snapshots
+  without it fail closed). The former Posture highlights box is kept as a hidden, empty
+  placeholder. The Open backlog card caption shows the in-progress count. From the
+    December 2026 report onward each severity card's caption is its in-progress count
+    (a card with none in progress keeps the as-of date); earlier reports keep the date.
 - Nothing after the period end (snapshot day, 23:59:59 UTC) is counted; early
   collections are marked EARLY OBSERVATION - NOT FINAL on every slide.
 - Without reviewed `team_resolved` evidence, resolved slides show tenant closure

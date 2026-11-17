@@ -193,8 +193,7 @@ MONTHLY_GOVERNANCE = Category(
         "Use the approved previous workbook for workbook history, the reviewed "
         "operational snapshot/deck for operational history, and the workbook "
         "Critical/High figures plus the executive template/history for the dashboard.",
-        "Keep accepted-risk and attribution distinct; never merge or infer one "
-        "from the other.",
+        "Keep accepted-risk and attribution distinct; never merge or infer one from the other.",
         "Read-only and no-send: drafts only, never send email or change Wiz, "
         "ticketing or cloud records.",
         "Collection, generation and handoff gates must pass, with workflow-QA "
@@ -203,8 +202,7 @@ MONTHLY_GOVERNANCE = Category(
     ),
 )
 CATEGORIES = {
-    c.category_id: c
-    for c in (RISK_ISSUES, DAILY_PROGRESS, WEEKLY_PROGRESS, MONTHLY_GOVERNANCE)
+    c.category_id: c for c in (RISK_ISSUES, DAILY_PROGRESS, WEEKLY_PROGRESS, MONTHLY_GOVERNANCE)
 }
 
 
@@ -226,8 +224,10 @@ def validate_binding(category_id: str, binding: dict[str, Any]) -> list[str]:
         problems.append(f"unexpected slot {extra!r} (bespoke deliverable)")
     for slot_id, entry in slots.items():
         digest = entry.get("template_sha256") if isinstance(entry, dict) else None
-        if not isinstance(digest, str) or len(digest) != 64 or any(
-            ch not in "0123456789abcdef" for ch in digest
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(ch not in "0123456789abcdef" for ch in digest)
         ):
             problems.append(f"slot {slot_id!r} needs a pinned lowercase SHA-256")
     return problems
