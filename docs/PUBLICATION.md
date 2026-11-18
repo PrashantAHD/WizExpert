@@ -50,6 +50,15 @@ client that ignores hooks). They cannot provide server-side enforcement.
 Configure protected branches and require the `verify` CI check where available.
 CI only runs **after** source has reached GitHub, so it cannot undo a disclosure.
 
+The optional GitHub Pages demo is built by `.github/workflows/pages.yml` from
+the tracked synthetic source and the already-approved demo media. The workflow
+generates the small HTML wrapper during the build rather than tracking an HTML
+file under `docs/`, copies the MP4 and poster without modification, and deploys
+only through GitHub Pages. Actions are pinned to full upstream commit IDs;
+checkout does not persist credentials; build permissions are read-only; and
+Pages deployment permissions are limited to the deploy job. Enable Pages with
+the GitHub Actions source before relying on the public URL.
+
 ## What is inspected
 
 `scripts/public_check.py` inspects the current contents of tracked files, every

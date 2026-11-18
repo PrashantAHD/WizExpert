@@ -39,6 +39,8 @@ The demo uses fictional **Contoso** workflow data. It includes an animated tool 
 the developer's authorized portrait and a silent closing credit:
 **Developed by Prashant. — Cloud Security Engineer @AHEAD India.**
 
+The [GitHub Pages demo](https://prashantahd.github.io/WizExpert/) is published by the Pages workflow once GitHub Pages is enabled with the GitHub Actions source.
+
 GitHub may open the MP4 as a repository file rather than an inline player. Use its
 **Raw/Download** option if needed, or play the same video on the local console Home page,
 with play/pause, seeking, skip controls and playback speed.

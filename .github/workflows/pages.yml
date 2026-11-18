@@ -1,0 +1,64 @@
+name: Pages demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Stage demo site
+        run: |
+          mkdir -p _site/docs/demo _site/wizexpert/console/static/assets
+          cat > _site/docs/demo/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>WizExpert demo</title>
+          </head>
+          <body>
+            <main>
+              <h1>WizExpert walkthrough</h1>
+              <p>This is the approved fictional Contoso workflow demo.</p>
+              <video controls preload="metadata" poster="../../wizexpert/console/static/assets/console-demo-poster.jpg" width="960" aria-label="WizExpert narrated walkthrough">
+                <source src="../../wizexpert/console/static/assets/console-demo.mp4" type="video/mp4">
+                Your browser cannot play this video. <a href="../../wizexpert/console/static/assets/console-demo.mp4">Download the MP4</a>.
+              </video>
+              <p><a href="https://github.com/PrashantAHD/WizExpert">Back to the project</a></p>
+            </main>
+          </body>
+          </html>
+          EOF
+          cp wizexpert/console/static/assets/console-demo.mp4 wizexpert/console/static/assets/console-demo-poster.jpg _site/wizexpert/console/static/assets/
+          echo '<!doctype html><meta charset="utf-8"><title>WizExpert demo</title><meta http-equiv="refresh" content="0; url=docs/demo/"><a href="docs/demo/">WizExpert demo</a>' > _site/index.html
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
