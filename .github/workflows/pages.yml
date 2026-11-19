@@ -21,32 +21,54 @@ jobs:
           persist-credentials: false
       - name: Stage demo site
         run: |
-          mkdir -p _site/docs/demo _site/wizexpert/console/static/assets
+          mkdir -p _site/docs/demo _site/docs/assets
           cat > _site/docs/demo/index.html <<'EOF'
           <!doctype html>
           <html lang="en">
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>WizExpert demo</title>
+            <meta name="description" content="WizExpert narrated product walkthrough">
+            <title>WizExpert | Product walkthrough</title>
+            <style>
+              :root{color-scheme:dark;--navy:#08152b;--panel:#102443;--line:#244166;--ink:#f4f8ff;--muted:#a9bdd8;--blue:#55a9ff;--teal:#40dec4}
+              *{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--ink);background:radial-gradient(circle at 15% 0%,#173d6b 0,transparent 38rem),var(--navy);font:16px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+              main{width:min(1180px,calc(100% - 40px));margin:auto;padding:54px 0 72px}.eyebrow{color:var(--teal);font-size:.78rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase}
+              h1{max-width:760px;margin:10px 0 14px;font-size:clamp(2.2rem,5vw,4.5rem);line-height:1.04;letter-spacing:-.05em}.lead{max-width:700px;margin:0 0 30px;color:var(--muted);font-size:1.12rem}
+              .video-shell{padding:10px;border:1px solid var(--line);border-radius:24px;background:linear-gradient(145deg,#17345a,#0b1a31);box-shadow:0 25px 80px #020914aa}video{display:block;width:100%;border-radius:16px;background:#020914}
+              .meta{display:flex;flex-wrap:wrap;gap:10px 24px;margin:18px 4px 0;color:var(--muted);font-size:.9rem}.meta strong{color:var(--ink)}
+              .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:42px}.card{padding:20px;border:1px solid var(--line);border-radius:16px;background:#0d203b99}.card b{display:block;margin-bottom:5px;color:var(--blue)}.card span{color:var(--muted);font-size:.92rem}
+              footer{display:flex;justify-content:space-between;gap:20px;margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem}a{color:var(--blue)}
+              @media(max-width:760px){main{width:min(100% - 24px,1180px);padding-top:30px}.grid{grid-template-columns:1fr 1fr}footer{display:block}}@media(max-width:480px){.grid{grid-template-columns:1fr}}
+            </style>
           </head>
           <body>
             <main>
-              <h1>WizExpert walkthrough</h1>
-              <p>This is the approved fictional Contoso workflow demo.</p>
-              <video controls preload="metadata" poster="../../wizexpert/console/static/assets/console-demo-poster.jpg" width="960" aria-label="WizExpert narrated walkthrough">
-                <source src="../../wizexpert/console/static/assets/console-demo.mp4" type="video/mp4">
-                Your browser cannot play this video. <a href="../../wizexpert/console/static/assets/console-demo.mp4">Download the MP4</a>.
-              </video>
-              <p><a href="https://github.com/PrashantAHD/WizExpert">Back to the project</a></p>
+              <div class="eyebrow">WizExpert / product walkthrough</div>
+              <h1>From Wiz evidence to review-ready reporting.</h1>
+              <p class="lead">A narrated tour of the read-only, human-controlled workflow for investigating findings, tracking remediation, and producing validated local drafts.</p>
+              <div class="video-shell">
+                <video controls preload="metadata" poster="https://github.com/PrashantAHD/WizExpert/releases/download/wizexpert-demo-2026-11-19/console-demo-poster.jpg" aria-label="WizExpert narrated walkthrough">
+                  <source src="https://github.com/PrashantAHD/WizExpert/releases/download/wizexpert-demo-2026-11-19/console-demo.mp4" type="video/mp4">
+                  Your browser cannot play this video. <a href="https://github.com/PrashantAHD/WizExpert/releases/download/wizexpert-demo-2026-11-19/console-demo.mp4">Download the MP4</a>.
+                </video>
+                <div class="meta"><span><strong>7:10</strong> narrated walkthrough</span><span><strong>Contoso</strong> fictional demo data</span><span><strong>1600 × 900</strong> H.264 / AAC</span></div>
+              </div>
+              <section class="grid" aria-label="Walkthrough chapters">
+                <div class="card"><b>01 / Investigate</b><span>Read-only Wiz MCP evidence, retained snapshots, and QA checks.</span></div>
+                <div class="card"><b>02 / Maintain</b><span>Refresh, Update, resolved cases, and status Sync.</span></div>
+                <div class="card"><b>03 / Report</b><span>Daily, weekly, monthly, and Risk Issues deliverables.</span></div>
+                <div class="card"><b>04 / Control</b><span>Approvals, no-send rules, no-mutate safeguards, and private drafts.</span></div>
+              </section>
+              <footer><span>Developed by Prashant. — Cloud Security Engineer @AHEAD India.</span><a href="https://github.com/PrashantAHD/WizExpert">Back to WizExpert</a></footer>
             </main>
           </body>
           </html>
           EOF
-          cp wizexpert/console/static/assets/console-demo.mp4 wizexpert/console/static/assets/console-demo-poster.jpg _site/wizexpert/console/static/assets/
+          cp docs/assets/wizexpert-platform-overview.svg _site/docs/assets/
           echo '<!doctype html><meta charset="utf-8"><title>WizExpert demo</title><meta http-equiv="refresh" content="0; url=docs/demo/"><a href="docs/demo/">WizExpert demo</a>' > _site/index.html
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffdfaa0e8f6dda462b719fa # v3
         with:
           path: _site
 

@@ -20,11 +20,13 @@ Read-only evidence in; validated local drafts out. People stay in control.
 
 <div align="center">
 
-<p><b><a href="https://github.com/PrashantAHD/WizExpert/releases/tag/wizexpert-demo-2026-11-19">Watch the narrated walkthrough — 7:10 (GitHub Release)</a></b></p>
+<p><b><a href="https://prashantahd.github.io/WizExpert/docs/demo/">Watch the narrated walkthrough — 7:10</a></b></p>
 
-<sub>Full video: 1600 × 900, H.264/AAC, approximately 24 MB · Media hosted on the public GitHub Release, not bundled in this repository</sub>
+<sub>Opens a dedicated HTML player on GitHub Pages · Video is streamed from the public GitHub Release and is not bundled in this repository</sub>
 
 </div>
+
+<img src="docs/assets/wizexpert-platform-overview.svg" alt="Animated overview of WizExpert: read-only Wiz evidence flows through four reporting workflows, QA and human approval into private local drafts." width="1100">
 
 Follow a guided workflow from an issue ID to validated local drafts:
 
@@ -37,8 +39,7 @@ The demo uses fictional **Contoso** workflow data. It includes an animated tool 
 the developer's authorized portrait and a silent closing credit:
 **Developed by Prashant. — Cloud Security Engineer @AHEAD India.**
 
-Open the public GitHub Release linked above and download the MP4 from **Assets**
-for narration and seeking in your video player.
+The player page includes native controls and a download fallback for narration and seeking.
 
 ## Why WizExpert
 
