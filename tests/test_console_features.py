@@ -691,7 +691,17 @@ def _workflow(folder, events):
     _touch(folder / "x.workflow.json", json.dumps({"version": 1, "events": events}))
 
 
-def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
+def test_refresh_is_repeatable_and_status_milestones(env, monkeypatch):  # noqa: F811
+    import uuid
+
+    import console_fakes
+
+    make_session = console_fakes.make_session
+    monkeypatch.setattr(
+        console_fakes,
+        "make_session",
+        lambda *args, **kw: make_session(*args, session_id=str(uuid.uuid4()), **kw),
+    )
     config, workspace, home = env
     base = workspace / "deliverables" / "Risk-Issues"
     fresh = base / "Fresh-wc-id-41"
