@@ -275,7 +275,6 @@ RISK_ACTIONS: tuple[Action, ...] = (
         "accordingly. Archive any file before replacing it and never modify retained evidence. "
         "Work locally only: make no change in Wiz, ServiceNow or cloud and send no email",
         max_prompt=1400,
-        gated=True,
     ),
     Action(
         "sync-refresh",
@@ -717,11 +716,15 @@ CATEGORY_STAGE_NOTES = {
 
 
 def gate_ids(category_id: str, action_id: str | None, requested: bool) -> list[str]:
-    """Gates for a start request: always for gated actions, otherwise only when requested."""
+    """Gates for a start request, except workflows authorized end-to-end by their start."""
     category = CATEGORIES.get(category_id)
     if category is None:
         return []
     action = category.resolve(action_id)
+    # Manual Refresh (including resume-case) authorizes collection and generation together.
+    # Keep this action-specific: Sync Refresh and Update retain their existing gate policy.
+    if category_id == "risk-issues" and action is not None and action.action_id == "refresh-case":
+        return []
     if (action is not None and action.gated) or requested:
         return list(DEFAULT_GATES)
     return []

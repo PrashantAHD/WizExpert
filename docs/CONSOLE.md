@@ -106,7 +106,7 @@ passwords, MFA codes or tokens.
   chat through the helper and runs `code --reuse-window <workspace>` to raise the window, since
   an extension cannot raise the OS window itself. Approving inside VS Code stays the only way to
   answer prompts the console cannot press (see Allow / Skip above).
-- **Approval gates.** Weekly and Monthly runs, Weekly *Update* and Risk Issues *Refresh* are created
+- **Approval gates.** Weekly and Monthly runs and Weekly *Update* are created
   *waiting for your approval*: nothing is handed to the agent yet. The run page shows the gates
   *Collection plan* then *Generation* (the catalog also defines *Push*, for flows that publish;
   no current flow uses it, and the console never pushes itself). **Approve** hands that stage's
@@ -200,7 +200,7 @@ launch, no helper).
   folder name such as `...-wc-id-11-12`), last modified, the artifacts present (analysis,
   client assessment, stakeholder / follow-up emails, report workbook, evidence, archives) and a
   **legacy** tag when the case has no rebuilt-workflow record (`*.workflow.json` or
-  `case-gate-plan*`). **Refresh** (action `refresh-case`, gated; the old `resume-case` id maps to it) is the **repeatable** case action, enforced like the
+  `case-gate-plan*`). **Refresh** (action `refresh-case`, no approval gate: Approval gates `not_applicable`, like Daily Progress Refresh; the old `resume-case` id maps to it) is the **repeatable** case action, enforced like the
   PHP2Shell daily refresh: fetch the latest Wiz status of the case issues read-only, compute the
   delta against the retained evidence (status changes, new/resolved issues, changed counts), save
   the new evidence snapshot plus a change summary, then regenerate/update the deliverables from
@@ -567,8 +567,12 @@ Replaces the earlier delta auto-approval. Applies to the Risk Issues workflow on
   stays in the top bar.
 - Nothing is auto-approved or auto-started: a refresh (no-send, ungated sync-refresh) starts only
   from "Approve refresh", once per case per day. Phase 2 shows no status (and no failure) until a
-  refresh is approved. A manual Refresh/Update is never blocked by a stale or no-change delta and
-  stays gated (Collection plan, Generation) with manual approval.
+  refresh is approved. A manual Refresh/Update is never blocked by a stale or no-change delta.
+  Manual `refresh-case` (including legacy `resume-case`) starts end-to-end like Daily Progress
+  Refresh: **Approval gates — `not_applicable`**, with no Collection plan or Generation approval
+  flow, even if a caller requests gates. Update remains gated (Collection plan, Generation).
+  Retained-evidence requirements, read-only collection, archiving before replacement and
+  no-send/no-mutate safeguards still apply; Sync's per-case Approve refresh click is unchanged.
 - Never sends email, mutates Wiz/ServiceNow, commits or pushes.
 
 ## Daily deliverables expire after 7 days (owner-approved, persistent rule)
