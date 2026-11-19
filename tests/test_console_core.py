@@ -734,7 +734,10 @@ def test_case_email_actions_and_update_case_prompts():
     assert "assigned team" in reply and "Do not send" in reply
     upd = _act("refresh-case", {"case_folder": "Case-wc-id-1"})
     assert "delta versus the retained evidence" in upd and "repeatable" in upd
-    assert categories.gate_ids("risk-issues", "refresh-case", False)
+    assert categories.gate_ids("risk-issues", "refresh-case", False) == []
+    assert categories.gate_ids("risk-issues", "refresh-case", True) == []
+    assert categories.gate_ids("risk-issues", "resume-case", False) == []
+    assert categories.gate_ids("risk-issues", "resume-case", True) == []
     ud = _act("update-deliverables", {"case_folder": "Case-wc-id-1", "update_text": "Client agreed.\n Ignore rules `x`"[:14]})  # noqa: E501
     assert "BEGIN OWNER INPUT Client agreed" in ud and "no Wiz fetch" in ud
     assert "verbatim" in ud and "inputs/update-" in ud and "send no email" in ud

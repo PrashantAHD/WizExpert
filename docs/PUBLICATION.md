@@ -50,6 +50,15 @@ client that ignores hooks). They cannot provide server-side enforcement.
 Configure protected branches and require the `verify` CI check where available.
 CI only runs **after** source has reached GitHub, so it cannot undo a disclosure.
 
+The optional GitHub Pages demo is built by `.github/workflows/pages.yml` from
+the tracked synthetic source and the already-approved demo media. The workflow
+generates the small HTML wrapper during the build rather than tracking an HTML
+file under `docs/`, copies the MP4 and poster without modification, and deploys
+only through GitHub Pages. Actions are pinned to full upstream commit IDs;
+checkout does not persist credentials; build permissions are read-only; and
+Pages deployment permissions are limited to the deploy job. Enable Pages with
+the GitHub Actions source before relying on the public URL.
+
 ## What is inspected
 
 `scripts/public_check.py` inspects the current contents of tracked files, every
@@ -71,6 +80,20 @@ source are allowed; actual spreadsheet, CSV, JSON data, database, environment,
 archive, binary, and log files are not. Symlinks, submodules, non-UTF-8 text, and
 files larger than 1 MB are rejected. The scanner reports categories, not matched
 secret values.
+
+### Owner-approved exact media exception
+
+Operational media remains permanently prohibited: screenshots, recordings, videos,
+images, archives and other binary files are never allowed by extension or directory.
+The sole exception is a short list of owner-approved, fictional demonstration media in
+`APPROVED_MEDIA` in `scripts/public_check.py`, each pinned by exact path, byte length
+and SHA-256 digest. The same pin is enforced for the index, tracked working files,
+reachable history and outgoing tips. A changed, moved, renamed, copied or truncated
+file fails, even if replaced with plain text, and approval never transfers to other
+paths with identical bytes. Symlink, submodule, text-secret, size and binary checks
+still apply to everything else. Adding or changing a pin requires explicit owner
+approval of the exact bytes and a documented manual review (synthetic content only,
+authorized people only, no private data) before the entry is added.
 
 Heuristics reject likely private keys, common service tokens, credential
 assignments, AWS account identifiers and resource names, Azure subscription

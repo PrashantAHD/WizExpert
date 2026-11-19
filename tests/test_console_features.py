@@ -433,22 +433,25 @@ def test_imports_never_modify_source_files(env):  # noqa: F811
     assert before == after
 
 
-def test_resume_case_is_gated_and_starts_from_retained_evidence(env):  # noqa: F811
+@pytest.mark.parametrize("action", ["refresh-case", "resume-case"])
+@pytest.mark.parametrize("requested_gates", [False, True])
+def test_manual_refresh_starts_ungated_from_retained_evidence(
+    env, action, requested_gates  # noqa: F811
+):
     config, workspace, home = env
-    _risk(workspace)
+    case, _ = _risk(workspace)
+    _touch(case / "evidence" / "raw.json", '{"status": "OPEN"}')
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
-    run = manager.start(
-        "risk-issues", {"case_folder": "Synthetic-Case-wc-id-11-12"}, "refresh-case"
-    )
-    assert run.status == "awaiting_gate" and run.session_id == ""
-    assert "Synthetic-Case-wc-id-11-12" in run.prompt and "retained evidence" in run.prompt
-    assert "Stage collection plan" in run.prompt
     with FakeHelper(bridge, workspace, home) as helper:
-        manager.decide_gate(run.id, "collection-plan", "approve")
-        assert [j["kind"] for j in helper.jobs if j["kind"] == "start_chat"]
-    assert manager.get(run.id).status == "running"
-    assert manager.get(run.id).decisions[0]["decision"] == "approve"
+        run = manager.start(
+            "risk-issues", {"case_folder": case.name}, action, gated=requested_gates
+        )
+        assert run.status == "running" and run.action_id == "refresh-case"
+        assert run.gates == run.decisions == [] and run.auto == {}
+        assert "Stage collection plan" not in run.prompt
+        assert "retained evidence" in run.prompt and "read-only" in run.prompt
+        assert len([j for j in helper.jobs if j["kind"] == "start_chat"]) == 1
 
 
 def test_status_sync_requires_assignee_and_starts_one_check_run(env):  # noqa: F811
@@ -559,12 +562,13 @@ def test_day_gate_is_calendar_day_ist_and_unapproved_phase2_never_fails(env):  #
 
 
 def test_manual_refresh_not_blocked_by_stale_no_change_delta(env):  # noqa: F811
-    config, workspace, _ = env
+    config, workspace, home = env
     case = _case(config)
     imports._write_sync_state(config, {"phase": "done", "checked_cases": [case], "changed": []})
     manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
-    run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
-    assert run.status == "awaiting_gate" and [g["state"] for g in run.gates] == ["pending"] * 2
+    with FakeHelper(manager.bridge, workspace, home):
+        run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
+        assert run.status == "running" and run.gates == run.decisions == []
 
 
 def test_ui_shows_daily_result_as_notification_not_inline_phases():
@@ -603,7 +607,7 @@ def test_phase2_has_status_only_after_approval(env):  # noqa: F811
 
 def test_sync_refresh_action_has_no_gate_and_spec_is_no_send():
     assert categories.gate_ids("risk-issues", "sync-refresh", False) == []
-    assert categories.gate_ids("risk-issues", "refresh-case", False)
+    assert categories.gate_ids("risk-issues", "refresh-case", False) == []
     values = categories.validate("risk-issues", {"case_folder": "Case-wc-id-1"}, "sync-refresh")
     prompt = categories.build_prompt("risk-issues", values, {}, "sync-refresh")
     for text in ("PDF change summary", "INC was created", "never use the words Wiz detected",
@@ -687,8 +691,18 @@ def _workflow(folder, events):
     _touch(folder / "x.workflow.json", json.dumps({"version": 1, "events": events}))
 
 
-def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
-    config, workspace, _ = env
+def test_refresh_is_repeatable_and_status_milestones(env, monkeypatch):  # noqa: F811
+    import uuid
+
+    import console_fakes
+
+    make_session = console_fakes.make_session
+    monkeypatch.setattr(
+        console_fakes,
+        "make_session",
+        lambda *args, **kw: make_session(*args, session_id=str(uuid.uuid4()), **kw),
+    )
+    config, workspace, home = env
     base = workspace / "deliverables" / "Risk-Issues"
     fresh = base / "Fresh-wc-id-41"
     _touch(fresh / "evidence" / "raw.json", "secret")
@@ -715,12 +729,13 @@ def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
     assert "unreadable" in b["workflow_summary"] and b["can_refresh"]
     manager = _manager(config)
     # Refresh is repeatable (no one-time gate); legacy ids map to refresh-case.
-    for action in ("refresh-case", "refresh-case", "resume-case"):
-        for name in ("Done-wc-id-42", "Fresh-wc-id-41"):
-            run = manager.start("risk-issues", {"case_folder": name}, action)
-            assert run.status == "awaiting_gate"
-            assert "delta" in run.prompt and "Refresh" in run.prompt
-            manager.decide_gate(run.id, "collection-plan", "reject")
+    with FakeHelper(manager.bridge, workspace, home) as helper:
+        for action in ("refresh-case", "refresh-case", "resume-case"):
+            for name in ("Done-wc-id-42", "Fresh-wc-id-41"):
+                run = manager.start("risk-issues", {"case_folder": name}, action)
+                assert run.status == "running" and not run.gates
+                assert "delta" in run.prompt and "Refresh" in run.prompt
+                append(helper.events_path, event("hook.end", {"hookType": "agentStop"}))
     assert imports.require_case(config, "Fresh-wc-id-41", "any")["name"] == "Fresh-wc-id-41"
     # Update deliverables: needs prepared deliverables and non-empty input; gated; no Wiz fetch.
     assert cases["Done-wc-id-42"]["can_update_deliverables"]
@@ -1817,7 +1832,7 @@ def _case(config):
     return "Auto-wc-id-9"
 
 
-def test_risk_refresh_never_auto_approves_even_with_delta_state(env):  # noqa: F811
+def test_manual_refresh_with_delta_starts_without_approval_records(env):  # noqa: F811
     config, workspace, home = env
     case = _case(config)
     imports._write_sync_state(config, {
@@ -1828,9 +1843,8 @@ def test_risk_refresh_never_auto_approves_even_with_delta_state(env):  # noqa: F
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home) as helper:
         run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
-        assert run.status == "awaiting_gate"
-        assert [g["state"] for g in run.gates] == ["pending", "pending"]
-        assert not [j for j in helper.jobs if j["kind"] == "start_chat"]
+        assert run.status == "running" and run.gates == run.decisions == []
+        assert len([j for j in helper.jobs if j["kind"] == "start_chat"]) == 1
         assert run.auto == {}
 
 
