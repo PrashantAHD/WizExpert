@@ -386,7 +386,10 @@ def test_risk_cases_panel_shows_empty_notification_state():
         and "syncStatusText" in js
     )
     assert "topbar-icon-btn" in css and ".sync-tooltip" in css and "automatic sync runs daily" in js
-    assert 'const sync = h("button"' not in js and '"Sync now"' not in js
+    assert 'const sync = h("button"' not in js
+    # "Sync now" exists only as the page-local button on the Sync page, never in the topbar.
+    page = js.split("function showSyncWorkflow(")[1].split("function rulesPanel(")[0]
+    assert js.count('"Sync now"') == page.count('"Sync now"')
 
 
 def test_risk_case_recognizes_case_prefixed_evidence_folder(env):  # noqa: F811
@@ -433,22 +436,45 @@ def test_imports_never_modify_source_files(env):  # noqa: F811
     assert before == after
 
 
-def test_resume_case_is_gated_and_starts_from_retained_evidence(env):  # noqa: F811
+@pytest.mark.parametrize("action", ["refresh-case", "resume-case"])
+@pytest.mark.parametrize("requested_gates", [False, True])
+def test_manual_refresh_starts_ungated_from_retained_evidence(
+    env, action, requested_gates  # noqa: F811
+):
     config, workspace, home = env
-    _risk(workspace)
+    case, _ = _risk(workspace)
+    _touch(case / "evidence" / "raw.json", '{"status": "OPEN"}')
+    before = {p: (p.stat().st_mtime_ns, p.read_bytes()) for p in case.rglob("*") if p.is_file()}
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
-    run = manager.start(
-        "risk-issues", {"case_folder": "Synthetic-Case-wc-id-11-12"}, "refresh-case"
-    )
-    assert run.status == "awaiting_gate" and run.session_id == ""
-    assert "Synthetic-Case-wc-id-11-12" in run.prompt and "retained evidence" in run.prompt
-    assert "Stage collection plan" in run.prompt
     with FakeHelper(bridge, workspace, home) as helper:
-        manager.decide_gate(run.id, "collection-plan", "approve")
-        assert [j["kind"] for j in helper.jobs if j["kind"] == "start_chat"]
-    assert manager.get(run.id).status == "running"
-    assert manager.get(run.id).decisions[0]["decision"] == "approve"
+        run = manager.start(
+            "risk-issues", {"case_folder": case.name}, action, gated=requested_gates
+        )
+        assert run.status == "running" and run.action_id == "refresh-case"
+        assert run.gates == run.decisions == [] and run.auto == {}
+        assert run.prompt == categories.build_prompt(
+            "risk-issues", run.values, config.prompts, "refresh-case"
+        )
+        for text in (
+            case.name, "retained evidence", "read-only", "delta versus the retained evidence",
+            "save the new evidence snapshot", "Archive any file before replacing it",
+            "never modify retained evidence", "make no change in Wiz, ServiceNow or cloud",
+            "send no email",
+        ):
+            assert text in run.prompt
+        assert "Stage collection plan" not in run.prompt
+        assert "Stage generation approved" not in run.prompt
+        assert len([j for j in helper.jobs if j["kind"] == "start_chat"]) == 1
+        append(helper.events_path, event("hook.end", {"hookType": "agentStop"}))
+        view = manager.view(run.id)
+        assert view["status"] == "completed"
+        gate_step = next(s for s in view["checklist"] if s["id"] == "gates")
+        assert gate_step["label"] == "Approval gates"
+        assert gate_step["state"] == "not_applicable"
+        assert not run.parent and not run.child and not run.decisions
+    after = {p: (p.stat().st_mtime_ns, p.read_bytes()) for p in case.rglob("*") if p.is_file()}
+    assert before == after
 
 
 def test_status_sync_requires_assignee_and_starts_one_check_run(env):  # noqa: F811
@@ -559,12 +585,13 @@ def test_day_gate_is_calendar_day_ist_and_unapproved_phase2_never_fails(env):  #
 
 
 def test_manual_refresh_not_blocked_by_stale_no_change_delta(env):  # noqa: F811
-    config, workspace, _ = env
+    config, workspace, home = env
     case = _case(config)
     imports._write_sync_state(config, {"phase": "done", "checked_cases": [case], "changed": []})
     manager = RunManager(config, Bridge("t" * 64), run_async=False, sleep=lambda _s: None)
-    run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
-    assert run.status == "awaiting_gate" and [g["state"] for g in run.gates] == ["pending"] * 2
+    with FakeHelper(manager.bridge, workspace, home):
+        run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
+        assert run.status == "running" and run.gates == run.decisions == []
 
 
 def test_ui_shows_daily_result_as_notification_not_inline_phases():
@@ -603,7 +630,11 @@ def test_phase2_has_status_only_after_approval(env):  # noqa: F811
 
 def test_sync_refresh_action_has_no_gate_and_spec_is_no_send():
     assert categories.gate_ids("risk-issues", "sync-refresh", False) == []
-    assert categories.gate_ids("risk-issues", "refresh-case", False)
+    # Explicitly requested gates retain their previous policy for Sync Refresh.
+    assert categories.gate_ids("risk-issues", "sync-refresh", True) == [
+        "collection-plan", "generation",
+    ]
+    assert categories.gate_ids("risk-issues", "refresh-case", False) == []
     values = categories.validate("risk-issues", {"case_folder": "Case-wc-id-1"}, "sync-refresh")
     prompt = categories.build_prompt("risk-issues", values, {}, "sync-refresh")
     for text in ("PDF change summary", "INC was created", "never use the words Wiz detected",
@@ -671,24 +702,38 @@ def test_weekly_prompt_requires_fresh_readonly_status_fetch(env):  # noqa: F811
     assert "make no change in Wiz, ServiceNow or cloud" in prompt
 
 
-def test_resume_refuses_unknown_and_legacy_cases(env):  # noqa: F811
+@pytest.mark.parametrize("action", ["refresh-case", "resume-case"])
+@pytest.mark.parametrize("requested_gates", [False, True])
+def test_resume_refuses_unknown_and_legacy_cases(env, action, requested_gates):  # noqa: F811
     config, workspace, _ = env
     _risk(workspace)
     manager = _manager(config)
     with pytest.raises(RunError, match="No such"):
-        manager.start("risk-issues", {"case_folder": "Missing-Case"}, "refresh-case")
+        manager.start("risk-issues", {"case_folder": "Missing-Case"}, action, gated=requested_gates)
     with pytest.raises(RunError, match="no retained evidence"):
-        manager.start("risk-issues", {"case_folder": "Old-Case-wc-id-7"}, "refresh-case")
+        manager.start(
+            "risk-issues", {"case_folder": "Old-Case-wc-id-7"}, action, gated=requested_gates
+        )
     with pytest.raises(RunError):
-        manager.start("risk-issues", {"case_folder": "../x"}, "refresh-case")
+        manager.start("risk-issues", {"case_folder": "../x"}, action, gated=requested_gates)
 
 
 def _workflow(folder, events):
     _touch(folder / "x.workflow.json", json.dumps({"version": 1, "events": events}))
 
 
-def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
-    config, workspace, _ = env
+def test_refresh_is_repeatable_and_status_milestones(env, monkeypatch):  # noqa: F811
+    import uuid
+
+    import console_fakes
+
+    # Each real start opens a new chat; the default helper reuses one synthetic session ID.
+    make_session = console_fakes.make_session
+    monkeypatch.setattr(
+        console_fakes, "make_session",
+        lambda *args, **kw: make_session(*args, session_id=str(uuid.uuid4()), **kw),
+    )
+    config, workspace, home = env
     base = workspace / "deliverables" / "Risk-Issues"
     fresh = base / "Fresh-wc-id-41"
     _touch(fresh / "evidence" / "raw.json", "secret")
@@ -715,12 +760,14 @@ def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
     assert "unreadable" in b["workflow_summary"] and b["can_refresh"]
     manager = _manager(config)
     # Refresh is repeatable (no one-time gate); legacy ids map to refresh-case.
-    for action in ("refresh-case", "refresh-case", "resume-case"):
-        for name in ("Done-wc-id-42", "Fresh-wc-id-41"):
-            run = manager.start("risk-issues", {"case_folder": name}, action)
-            assert run.status == "awaiting_gate"
-            assert "delta" in run.prompt and "Refresh" in run.prompt
-            manager.decide_gate(run.id, "collection-plan", "reject")
+    with FakeHelper(manager.bridge, workspace, home) as helper:
+        for action in ("refresh-case", "refresh-case", "resume-case"):
+            for name in ("Done-wc-id-42", "Fresh-wc-id-41"):
+                run = manager.start("risk-issues", {"case_folder": name}, action)
+                assert run.status == "running" and not run.gates
+                assert "delta" in run.prompt and "Refresh" in run.prompt
+                append(helper.events_path, event("hook.end", {"hookType": "agentStop"}))
+                assert manager.view(run.id)["status"] == "completed"
     assert imports.require_case(config, "Fresh-wc-id-41", "any")["name"] == "Fresh-wc-id-41"
     # Update deliverables: needs prepared deliverables and non-empty input; gated; no Wiz fetch.
     assert cases["Done-wc-id-42"]["can_update_deliverables"]
@@ -747,30 +794,19 @@ def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
 # -- approval gates ----------------------------------------------------------------------------
 
 
-def test_gated_run_hands_nothing_to_the_agent_until_approved_and_reject_ends_it(env):  # noqa: F811
+def test_monthly_proceed_starts_end_to_end_without_approval_gates(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home) as helper:
         run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
-        assert run.status == "awaiting_gate"
-        assert [g["id"] for g in run.gates] == ["collection-plan", "generation"]
-        assert manager.active()[0]["status"] == "awaiting_gate"
-        assert not [j for j in helper.jobs if j["kind"] == "start_chat"]
-        with pytest.raises(RunError, match="earlier gate"):
-            manager.decide_gate(run.id, "generation", "approve")
-        manager.decide_gate(run.id, "collection-plan", "reject")
-    assert manager.get(run.id).status == "rejected"
-    assert manager.active() == []
-    view = manager.view(run.id)
-    assert view["decisions"][0] == {
-        **view["decisions"][0],
-        "gate": "collection-plan",
-        "decision": "reject",
-    }
-    assert [g["state"] for g in view["gates"]] == ["rejected", "skipped"]
-    with pytest.raises(RunError, match="not waiting"):
-        manager.decide_gate(run.id, "collection-plan", "approve")
+        assert run.status == "running" and not run.gates
+        assert [j for j in helper.jobs if j["kind"] == "start_chat"]
+        view = manager.view(run.id)
+    assert [m["label"] for m in view["milestones"]] == [
+        "Run started", "Wiz connected", "Data fetching", "Data collected",
+        "Report generating", "Report generated",
+    ]
 
 
 def test_second_gate_starts_a_follow_up_run_and_decisions_persist(env):  # noqa: F811
@@ -905,7 +941,8 @@ def test_mcp_status_registration_is_not_authentication(env):  # noqa: F811
         assert job["server"] == "mcp.config.ws0.wiz-demo"
         assert "secret" not in json.dumps(helper.jobs)
 
-
+
+
 _FAKE_ACCESS = "SECRET-" + "ACCESS-VALUE"
 _FAKE_REFRESH = "SECRET-" + "REFRESH-VALUE"
 
@@ -1168,6 +1205,33 @@ def test_monthly_lists_preliminary_and_final(env):  # noqa: F811
     assert "governance-evidence" not in json.dumps(months)
 
 
+def test_monthly_lists_and_opens_canonical_period_folder(env):  # noqa: F811
+    from wizexpert.console import launcher
+
+    config, workspace, _ = env
+    base = _monthly(workspace)
+    period = base / "November2026-report"
+    _touch(period / "Nov26_Org_Governance_Report.xlsx")
+    _touch(period / "Executive_Dashboard_11.15.26.pptx")
+    _touch(period / "November2026_Org_Monthly.governance.json", "{}")
+    _touch(period / "report-backups" / "old" / "Nov26_Org_Governance_Report.xlsx")
+    _touch(base / "November2026-review" / "Nov26_Org_Governance_Report.xlsx")
+    _touch(base / "November2026-review" / "November2026_Org_Monthly.generated.pptx")
+    months = {m["month"]: m for m in imports.scan_monthly(config)}
+    assert months["2026-11"]["status"] == "final" and months["2026-11"]["has_json"]
+    paths = [f["path"] for f in months["2026-11"]["files"]]
+    assert len(paths) == 3 and all("/November2026-report/" in p for p in paths)
+    assert [m["month"] for m in imports.scan_monthly(config)][0] == "2026-11"
+    listed = {f["name"] for f in launcher.list_files(config, "monthly", "2026-11")}
+    assert listed == {"Nov26_Org_Governance_Report.xlsx", "Executive_Dashboard_11.15.26.pptx"}
+    assert launcher.resolve_file(
+        config, "monthly", "2026-11", "Nov26_Org_Governance_Report.xlsx"
+    ).parent == period
+    with pytest.raises(ValueError):
+        launcher.resolve_file(config, "monthly", "2026-10", "Nov26_Org_Governance_Report.xlsx")
+    assert imports.compare_months(config, "2026-11")["previous_status"] == "PRELIMINARY"
+
+
 @pytest.mark.parametrize(
     ("name", "month"),
     [
@@ -1201,11 +1265,14 @@ def test_previous_month_wraps_the_year():
 
 
 def test_new_month_runs_behind_gates_with_runbook(env):  # noqa: F811
-    config, *_ = env
-    run = _manager(config).start(
-        "monthly-governance-reporting", {"month": "2026-11"}, "new", gated=True
-    )
-    assert "governance runbook" in run.prompt and run.status == "awaiting_gate"
+    config, workspace, home = env
+    bridge = Bridge("t" * 64)
+    with FakeHelper(bridge, workspace, home):
+        run = RunManager(config, bridge, run_async=False, sleep=lambda _s: None).start(
+            "monthly-governance-reporting", {"month": "2026-11"}, "new", gated=True
+        )
+    assert "governance runbook" in run.prompt and run.status == "running"
+    assert not run.gates and "governance collect check" in run.prompt
 
 
 # -- viewing files ---------------------------------------------------------------------------
@@ -1277,26 +1344,7 @@ def test_gate_endpoint_records_decision_over_http(console):  # noqa: F811
             "gated": True,
         },
     )
-    assert status == 200
-    run_id = json.loads(body)["run_id"]
-    bad = api(
-        server,
-        token,
-        "POST",
-        f"/api/runs/{run_id}/gate",
-        {"gate": "generation", "decision": "approve"},
-    )
-    assert bad[0] == 400
-    status, _h, body = api(
-        server,
-        token,
-        "POST",
-        f"/api/runs/{run_id}/gate",
-        {"gate": "collection-plan", "decision": "reject"},
-    )
-    assert status == 200 and json.loads(body)["status"] == "rejected"
-    view = json.loads(api(server, token, "GET", f"/api/runs/{run_id}")[2])
-    assert view["status"] == "rejected" and view["decisions"][0]["decision"] == "reject"
+    assert status == 400 and "helper" in json.loads(body)["error"].lower()
 
 
 # -- helper extension, template and docs ---------------------------------------------------------
@@ -1395,20 +1443,9 @@ def test_thread_safety_of_concurrent_gate_decisions(env):  # noqa: F811
     config, workspace, home = env
     bridge = Bridge("t" * 64)
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
-    run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
-    results = []
-
-    def go():
-        try:
-            manager.decide_gate(run.id, "collection-plan", "reject")
-            results.append("ok")
-        except RunError:
-            results.append("refused")
-
-    threads = [threading.Thread(target=go) for _ in range(4)]
-    [t.start() for t in threads]
-    [t.join() for t in threads]
-    assert results.count("ok") == 1 and len(manager.get(run.id).decisions) == 1
+    with FakeHelper(bridge, workspace, home):
+        run = manager.start("monthly-governance-reporting", {"month": "2026-11"}, gated=True)
+    assert run.status == "running" and not run.gates and not run.decisions
 
 
 # -- manually confirmed milestones ---------------------------------------------------------------
@@ -1817,7 +1854,7 @@ def _case(config):
     return "Auto-wc-id-9"
 
 
-def test_risk_refresh_never_auto_approves_even_with_delta_state(env):  # noqa: F811
+def test_manual_refresh_with_delta_starts_without_approval_records(env):  # noqa: F811
     config, workspace, home = env
     case = _case(config)
     imports._write_sync_state(config, {
@@ -1828,9 +1865,8 @@ def test_risk_refresh_never_auto_approves_even_with_delta_state(env):  # noqa: F
     manager = RunManager(config, bridge, run_async=False, sleep=lambda _s: None)
     with FakeHelper(bridge, workspace, home) as helper:
         run = manager.start("risk-issues", {"case_folder": case}, "refresh-case")
-        assert run.status == "awaiting_gate"
-        assert [g["state"] for g in run.gates] == ["pending", "pending"]
-        assert not [j for j in helper.jobs if j["kind"] == "start_chat"]
+        assert run.status == "running" and run.gates == run.decisions == []
+        assert len([j for j in helper.jobs if j["kind"] == "start_chat"]) == 1
         assert run.auto == {}
 
 
@@ -1843,3 +1879,26 @@ def test_case_delta_from_status_sync_state(env):  # noqa: F811
     assert imports.case_delta(config, "A-wc-id-1") == {"changed": True, "reason": "status changed"}
     assert imports.case_delta(config, "B-wc-id-2") == {"changed": False, "reason": "no change"}
     assert imports.case_delta(config, "C-wc-id-3") is None
+
+
+def test_monthly_milestones_mark_reused_collection_evidence():
+    from types import SimpleNamespace
+
+    from wizexpert.console.runs import RunManager
+
+    def states(status, files, view):
+        run = SimpleNamespace(view=view, files=files)
+        return {m["id"]: m["state"] for m in RunManager._monthly_milestones(None, run, status)}
+
+    reused = states("completed", ["Governance-Workbook.xlsx"], None)
+    assert reused["run-started"] == "ok"
+    wiz_steps = ("wiz-connected", "data-fetching", "data-collected")
+    assert [reused[k] for k in wiz_steps] == ["reused"] * 3
+    assert reused["report-generating"] == reused["report-generated"] == "ok"
+    live = SimpleNamespace(
+        last_wiz_ok_at=1.0, wiz_auth_failed=False, wiz_calls=3, open_tools=[]
+    )
+    assert set(states("completed", ["x.xlsx"], live).values()) == {"ok"}
+    # failures and empty outputs never look reused
+    assert states("stopped", [], None)["wiz-connected"] == "failed"
+    assert "reused" not in states("completed", [], None).values()
