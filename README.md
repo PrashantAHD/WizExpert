@@ -20,11 +20,9 @@ Read-only evidence in; validated local drafts out. People stay in control.
 
 <div align="center">
 
-<a href="wizexpert/console/static/assets/console-demo.mp4"><img src="docs/assets/console-demo.gif" alt="Open the 7-minute 10-second WizExpert walkthrough: Risk Issues investigation, report previews, Refresh and Update, daily, weekly and monthly reporting, Sync and Dashboard" width="920"></a>
+<p><b><a href="https://github.com/PrashantAHD/WizExpert/releases/tag/wizexpert-demo-2026-11-19">Watch the narrated walkthrough — 7:10 (GitHub Release)</a></b></p>
 
-<p><b><a href="wizexpert/console/static/assets/console-demo.mp4">Watch the narrated walkthrough — 7:10 (MP4)</a></b></p>
-
-<sub>Silent animated preview above · Full video: 1600 × 900, H.264/AAC, approximately 24 MB</sub>
+<sub>Full video: 1600 × 900, H.264/AAC, approximately 24 MB · Media hosted on the public GitHub Release, not bundled in this repository</sub>
 
 </div>
 
@@ -39,11 +37,8 @@ The demo uses fictional **Contoso** workflow data. It includes an animated tool 
 the developer's authorized portrait and a silent closing credit:
 **Developed by Prashant. — Cloud Security Engineer @AHEAD India.**
 
-The [GitHub Pages demo](https://prashantahd.github.io/WizExpert/) is published by the Pages workflow once GitHub Pages is enabled with the GitHub Actions source.
-
-GitHub may open the MP4 as a repository file rather than an inline player. Use its
-**Raw/Download** option if needed, or play the same video on the local console Home page,
-with play/pause, seeking, skip controls and playback speed.
+Open the public GitHub Release linked above and download the MP4 from **Assets**
+for narration and seeking in your video player.
 
 ## Why WizExpert
 
@@ -201,7 +196,7 @@ the `WizExpert` agent and mirrors it (progress, "input needed", summary, files).
 
 | Feature | What it does |
 |---|---|
-| **Home walkthrough** | The narrated demo with play/pause, seeking, skip controls and playback speed |
+| **Walkthrough** | The narrated demo is available from the [public GitHub Release](https://github.com/PrashantAHD/WizExpert/releases/tag/wizexpert-demo-2026-11-19) |
 | **Category cards** | Private case and campaign folders grouped by reporting category |
 | **Refresh** | Read-only evidence refresh, delta, new snapshot, change summary including PDF, and rebuilt deliverables |
 | **Update deliverables** | Apply the owner's requested edits to retained evidence without a Wiz fetch; archive previous outputs first |
