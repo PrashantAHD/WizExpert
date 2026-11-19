@@ -692,7 +692,7 @@ def _workflow(folder, events):
 
 
 def test_refresh_is_repeatable_and_status_milestones(env):  # noqa: F811
-    config, workspace, _ = env
+    config, workspace, home = env
     base = workspace / "deliverables" / "Risk-Issues"
     fresh = base / "Fresh-wc-id-41"
     _touch(fresh / "evidence" / "raw.json", "secret")
